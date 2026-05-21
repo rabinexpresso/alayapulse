@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useRef, type ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
+import { createSession, updateSessionState } from '@/lib/session'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   DndContext, closestCenter,
@@ -77,10 +78,17 @@ function makeQuestion(type: QType): QuestionSlide {
 
 export default function Create() {
   const navigate = useNavigate()
-  const [slides, setSlides]         = useState<Slide[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [deckTitle, setDeckTitle]   = useState('Untitled session')
+  const location = useLocation()
+  // Restore slides + title when returning from present mode
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const returnState  = (location.state as any) ?? {}
+  const resumeCode   = returnState.sessionCode as string | undefined  // existing session to resume
+
+  const [slides, setSlides]         = useState<Slide[]>(returnState.slides ?? [])
+  const [selectedId, setSelectedId] = useState<string | null>(returnState.slides?.[0]?.id ?? null)
+  const [deckTitle, setDeckTitle]   = useState(returnState.deckTitle ?? 'Untitled session')
   const [isImporting, setImporting] = useState(false)
+  const [isStarting,  setStarting]  = useState(false)
   const [addMenuAfter, setAddMenu]  = useState<string | undefined>(undefined)
   // addMenuAfter = id of slide to insert after; undefined = menu closed
 
@@ -103,7 +111,7 @@ export default function Create() {
         canvas.width   = viewport.width
         canvas.height  = viewport.height
         const ctx      = canvas.getContext('2d')!
-        await page.render({ canvasContext: ctx, viewport }).promise
+        await page.render({ canvas, canvasContext: ctx, viewport }).promise
         newSlides.push({ id: uid(), type: 'pdf', pageNum: p, imgUrl: canvas.toDataURL('image/jpeg', 0.85) })
       }
 
@@ -159,7 +167,30 @@ export default function Create() {
     }
   }, [])
 
-  const startSession = () => navigate('/present/demo123')
+  const startSession = async () => {
+    if (slides.length === 0 || isStarting) return
+    setStarting(true)
+    try {
+      const code = await createSession(deckTitle, slides)
+      navigate(`/present/${code}`, { state: { slides, deckTitle, sessionCode: code } })
+    } catch (err) {
+      console.error('Failed to start session:', err)
+      setStarting(false)
+    }
+  }
+
+  // Resume an existing session — resets to slide 0 so audience auto-follows
+  const resumeSession = async () => {
+    if (!resumeCode || isStarting) return
+    setStarting(true)
+    try {
+      await updateSessionState(resumeCode, 0, 'question')
+      navigate(`/present/${resumeCode}`, { state: { slides, deckTitle, sessionCode: resumeCode } })
+    } catch (err) {
+      console.error('Failed to resume session:', err)
+      setStarting(false)
+    }
+  }
 
   /* ── Render ─────────────────────────────────────────────────────────── */
 
@@ -188,21 +219,43 @@ export default function Create() {
           className="w-56 rounded-lg px-3 py-1.5 text-center text-sm font-medium text-midnight-sky-800 outline-none ring-0 transition hover:bg-midnight-sky-50 focus:bg-midnight-sky-50 focus:ring-1 focus:ring-midnight-sky-200"
         />
 
-        {/* Start session */}
-        <motion.button
-          onClick={startSession}
-          whileTap={slides.length > 0 ? { scale: 0.96 } : {}}
-          disabled={slides.length === 0}
-          className={cn(
-            'flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium text-white transition-all duration-200',
-            slides.length > 0
-              ? 'bg-hot-pink shadow-[0_0_20px_-4px] shadow-hot-pink/50 hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/70'
-              : 'cursor-not-allowed bg-midnight-sky-300',
-          )}
-        >
-          <Play className="size-3.5 fill-white" />
-          Start session
-        </motion.button>
+        {/* Start / Resume session */}
+        {resumeCode && slides.length > 0 ? (
+          /* Has an existing session — offer Resume (same code) or New */
+          <div className="flex items-center gap-2">
+            <motion.button
+              onClick={resumeSession}
+              whileTap={!isStarting ? { scale: 0.96 } : {}}
+              disabled={isStarting}
+              className="flex items-center gap-2 rounded-xl bg-hot-pink px-4 py-2 text-sm font-medium text-white shadow-[0_0_20px_-4px] shadow-hot-pink/50 transition-all hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/70 disabled:opacity-60"
+            >
+              {isStarting ? <LoadingDots /> : <><Play className="size-3.5 fill-white" />Resume · {resumeCode}</>}
+            </motion.button>
+            <motion.button
+              onClick={startSession}
+              whileTap={!isStarting ? { scale: 0.96 } : {}}
+              disabled={isStarting}
+              className="flex items-center gap-2 rounded-xl border border-midnight-sky-200 bg-white px-3 py-2 text-sm font-medium text-midnight-sky-600 transition-all hover:border-midnight-sky-400 hover:text-midnight-sky-900 disabled:opacity-60"
+            >
+              New session
+            </motion.button>
+          </div>
+        ) : (
+          /* No existing session — single Start button */
+          <motion.button
+            onClick={startSession}
+            whileTap={slides.length > 0 && !isStarting ? { scale: 0.96 } : {}}
+            disabled={slides.length === 0 || isStarting}
+            className={cn(
+              'flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium text-white transition-all duration-200',
+              slides.length > 0 && !isStarting
+                ? 'bg-hot-pink shadow-[0_0_20px_-4px] shadow-hot-pink/50 hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/70'
+                : 'cursor-not-allowed bg-midnight-sky-300',
+            )}
+          >
+            {isStarting ? <LoadingDots /> : <><Play className="size-3.5 fill-white" />Start session</>}
+          </motion.button>
+        )}
       </header>
 
       {/* ── Main area ───────────────────────────────────────────────── */}
@@ -318,7 +371,6 @@ function SlidePanel({
                     />
                     {/* "+ Add question" between each slide */}
                     <AddBetweenButton
-                      slideId={slide.id}
                       isOpen={addMenuAfter === slide.id}
                       onToggle={() => onSetAddMenu(addMenuAfter === slide.id ? undefined : slide.id)}
                       onAdd={(type) => onAddQuestion(type, slide.id)}
@@ -451,9 +503,8 @@ function SlideThumbnail({
    ───────────────────────────────────────────────────────────────────────── */
 
 function AddBetweenButton({
-  slideId, isOpen, onToggle, onAdd,
+  isOpen, onToggle, onAdd,
 }: {
-  slideId: string
   isOpen: boolean
   onToggle: () => void
   onAdd: (type: QType) => void

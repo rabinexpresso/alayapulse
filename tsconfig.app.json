@@ -16,6 +16,7 @@
     "jsx": "react-jsx",
 
     /* Path aliases (mirrored in tsconfig.json for editor support) */
+    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]

@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
+import { getSessionByCode } from '@/lib/session'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowRight, AlertCircle } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
@@ -22,7 +23,10 @@ export default function Join() {
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [errorMsg, setErrorMsg] = useState('')
 
-  const inputRefs = useRef<(HTMLInputElement | null)[]>(Array(CODE_LENGTH).fill(null))
+  const inputRefs   = useRef<(HTMLInputElement | null)[]>(Array(CODE_LENGTH).fill(null))
+  const nameInputRef = useRef<HTMLInputElement | null>(null)
+  // Track whether this is the first render so we don't steal focus on prefill
+  const mountedRef  = useRef(false)
 
   // Pre-fill code from URL query param e.g. /join?code=ABC123
   useEffect(() => {
@@ -97,24 +101,35 @@ export default function Join() {
 
   const codeComplete = code.every(c => c !== '')
 
+  // When user finishes typing all 6 chars, move focus to the name field
+  useEffect(() => {
+    if (!mountedRef.current) { mountedRef.current = true; return }
+    if (codeComplete) nameInputRef.current?.focus()
+  }, [codeComplete])
+
   const handleJoin = async () => {
     if (!codeComplete) return
     setStatus('loading')
     const sessionCode = code.join('')
 
-    // TODO: look up session in Firestore when Firebase is wired up
-    // For now: simulate a 800ms lookup then navigate to vote screen
-    await new Promise(r => setTimeout(r, 800))
-
-    // Simulated error check — real check hits Firestore
-    if (sessionCode === 'XXXXXX') {
+    try {
+      const session = await getSessionByCode(sessionCode)
+      if (!session) {
+        setStatus('error')
+        setErrorMsg("Session not found. Double-check the code on the presenter's screen.")
+        return
+      }
+      if (session.status === 'ended') {
+        setStatus('error')
+        setErrorMsg('This session has already ended.')
+        return
+      }
+      setStatus('idle')
+      navigate(`/vote/${session.code}${name ? `?name=${encodeURIComponent(name)}` : ''}`)
+    } catch {
       setStatus('error')
-      setErrorMsg('Session not found. Check the code on the presenter\'s screen.')
-      return
+      setErrorMsg('Something went wrong — please try again.')
     }
-
-    setStatus('idle')
-    navigate(`/vote/${sessionCode.toLowerCase()}${name ? `?name=${encodeURIComponent(name)}` : ''}`)
   }
 
   return (
@@ -181,6 +196,7 @@ export default function Join() {
             </label>
             <input
               id="join-name"
+              ref={nameInputRef}
               type="text"
               value={name}
               onChange={e => setName(e.target.value)}

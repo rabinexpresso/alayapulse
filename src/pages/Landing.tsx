@@ -1,17 +1,15 @@
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
-import { ArrowRight, Play } from 'lucide-react'
+import { ArrowRight, BarChart2, QrCode, FileImage, Zap } from 'lucide-react'
 import { AlayaMark, DnaMonogram } from '@/components/AlayaMark'
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Landing page — premium hero, dark Midnight Sky background, animated
-   gradient orbs, oversized typography, Hot Pink primary CTA.
+   Landing page
    ───────────────────────────────────────────────────────────────────────── */
 
 export default function Landing() {
   return (
-    <main className="relative min-h-screen overflow-hidden bg-midnight-sky-900 text-white">
-      {/* Animated gradient orbs */}
+    <main className="relative overflow-hidden bg-midnight-sky-900 text-white">
       <GradientOrbs />
 
       {/* Subtle grid texture */}
@@ -24,36 +22,29 @@ export default function Landing() {
         }}
       />
 
-      {/* Top nav */}
       <Nav />
-
-      {/* Hero */}
       <Hero />
-
-      {/* Footer strip */}
+      <HowItWorks />
+      <Features />
       <FooterStrip />
     </main>
   )
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Sub-sections
+   Nav
    ───────────────────────────────────────────────────────────────────────── */
 
 function Nav() {
   return (
     <header className="relative z-20">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5 sm:px-10">
-        <Link to="/" className="group">
+        <Link to="/">
           <AlayaMark className="text-white" />
         </Link>
         <nav className="hidden items-center gap-8 text-sm font-light text-white/70 md:flex">
-          <a href="#how" className="transition hover:text-white">
-            How it works
-          </a>
-          <a href="#features" className="transition hover:text-white">
-            Features
-          </a>
+          <a href="#how" className="transition hover:text-white">How it works</a>
+          <a href="#features" className="transition hover:text-white">Features</a>
         </nav>
         <div className="flex items-center gap-3">
           <Link
@@ -66,7 +57,7 @@ function Nav() {
             to="/create"
             className="rounded-full bg-white/10 px-4 py-2 text-sm font-medium text-white backdrop-blur-md transition hover:bg-white/20"
           >
-            Sign in
+            Create session
           </Link>
         </div>
       </div>
@@ -74,26 +65,27 @@ function Nav() {
   )
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Hero
+   ───────────────────────────────────────────────────────────────────────── */
+
 function Hero() {
   return (
-    <section className="relative z-10 mx-auto flex min-h-[calc(100vh-88px)] max-w-6xl flex-col items-center justify-center px-6 pb-20 pt-12 text-center sm:px-10">
+    <section className="relative z-10 mx-auto flex min-h-[calc(100vh-72px)] max-w-6xl flex-col items-center justify-center px-6 pb-20 pt-12 text-center sm:px-10">
 
-      {/* Headline */}
       <AnimatedHeadline />
 
-      {/* Subhead */}
       <motion.p
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.7, delay: 0.65, ease: [0.16, 1, 0.3, 1] }}
         className="mt-8 max-w-2xl text-balance text-lg font-light text-white/70 sm:text-xl"
       >
-        The Mentimeter alternative built for teams that hate audience caps
-        and dated UX. Pixel-perfect slide import, live results that don't
-        suck, beautiful on every phone.
+        The live polling tool built for Alaya — no audience caps, no paywalls,
+        no ugly results screens. Import your slides, ask questions, watch the
+        room respond in real time.
       </motion.p>
 
-      {/* CTAs */}
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
@@ -104,13 +96,14 @@ function Hero() {
           Start a session — free
           <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
         </PrimaryCta>
-        <SecondaryCta href="#demo">
-          <Play className="size-4 fill-current" />
+        <a
+          href="#how"
+          className="group inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/5 px-7 py-4 text-base font-medium text-white backdrop-blur-md transition-all hover:scale-[1.02] hover:border-white/40 hover:bg-white/10"
+        >
           See how it works
-        </SecondaryCta>
+        </a>
       </motion.div>
 
-      {/* Reassurance copy */}
       <motion.p
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -119,6 +112,22 @@ function Hero() {
       >
         No signup required · Start your first poll in 30 seconds
       </motion.p>
+
+      {/* Scroll hint */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 1.4, duration: 0.8 }}
+        className="absolute bottom-10 left-1/2 -translate-x-1/2"
+      >
+        <motion.div
+          animate={{ y: [0, 6, 0] }}
+          transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+          className="flex h-8 w-5 items-start justify-center rounded-full border border-white/20 p-1"
+        >
+          <div className="h-1.5 w-0.5 rounded-full bg-white/40" />
+        </motion.div>
+      </motion.div>
     </section>
   )
 }
@@ -130,7 +139,7 @@ function AnimatedHeadline() {
 
   const wordVariants = {
     hidden: { opacity: 0, y: 28, filter: 'blur(8px)' },
-    show: { opacity: 1, y: 0, filter: 'blur(0px)' },
+    show:   { opacity: 1, y: 0,  filter: 'blur(0px)' },
   }
 
   return (
@@ -150,7 +159,6 @@ function AnimatedHeadline() {
           {w}&nbsp;
         </motion.span>
       ))}
-      {/* "move" — gradient italic, extra right padding so the italic "e" isn't clipped */}
       <motion.span
         variants={wordVariants}
         transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
@@ -178,19 +186,177 @@ function AnimatedHeadline() {
   )
 }
 
-function PrimaryCta({
-  to,
-  children,
-}: {
-  to: string
-  children: React.ReactNode
-}) {
+/* ─────────────────────────────────────────────────────────────────────────
+   How it works — 3-step section
+   ───────────────────────────────────────────────────────────────────────── */
+
+const STEPS = [
+  {
+    number: '01',
+    title:  'Build your session',
+    body:   'Import your deck as a PDF and drop in question slides — multiple choice, word clouds, open-ended, or star ratings.',
+    color:  'text-sky-blue',
+    bg:     'bg-sky-blue/10',
+    border: 'border-sky-blue/20',
+  },
+  {
+    number: '02',
+    title:  'Audience scans & joins',
+    body:   'Show the QR code or 6-character code on screen. Anyone with a phone can join in seconds — no app download, no account.',
+    color:  'text-hot-pink',
+    bg:     'bg-hot-pink/10',
+    border: 'border-hot-pink/20',
+  },
+  {
+    number: '03',
+    title:  'Results update live',
+    body:   'Votes, words, and answers stream in as people respond. Reveal results whenever you\'re ready — the whole room reacts together.',
+    color:  'text-fresh-green',
+    bg:     'bg-fresh-green/10',
+    border: 'border-fresh-green/20',
+  },
+]
+
+function HowItWorks() {
+  return (
+    <section id="how" className="relative z-10 mx-auto max-w-6xl px-6 py-28 sm:px-10">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, margin: '-80px' }}
+        transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+        className="mb-16 text-center"
+      >
+        <span className="mb-4 inline-block rounded-full border border-white/15 bg-white/5 px-4 py-1.5 text-xs font-medium uppercase tracking-wider text-white/50">
+          How it works
+        </span>
+        <h2 className="text-4xl font-semibold tracking-tight text-white sm:text-5xl">
+          From zero to live poll<br />in under a minute
+        </h2>
+      </motion.div>
+
+      <div className="grid gap-6 md:grid-cols-3">
+        {STEPS.map((step, i) => (
+          <motion.div
+            key={step.number}
+            initial={{ opacity: 0, y: 24 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: '-60px' }}
+            transition={{ duration: 0.55, delay: i * 0.1, ease: [0.16, 1, 0.3, 1] }}
+            className={`relative rounded-2xl border ${step.border} ${step.bg} p-8`}
+          >
+            <span className={`mb-5 block font-mono text-4xl font-bold ${step.color} opacity-40`}>
+              {step.number}
+            </span>
+            <h3 className="mb-3 text-xl font-semibold text-white">{step.title}</h3>
+            <p className="text-sm font-light leading-relaxed text-white/60">{step.body}</p>
+          </motion.div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Features — 4-card grid
+   ───────────────────────────────────────────────────────────────────────── */
+
+const FEATURES = [
+  {
+    icon:  <BarChart2 className="size-5" />,
+    title: 'Live results, zero lag',
+    body:  'Responses appear on the presenter\'s screen the moment the audience submits. No refresh. No delay.',
+    color: 'text-hot-pink',
+    bg:    'bg-hot-pink/10',
+  },
+  {
+    icon:  <QrCode className="size-5" />,
+    title: 'No audience cap, ever',
+    body:  'Designed for the whole room. Whether that\'s 10 people or 500, everyone joins the same way.',
+    color: 'text-sky-blue',
+    bg:    'bg-sky-blue/10',
+  },
+  {
+    icon:  <FileImage className="size-5" />,
+    title: 'Pixel-perfect slide import',
+    body:  'Export your deck from PowerPoint, Keynote, or Google Slides as a PDF. Slides look exactly as designed.',
+    color: 'text-fresh-green',
+    bg:    'bg-fresh-green/10',
+  },
+  {
+    icon:  <Zap className="size-5" />,
+    title: '4 question types',
+    body:  'Multiple choice, word cloud, open-ended responses, and star ratings — everything you need for a great session.',
+    color: 'text-golden-sun',
+    bg:    'bg-golden-sun/10',
+  },
+]
+
+function Features() {
+  return (
+    <section id="features" className="relative z-10 mx-auto max-w-6xl px-6 pb-28 sm:px-10">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, margin: '-80px' }}
+        transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+        className="mb-16 text-center"
+      >
+        <span className="mb-4 inline-block rounded-full border border-white/15 bg-white/5 px-4 py-1.5 text-xs font-medium uppercase tracking-wider text-white/50">
+          Features
+        </span>
+        <h2 className="text-4xl font-semibold tracking-tight text-white sm:text-5xl">
+          Everything you need.<br />Nothing you don't.
+        </h2>
+      </motion.div>
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {FEATURES.map((f, i) => (
+          <motion.div
+            key={f.title}
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: '-60px' }}
+            transition={{ duration: 0.5, delay: i * 0.08, ease: [0.16, 1, 0.3, 1] }}
+            className="rounded-2xl border border-white/8 bg-white/5 p-6 backdrop-blur-sm"
+          >
+            <div className={`mb-4 inline-flex rounded-xl ${f.bg} p-2.5 ${f.color}`}>
+              {f.icon}
+            </div>
+            <h3 className="mb-2 text-base font-semibold text-white">{f.title}</h3>
+            <p className="text-sm font-light leading-relaxed text-white/55">{f.body}</p>
+          </motion.div>
+        ))}
+      </div>
+
+      {/* Bottom CTA */}
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true }}
+        transition={{ duration: 0.6, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
+        className="mt-16 flex flex-col items-center gap-4 text-center"
+      >
+        <p className="text-lg font-light text-white/60">Ready to run your next session?</p>
+        <PrimaryCta to="/create">
+          Create a session now
+          <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+        </PrimaryCta>
+      </motion.div>
+    </section>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Shared CTA button
+   ───────────────────────────────────────────────────────────────────────── */
+
+function PrimaryCta({ to, children }: { to: string; children: React.ReactNode }) {
   return (
     <Link
       to={to}
-      className="group relative inline-flex items-center gap-2 overflow-hidden rounded-full bg-hot-pink px-8 py-4 text-base font-medium text-white shadow-[0_0_32px_-8px] shadow-hot-pink/60 transition-all hover:scale-[1.02] hover:shadow-[0_0_48px_-4px] hover:shadow-hot-pink/80 focus:outline-none focus:ring-2 focus:ring-white/40 focus:ring-offset-2 focus:ring-offset-midnight-sky-900"
+      className="group relative inline-flex items-center gap-2 overflow-hidden rounded-full bg-hot-pink px-8 py-4 text-base font-medium text-white shadow-[0_0_32px_-8px] shadow-hot-pink/60 transition-all hover:scale-[1.02] hover:shadow-[0_0_48px_-4px] hover:shadow-hot-pink/80 focus:outline-none focus:ring-2 focus:ring-white/40"
     >
-      {/* Shimmer sweep on hover */}
       <span
         aria-hidden
         className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/30 to-transparent transition-transform duration-700 group-hover:translate-x-full"
@@ -200,44 +366,35 @@ function PrimaryCta({
   )
 }
 
-function SecondaryCta({
-  href,
-  children,
-}: {
-  href: string
-  children: React.ReactNode
-}) {
-  return (
-    <a
-      href={href}
-      className="group inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/5 px-7 py-4 text-base font-medium text-white backdrop-blur-md transition-all hover:scale-[1.02] hover:border-white/40 hover:bg-white/10"
-    >
-      {children}
-    </a>
-  )
-}
+/* ─────────────────────────────────────────────────────────────────────────
+   Gradient orbs
+   ───────────────────────────────────────────────────────────────────────── */
 
 function GradientOrbs() {
   return (
-    <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+    <div aria-hidden className="pointer-events-none fixed inset-0 overflow-hidden">
       <motion.div
-        className="absolute -left-32 top-1/4 size-[40rem] rounded-full bg-hot-pink/30 blur-[120px]"
+        className="absolute -left-32 top-1/4 size-[40rem] rounded-full bg-hot-pink/25 blur-[120px]"
         animate={{ x: [0, 40, -20, 0], y: [0, -30, 20, 0] }}
         transition={{ duration: 22, repeat: Infinity, ease: 'easeInOut' }}
       />
       <motion.div
-        className="absolute right-0 top-1/3 size-[36rem] rounded-full bg-sky-blue/30 blur-[120px]"
+        className="absolute right-0 top-1/3 size-[36rem] rounded-full bg-sky-blue/25 blur-[120px]"
         animate={{ x: [0, -50, 30, 0], y: [0, 40, -10, 0] }}
         transition={{ duration: 28, repeat: Infinity, ease: 'easeInOut' }}
       />
       <motion.div
-        className="absolute bottom-0 left-1/3 size-[32rem] rounded-full bg-fresh-green/25 blur-[120px]"
+        className="absolute bottom-0 left-1/3 size-[32rem] rounded-full bg-fresh-green/20 blur-[120px]"
         animate={{ x: [0, 30, -40, 0], y: [0, -20, 30, 0] }}
         transition={{ duration: 25, repeat: Infinity, ease: 'easeInOut' }}
       />
     </div>
   )
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Footer strip
+   ───────────────────────────────────────────────────────────────────────── */
 
 function FooterStrip() {
   return (
@@ -247,9 +404,10 @@ function FooterStrip() {
           <DnaMonogram className="h-4" animate={false} />
           Built by Alaya · for teams that lead
         </span>
-        <span className="hidden sm:inline">
-          v0.1 · in active development
-        </span>
+        <div className="hidden items-center gap-5 sm:flex">
+          <Link to="/join" className="transition hover:text-white/70">Join a session</Link>
+          <Link to="/create" className="transition hover:text-white/70">Create a session</Link>
+        </div>
       </div>
     </div>
   )

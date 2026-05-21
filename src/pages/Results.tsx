@@ -75,7 +75,6 @@ function useLiveMCQ(initial: typeof MCQ_OPTIONS) {
   useEffect(() => {
     // Reset on mount
     setVotes(initial.map(o => ({ ...o })))
-    const maxVotes = initial.reduce((s, o) => s + o.votes, 0) + 18
     let added = 0
 
     intervalRef.current = setInterval(() => {

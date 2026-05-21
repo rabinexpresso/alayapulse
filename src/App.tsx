@@ -14,7 +14,7 @@ function App() {
         <Route path="/create" element={<Create />} />
         <Route path="/present/:sessionId" element={<Present />} />
         <Route path="/join" element={<Join />} />
-        <Route path="/vote/:sessionId" element={<Vote />} />
+        <Route path="/vote/:sessionCode" element={<Vote />} />
         <Route path="/results/:sessionId" element={<Results />} />
       </Routes>
     </BrowserRouter>

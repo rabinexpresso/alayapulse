@@ -1,12 +1,16 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Users, ChevronLeft, ChevronRight, X,
+  ChevronLeft, ChevronRight, X,
   BarChart2, Wifi, ArrowRight,
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { cn } from '@/lib/utils'
+import {
+  updateSessionState, endSession, subscribeToSlideResponses,
+  type Response as FirestoreResponse,
+} from '@/lib/session'
 
 /* ─────────────────────────────────────────────────────────────────────────
    Presenter full-screen slideshow mode.
@@ -23,21 +27,35 @@ import { cn } from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
-type QType = 'mcq' | 'wordcloud' | 'openended' | 'rating'
+type QType      = 'mcq' | 'wordcloud' | 'openended' | 'rating'
 type SlidePhase = 'question' | 'results'
 
-interface PdfDemoSlide    { id: string; type: 'pdf';    title: string; subtitle: string }
-interface QDemoSlide      { id: string; type: QType;    question: string; options: string[] }
-type DemoSlide = PdfDemoSlide | QDemoSlide
+interface PdfSlide {
+  id:        string
+  type:      'pdf'
+  pageNum?:  number
+  imgUrl?:   string   // real slides (passed via router state)
+  title?:    string   // demo fallback
+  subtitle?: string   // demo fallback
+}
 
-// ── Demo deck ─────────────────────────────────────────────────────────────
+interface QSlide {
+  id:       string
+  type:     QType
+  question: string
+  options:  string[]
+}
 
-const DEMO_DECK: DemoSlide[] = [
-  { id: 's1', type: 'pdf',       title: 'Leadership Pulse Check',                    subtitle: 'Q3 All-Hands · Alaya' },
+type AnySlide = PdfSlide | QSlide
+
+// ── Demo deck — used when navigating directly to /present ─────────────────
+
+const DEMO_DECK: AnySlide[] = [
+  { id: 's1', type: 'pdf',       title: 'Leadership Pulse Check',             subtitle: 'Q3 All-Hands · Alaya' },
   { id: 's2', type: 'mcq',       question: 'What is your biggest leadership challenge right now?',
     options: ['Giving honest feedback', 'Managing team conflict', 'Building trust quickly', 'Motivating others'] },
-  { id: 's3', type: 'pdf',       title: "Let's check in on culture",                 subtitle: 'One word from everyone in the room' },
-  { id: 's4', type: 'wordcloud', question: 'In one word — how would you describe our team culture right now?',  options: [] },
+  { id: 's3', type: 'pdf',       title: "Let's check in on culture",           subtitle: 'One word from everyone in the room' },
+  { id: 's4', type: 'wordcloud', question: 'In one word — how would you describe our team culture right now?', options: [] },
   { id: 's5', type: 'openended', question: 'What one change would make the biggest difference to your team in the next 90 days?', options: [] },
   { id: 's6', type: 'rating',    question: 'Rate your confidence in these leadership areas:',
     options: ['Giving feedback', 'Decision making', 'Coaching others'] },
@@ -45,9 +63,8 @@ const DEMO_DECK: DemoSlide[] = [
 
 // ── Demo results data ──────────────────────────────────────────────────────
 
-const MCQ_VOTES = [19, 12, 10, 6]
-
-const CLOUD_WORDS = [
+const DEMO_MCQ_VOTES   = [19, 12, 10, 6]
+const DEMO_CLOUD_WORDS = [
   { text: 'collaborative', count: 18 }, { text: 'innovative',  count: 12 },
   { text: 'challenging',   count: 14 }, { text: 'growth',      count: 10 },
   { text: 'busy',          count: 15 }, { text: 'focused',     count:  9 },
@@ -55,16 +72,56 @@ const CLOUD_WORDS = [
   { text: 'creative',      count:  8 }, { text: 'driven',      count:  6 },
   { text: 'dynamic',       count: 11 }, { text: 'supportive',  count:  7 },
 ]
-
-const OPEN_ANSWERS = [
+const DEMO_OPEN_ANSWERS = [
   { name: 'Sarah M.',   text: 'More time for strategic thinking instead of back-to-back meetings.' },
   { name: 'Anonymous',  text: "A clear framework for giving feedback that doesn't feel personal." },
   { name: 'James T.',   text: 'Better tools for async communication across time zones.' },
   { name: 'Anonymous',  text: 'Regular 1:1s with clear agendas so nothing falls through the cracks.' },
   { name: 'Priya K.',   text: 'Psychological safety to try new ideas without fear of failure.' },
 ]
+const DEMO_RATING_AVGS = [4.2, 3.8, 4.6]
 
-const RATING_AVGS = [4.2, 3.8, 4.6]
+// ── Response aggregators ───────────────────────────────────────────────────
+
+function aggregateMCQ(responses: FirestoreResponse[], count: number): number[] {
+  const votes = Array(count).fill(0)
+  responses.forEach(r => {
+    const i = parseInt(r.value, 10)
+    if (!isNaN(i) && i >= 0 && i < count) votes[i]++
+  })
+  return votes
+}
+
+function aggregateCloud(responses: FirestoreResponse[]): { text: string; count: number }[] {
+  const freq = new Map<string, number>()
+  responses.forEach(r => {
+    const w = r.value.trim().toLowerCase()
+    if (w) freq.set(w, (freq.get(w) ?? 0) + 1)
+  })
+  return Array.from(freq.entries())
+    .map(([text, count]) => ({ text, count }))
+    .sort((a, b) => b.count - a.count)
+}
+
+function aggregateOpen(responses: FirestoreResponse[]): { name: string; text: string }[] {
+  return [...responses]
+    .reverse()
+    .map(r => ({ name: r.respondentName || 'Anonymous', text: r.value }))
+}
+
+function aggregateRating(responses: FirestoreResponse[], count: number): number[] {
+  const sums = Array(count).fill(0)
+  const cnts = Array(count).fill(0)
+  responses.forEach(r => {
+    try {
+      const arr = JSON.parse(r.value) as number[]
+      arr.forEach((v, i) => {
+        if (i < count && typeof v === 'number') { sums[i] += v; cnts[i]++ }
+      })
+    } catch { /* skip invalid */ }
+  })
+  return sums.map((s, i) => (cnts[i] > 0 ? s / cnts[i] : 0))
+}
 
 // ── Transition variants ────────────────────────────────────────────────────
 
@@ -89,36 +146,58 @@ const slideVariants = {
 export default function Present() {
   const { sessionId } = useParams()
   const navigate      = useNavigate()
+  const location      = useLocation()
+
+  // Real slides come from Create.tsx via router state (includes imgUrls).
+  // Falls back to DEMO_DECK if opened directly (e.g. /present/ABCDEF refresh).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const locationState  = (location.state as any) ?? {}
+  const stateSlides: AnySlide[] | undefined = locationState.slides
+  const stateDeckTitle: string | undefined  = locationState.deckTitle
+  const isRealSession = !!stateSlides
+  const deck          = stateSlides ?? DEMO_DECK
 
   const [current,   setCurrent]   = useState(0)
   const [direction, setDirection] = useState(1)
   const [transType, setTransType] = useState<'slide' | 'phase'>('slide')
   const [phase,     setPhase]     = useState<SlidePhase>('question')
-  const [audience,  setAudience]  = useState(12)
+  const [responses,       setResponses]       = useState<FirestoreResponse[]>([])
+  const [showExitConfirm, setShowExitConfirm] = useState(false)
+  const [showQRModal,     setShowQRModal]     = useState(false)
 
-  const slide      = DEMO_DECK[current]
+  const slide      = deck[current] as AnySlide
   const isQuestion = slide.type !== 'pdf'
-  const code       = (sessionId ?? 'abc123').slice(0, 6).toUpperCase()
-  const joinUrl    = `localhost:5173/join?code=${code}`
+  const code       = (sessionId ?? 'DEMO').slice(0, 6).toUpperCase()
+  const joinUrl    = `${window.location.origin}/join?code=${code}`
 
-  // Simulate audience joining every few seconds
+  // ── Sync presenter state to Firestore so audience knows current slide ──
   useEffect(() => {
-    const t = setInterval(() => {
-      setAudience(prev => Math.min(prev + (Math.random() > 0.55 ? 2 : 1), 63))
-    }, 2800)
-    return () => clearInterval(t)
-  }, [])
+    if (!isRealSession) return
+    updateSessionState(code, current, phase).catch(console.error)
+  }, [isRealSession, code, current, phase])
 
-  // Navigation
+  // ── Subscribe to live responses for the current question slide ─────────
+  useEffect(() => {
+    if (!isRealSession || !slide || slide.type === 'pdf') {
+      setResponses([])
+      return
+    }
+    setResponses([]) // clear stale responses on slide change
+    const unsub = subscribeToSlideResponses(code, slide.id, setResponses)
+    return unsub
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRealSession, code, current]) // re-subscribe each time slide changes
+
+  // ── Navigation ────────────────────────────────────────────────────────
   const goNext = useCallback(() => {
     if (isQuestion && phase === 'question') {
       setTransType('phase'); setDirection(1); setPhase('results')
       return
     }
-    if (current >= DEMO_DECK.length - 1) return
+    if (current >= deck.length - 1) return
     setTransType('slide'); setDirection(1); setPhase('question')
     setCurrent(prev => prev + 1)
-  }, [isQuestion, phase, current])
+  }, [isQuestion, phase, current, deck.length])
 
   const goPrev = useCallback(() => {
     if (isQuestion && phase === 'results') {
@@ -134,14 +213,23 @@ export default function Present() {
     const h = (e: KeyboardEvent) => {
       if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') { e.preventDefault(); goNext() }
       else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp')                { e.preventDefault(); goPrev() }
-      else if (e.key === 'Escape')                                           { navigate('/create') }
+      else if (e.key === 'Escape')                                           { setShowExitConfirm(true) }
     }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
   }, [goNext, goPrev, navigate])
 
-  const canGoPrev = !(current === 0 && !(isQuestion && phase === 'results'))
-  const canGoNext = !(current === DEMO_DECK.length - 1 && (!isQuestion || phase === 'results'))
+  const canGoPrev     = !(current === 0 && !(isQuestion && phase === 'results'))
+  const canGoNext     = !(current === deck.length - 1 && (!isQuestion || phase === 'results'))
+  const responseCount = responses.length
+
+  // ── Compute aggregated results (real or demo fallback) ─────────────────
+  const qSlide     = isQuestion ? (slide as QSlide) : null
+  const optCount   = qSlide?.options.length ?? 0
+  const mcqVotes   = isRealSession ? aggregateMCQ(responses, optCount)    : DEMO_MCQ_VOTES
+  const cloudWords = isRealSession ? aggregateCloud(responses)             : DEMO_CLOUD_WORDS
+  const openAns    = isRealSession ? aggregateOpen(responses)              : DEMO_OPEN_ANSWERS
+  const ratingAvgs = isRealSession ? aggregateRating(responses, optCount) : DEMO_RATING_AVGS
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-midnight-sky-900 text-white">
@@ -155,7 +243,7 @@ export default function Present() {
       {/* ── Top bar ─────────────────────────────────────────────────── */}
       <header className="relative z-10 flex h-12 shrink-0 items-center justify-between border-b border-white/10 px-6 backdrop-blur-sm">
 
-        {/* Logo + code */}
+        {/* Logo + session code */}
         <div className="flex items-center gap-3">
           <span className="text-sm font-semibold text-white">
             alaya <span className="text-hot-pink">pulse</span>
@@ -176,9 +264,7 @@ export default function Present() {
             <ChevronLeft className="size-4" />
           </button>
           <span className="min-w-[72px] text-center text-xs font-medium text-white/50">
-            <span className="text-white/80">{current + 1}</span>
-            {' / '}
-            {DEMO_DECK.length}
+            <span className="text-white/80">{current + 1}</span>{' / '}{deck.length}
           </span>
           <button
             onClick={goNext} disabled={!canGoNext}
@@ -188,22 +274,23 @@ export default function Present() {
           </button>
         </div>
 
-        {/* Audience count + exit */}
+        {/* Response count + exit */}
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs">
-            <Users className="size-3 text-white/40" />
-            <motion.span
-              key={audience}
-              animate={{ scale: [1, 1.25, 1] }}
-              transition={{ duration: 0.2 }}
-              className="tabular-nums font-semibold text-white/80"
-            >
-              {audience}
-            </motion.span>
-            <span className="text-white/40">online</span>
-          </div>
+          {isQuestion && (
+            <div className="flex items-center gap-1.5 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs">
+              <motion.span
+                key={responseCount}
+                animate={{ scale: [1, 1.25, 1] }}
+                transition={{ duration: 0.2 }}
+                className="tabular-nums font-semibold text-white/80"
+              >
+                {responseCount}
+              </motion.span>
+              <span className="text-white/40">responses</span>
+            </div>
+          )}
           <button
-            onClick={() => navigate('/create')}
+            onClick={() => setShowExitConfirm(true)}
             className="rounded-lg p-1.5 text-white/40 transition hover:bg-white/10 hover:text-white"
             title="Exit (Esc)"
           >
@@ -214,7 +301,6 @@ export default function Present() {
 
       {/* ── Slide area ──────────────────────────────────────────────── */}
       <div className="relative z-10 flex flex-1 overflow-hidden">
-
         <div className="relative flex flex-1 items-center justify-center overflow-hidden">
           <AnimatePresence custom={{ dir: direction, type: transType }} mode="wait">
             <motion.div
@@ -230,7 +316,11 @@ export default function Present() {
               <SlideContent
                 slide={slide}
                 phase={phase}
-                audience={audience}
+                responseCount={responseCount}
+                mcqVotes={mcqVotes}
+                cloudWords={cloudWords}
+                openAnswers={openAns}
+                ratingAvgs={ratingAvgs}
                 onReveal={() => { setTransType('phase'); setDirection(1); setPhase('results') }}
               />
             </motion.div>
@@ -265,41 +355,54 @@ export default function Present() {
       {/* ── Bottom bar — always-visible join strip ───────────────────── */}
       <footer className="relative z-10 flex h-[68px] shrink-0 items-center gap-5 border-t border-white/10 px-6">
 
-        {/* QR code */}
-        <div className="shrink-0 rounded-xl bg-white p-1.5 shadow-lg">
+        {/* QR code — tap to enlarge */}
+        <button
+          onClick={() => setShowQRModal(true)}
+          className="shrink-0 rounded-xl bg-white p-1.5 shadow-lg transition hover:scale-105 hover:shadow-xl"
+          title="Click to enlarge"
+        >
           <QRCodeSVG
-            value={`http://${joinUrl}`}
+            value={joinUrl}
             size={46}
             bgColor="#ffffff"
             fgColor="#000079"
             level="M"
           />
-        </div>
+        </button>
 
         {/* Join text */}
         <div className="flex flex-col leading-tight">
           <span className="text-[10px] font-medium uppercase tracking-wider text-white/40">Join at</span>
-          <span className="text-sm font-medium text-white/80">{joinUrl}</span>
+          <span className="text-sm font-medium text-white/80">
+            {window.location.host}/join?code={code}
+          </span>
         </div>
 
         <div className="h-8 w-px shrink-0 bg-white/15" />
 
-        {/* Session code — large + mono */}
+        {/* Session code */}
         <div className="flex flex-col leading-tight">
           <span className="text-[10px] font-medium uppercase tracking-wider text-white/40">Code</span>
-          <span className="font-mono text-2xl font-bold tracking-[0.18em] text-white">
-            {code}
-          </span>
+          <span className="font-mono text-2xl font-bold tracking-[0.18em] text-white">{code}</span>
         </div>
 
         <div className="flex-1" />
 
-        {/* Live response counter */}
-        <div className="flex items-center gap-1.5 text-sm text-white/50">
-          <BarChart2 className="size-4" />
-          <span className="tabular-nums font-semibold text-white/70">{audience}</span>
-          <span>responses</span>
-        </div>
+        {/* Live response count */}
+        {isQuestion && (
+          <div className="flex items-center gap-1.5 text-sm text-white/50">
+            <BarChart2 className="size-4" />
+            <motion.span
+              key={responseCount}
+              animate={{ scale: [1, 1.2, 1] }}
+              transition={{ duration: 0.2 }}
+              className="tabular-nums font-semibold text-white/70"
+            >
+              {responseCount}
+            </motion.span>
+            <span>responses</span>
+          </div>
+        )}
 
         {/* Keyboard hints */}
         <div className="hidden items-center gap-1 text-[10px] text-white/25 lg:flex">
@@ -311,39 +414,157 @@ export default function Present() {
           <span className="ml-1">exit</span>
         </div>
       </footer>
+
+      {/* ── QR code enlarged modal ──────────────────────────────────── */}
+      <AnimatePresence>
+        {showQRModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+            onClick={() => setShowQRModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.85 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.85 }}
+              transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+              onClick={e => e.stopPropagation()}
+              className="flex flex-col items-center gap-6 rounded-3xl bg-white p-10 shadow-2xl"
+            >
+              <QRCodeSVG
+                value={joinUrl}
+                size={260}
+                bgColor="#ffffff"
+                fgColor="#000079"
+                level="M"
+              />
+              <div className="text-center">
+                <p className="text-sm font-medium text-midnight-sky-500">Join at</p>
+                <p className="mt-0.5 text-base font-semibold text-midnight-sky-800">
+                  {window.location.host}/join
+                </p>
+              </div>
+              <div className="flex flex-col items-center gap-1">
+                <p className="text-xs font-medium uppercase tracking-wider text-midnight-sky-400">Session code</p>
+                <p className="font-mono text-4xl font-bold tracking-[0.2em] text-midnight-sky-900">{code}</p>
+              </div>
+              <button
+                onClick={() => setShowQRModal(false)}
+                className="mt-1 rounded-xl bg-midnight-sky-100 px-6 py-2.5 text-sm font-medium text-midnight-sky-700 transition hover:bg-midnight-sky-200"
+              >
+                Close
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── End session confirmation ─────────────────────────────────── */}
+      <AnimatePresence>
+        {showExitConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+            onClick={() => setShowExitConfirm(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 12 }}
+              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+              onClick={e => e.stopPropagation()}
+              className="w-full max-w-sm rounded-2xl border border-white/10 bg-midnight-sky-800 p-8 text-center shadow-2xl"
+            >
+              <h3 className="text-xl font-semibold text-white">End this session?</h3>
+              <p className="mt-2 text-sm font-light text-white/50">
+                Audience members will lose their connection.<br />
+                To resume, keep the same tab open instead.
+              </p>
+              <div className="mt-7 flex gap-3">
+                <button
+                  onClick={() => setShowExitConfirm(false)}
+                  className="flex-1 rounded-xl border border-white/15 bg-white/5 py-3 text-sm font-medium text-white transition hover:bg-white/10"
+                >
+                  Keep presenting
+                </button>
+                <button
+                  onClick={() => {
+                    // Mark session ended so audience sees "That's a wrap" instead of the open question
+                    if (isRealSession) endSession(code).catch(console.error)
+                    navigate('/create', { state: { slides: stateSlides, deckTitle: stateDeckTitle, sessionCode: isRealSession ? code : undefined } })
+                  }}
+                  className="flex-1 rounded-xl bg-hot-pink py-3 text-sm font-medium text-white shadow-[0_0_20px_-4px] shadow-hot-pink/50 transition hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/70"
+                >
+                  End session
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Slide content — switches between PDF, question, and results views
+   Slide content router
    ───────────────────────────────────────────────────────────────────────── */
 
 function SlideContent({
-  slide, phase, audience, onReveal,
+  slide, phase, responseCount,
+  mcqVotes, cloudWords, openAnswers, ratingAvgs,
+  onReveal,
 }: {
-  slide: DemoSlide
-  phase: SlidePhase
-  audience: number
-  onReveal: () => void
+  slide:         AnySlide
+  phase:         SlidePhase
+  responseCount: number
+  mcqVotes:      number[]
+  cloudWords:    { text: string; count: number }[]
+  openAnswers:   { name: string; text: string }[]
+  ratingAvgs:    number[]
+  onReveal:      () => void
 }) {
   if (slide.type === 'pdf') return <PdfSlideView slide={slide} />
-  if (phase === 'results')  return <ResultsSlideView slide={slide} />
-  return <QuestionSlideView slide={slide} audience={audience} onReveal={onReveal} />
+  if (phase === 'results')  return (
+    <ResultsSlideView
+      slide={slide}
+      mcqVotes={mcqVotes}
+      cloudWords={cloudWords}
+      openAnswers={openAnswers}
+      ratingAvgs={ratingAvgs}
+    />
+  )
+  return <QuestionSlideView slide={slide} responseCount={responseCount} onReveal={onReveal} />
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   PDF placeholder slide
+   PDF slide — renders real image or demo title card
    ───────────────────────────────────────────────────────────────────────── */
 
-function PdfSlideView({ slide }: { slide: PdfDemoSlide }) {
+function PdfSlideView({ slide }: { slide: PdfSlide }) {
+  if (slide.imgUrl) {
+    return (
+      <div className="relative flex aspect-video w-full max-w-5xl overflow-hidden rounded-3xl border border-white/10 bg-midnight-sky-800 shadow-[0_32px_100px_-16px_rgba(0,0,121,0.5)]">
+        <img
+          src={slide.imgUrl}
+          alt={`Slide ${slide.pageNum ?? ''}`}
+          className="h-full w-full object-contain"
+        />
+      </div>
+    )
+  }
+
+  // Demo / fallback title card
   return (
     <div className="relative flex aspect-video w-full max-w-5xl items-center justify-center overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-midnight-sky-800 to-midnight-sky-900 shadow-[0_32px_100px_-16px_rgba(0,0,121,0.5)]">
-      {/* Decorative radial */}
       <div className="absolute inset-0 flex items-center justify-center">
         <div className="size-96 rounded-full bg-hot-pink/8 blur-[100px]" />
       </div>
-      <div className="relative z-10 text-center px-14">
+      <div className="relative z-10 px-14 text-center">
         <h1 className="text-5xl font-semibold leading-tight tracking-tight text-white lg:text-6xl xl:text-7xl">
           {slide.title}
         </h1>
@@ -356,7 +577,7 @@ function PdfSlideView({ slide }: { slide: PdfDemoSlide }) {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Question slide — voting open, collecting responses
+   Question slide — voting open
    ───────────────────────────────────────────────────────────────────────── */
 
 const QTYPE_META: Record<QType, { label: string; ring: string; bg: string; text: string }> = {
@@ -367,11 +588,11 @@ const QTYPE_META: Record<QType, { label: string; ring: string; bg: string; text:
 }
 
 function QuestionSlideView({
-  slide, audience, onReveal,
+  slide, responseCount, onReveal,
 }: {
-  slide: QDemoSlide
-  audience: number
-  onReveal: () => void
+  slide:         QSlide
+  responseCount: number
+  onReveal:      () => void
 }) {
   const meta = QTYPE_META[slide.type]
 
@@ -388,7 +609,7 @@ function QuestionSlideView({
         {slide.question}
       </h1>
 
-      {/* MCQ — show options so audience can follow along */}
+      {/* MCQ — show options on the big screen */}
       {slide.type === 'mcq' && (
         <div className="grid w-full max-w-2xl grid-cols-2 gap-3">
           {slide.options.map((opt, i) => (
@@ -402,7 +623,7 @@ function QuestionSlideView({
               <span className={cn('flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold', meta.bg, meta.text)}>
                 {String.fromCharCode(65 + i)}
               </span>
-              <span className="text-sm font-medium text-white/80 leading-snug">{opt}</span>
+              <span className="text-sm font-medium leading-snug text-white/80">{opt}</span>
             </motion.div>
           ))}
         </div>
@@ -410,8 +631,6 @@ function QuestionSlideView({
 
       {/* Collecting indicator + reveal button */}
       <div className="flex flex-col items-center gap-4">
-
-        {/* Live pulse */}
         <div className="flex items-center gap-2.5 rounded-full border border-white/15 bg-white/5 px-5 py-2.5 backdrop-blur-sm">
           <span className="relative flex size-2">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-fresh-green opacity-75" />
@@ -419,17 +638,16 @@ function QuestionSlideView({
           </span>
           <span className="text-sm font-medium text-white/70">Collecting responses</span>
           <motion.span
-            key={audience}
+            key={responseCount}
             animate={{ scale: [1, 1.3, 1] }}
             transition={{ duration: 0.2 }}
             className="tabular-nums font-bold text-white"
           >
-            {audience}
+            {responseCount}
           </motion.span>
           <span className="text-sm text-white/40">so far</span>
         </div>
 
-        {/* Show results CTA */}
         <motion.button
           onClick={onReveal}
           whileTap={{ scale: 0.97 }}
@@ -437,8 +655,8 @@ function QuestionSlideView({
         >
           <BarChart2 className="size-4" />
           Show results
-          <span className="flex items-center gap-1 text-white/60 text-xs font-normal">
-            or press <kbd className="rounded border border-white/30 px-1 py-0.5 text-[10px] font-mono text-white/70">Space</kbd>
+          <span className="flex items-center gap-1 text-xs font-normal text-white/60">
+            or press <kbd className="rounded border border-white/30 px-1 py-0.5 font-mono text-[10px] text-white/70">Space</kbd>
           </span>
         </motion.button>
       </div>
@@ -450,13 +668,19 @@ function QuestionSlideView({
    Results slide — live animated visualizations
    ───────────────────────────────────────────────────────────────────────── */
 
-function ResultsSlideView({ slide }: { slide: QDemoSlide }) {
+function ResultsSlideView({
+  slide, mcqVotes, cloudWords, openAnswers, ratingAvgs,
+}: {
+  slide:       QSlide
+  mcqVotes:    number[]
+  cloudWords:  { text: string; count: number }[]
+  openAnswers: { name: string; text: string }[]
+  ratingAvgs:  number[]
+}) {
   const meta = QTYPE_META[slide.type]
 
   return (
     <div className="flex w-full max-w-5xl flex-col gap-6">
-
-      {/* Header */}
       <div className="flex items-center gap-3">
         <span className={cn('rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider', meta.ring, meta.bg, meta.text)}>
           Results live
@@ -466,13 +690,11 @@ function ResultsSlideView({ slide }: { slide: QDemoSlide }) {
         </h2>
       </div>
 
-      {/* Visualization */}
-      {slide.type === 'mcq'       && <MCQResults   options={slide.options} />}
-      {slide.type === 'wordcloud' && <WordCloudResults />}
-      {slide.type === 'openended' && <OpenEndedResults />}
-      {slide.type === 'rating'    && <RatingResults  params={slide.options} />}
+      {slide.type === 'mcq'       && <MCQResults    options={slide.options} votes={mcqVotes} />}
+      {slide.type === 'wordcloud' && <WordCloudResults words={cloudWords} />}
+      {slide.type === 'openended' && <OpenEndedResults answers={openAnswers} />}
+      {slide.type === 'rating'    && <RatingResults   params={slide.options} avgs={ratingAvgs} />}
 
-      {/* Next hint */}
       <div className="flex justify-end">
         <div className="flex items-center gap-1.5 text-xs text-white/25">
           <ArrowRight className="size-3" />
@@ -484,18 +706,19 @@ function ResultsSlideView({ slide }: { slide: QDemoSlide }) {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   MCQ Results — animated bars
+   MCQ Results — animated horizontal bars
    ───────────────────────────────────────────────────────────────────────── */
 
-function MCQResults({ options }: { options: string[] }) {
-  const total  = MCQ_VOTES.reduce((s, v) => s + v, 0)
-  const maxV   = Math.max(...MCQ_VOTES)
+function MCQResults({ options, votes }: { options: string[]; votes: number[] }) {
+  const total = votes.reduce((s, v) => s + v, 0)
+  const maxV  = Math.max(...votes, 1)
 
   return (
     <div className="flex flex-col gap-4">
       {options.map((opt, i) => {
-        const pct      = Math.round((MCQ_VOTES[i] / total) * 100)
-        const isWinner = MCQ_VOTES[i] === maxV
+        const v         = votes[i] ?? 0
+        const pct       = total > 0 ? Math.round((v / total) * 100) : 0
+        const isWinner  = v > 0 && v === maxV
         return (
           <motion.div
             key={i}
@@ -536,7 +759,7 @@ function MCQResults({ options }: { options: string[] }) {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Word Cloud Results — dramatic dark cloud
+   Word Cloud Results
    ───────────────────────────────────────────────────────────────────────── */
 
 const CLOUD_COLORS = [
@@ -546,19 +769,26 @@ const CLOUD_COLORS = [
 const ROTATIONS = [-7, -3, 0, 3, 7, -5, 5, -2, 2, 0, -4, 4]
 
 function cloudSize(count: number) {
-  if (count >= 17) return 'text-6xl font-bold md:text-7xl'
-  if (count >= 13) return 'text-5xl font-bold md:text-6xl'
+  if (count >= 17) return 'text-6xl font-bold   md:text-7xl'
+  if (count >= 13) return 'text-5xl font-bold   md:text-6xl'
   if (count >= 10) return 'text-4xl font-semibold md:text-5xl'
   if (count >=  7) return 'text-3xl font-semibold md:text-4xl'
-  if (count >=  5) return 'text-2xl font-medium  md:text-3xl'
-  return                  'text-xl  font-medium  md:text-2xl'
+  if (count >=  5) return 'text-2xl font-medium   md:text-3xl'
+  return                   'text-xl  font-medium   md:text-2xl'
 }
 
-function WordCloudResults() {
-  const top = CLOUD_WORDS.reduce((a, b) => a.count > b.count ? a : b).text
+function WordCloudResults({ words }: { words: { text: string; count: number }[] }) {
+  if (words.length === 0) {
+    return (
+      <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-sm text-white/35">
+        Waiting for responses…
+      </div>
+    )
+  }
+  const top = words.reduce((a, b) => a.count > b.count ? a : b).text
   return (
     <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-4 py-4">
-      {CLOUD_WORDS.map((w, i) => (
+      {words.map((w, i) => (
         <motion.span
           key={w.text}
           initial={{ opacity: 0, scale: 0.1 }}
@@ -584,27 +814,20 @@ function WordCloudResults() {
    Open-ended Results — live answer cards
    ───────────────────────────────────────────────────────────────────────── */
 
-function OpenEndedResults() {
-  const [visible, setVisible] = useState<typeof OPEN_ANSWERS>([])
-
-  useEffect(() => {
-    setVisible([])
-    let i = 0
-    const reveal = () => {
-      setVisible(OPEN_ANSWERS.slice(0, i + 1))
-      i++
-      if (i < OPEN_ANSWERS.length) setTimeout(reveal, 1200)
-    }
-    const t = setTimeout(reveal, 150)
-    return () => clearTimeout(t)
-  }, [])
-
+function OpenEndedResults({ answers }: { answers: { name: string; text: string }[] }) {
+  if (answers.length === 0) {
+    return (
+      <div className="flex min-h-[150px] items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-sm text-white/35">
+        Waiting for responses…
+      </div>
+    )
+  }
   return (
     <div className="grid auto-rows-min gap-3 md:grid-cols-2 lg:grid-cols-3">
       <AnimatePresence>
-        {visible.map((ans, i) => (
+        {answers.map((ans, i) => (
           <motion.div
-            key={i}
+            key={`${ans.name}-${ans.text.slice(0, 20)}-${i}`}
             initial={{ opacity: 0, y: 16, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
@@ -620,14 +843,14 @@ function OpenEndedResults() {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Rating Results — animated average bars
+   Rating Results — average bars
    ───────────────────────────────────────────────────────────────────────── */
 
-function RatingResults({ params }: { params: string[] }) {
+function RatingResults({ params, avgs }: { params: string[]; avgs: number[] }) {
   return (
     <div className="flex flex-col gap-4">
       {params.map((label, idx) => (
-        <RatingRow key={idx} label={label} avg={RATING_AVGS[idx] ?? 4.0} delay={idx * 0.13} />
+        <RatingRow key={idx} label={label} avg={avgs[idx] ?? 0} delay={idx * 0.13} />
       ))}
     </div>
   )
