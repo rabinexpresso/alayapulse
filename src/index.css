@@ -1,0 +1,68 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@200;300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Alaya brand tokens — exposed as Tailwind utilities via @theme
+   ───────────────────────────────────────────────────────────────────────── */
+
+@theme {
+  /* Primary navy (Midnight Sky) with full 50→900 tint scale */
+  --color-midnight-sky-50:  #f7f7fa;  /* 3%  */
+  --color-midnight-sky-100: #f0f0f5;  /* 6%  */
+  --color-midnight-sky-200: #e8e8f1;  /* 9%  */
+  --color-midnight-sky-300: #dedeec;  /* 13% */
+  --color-midnight-sky-400: #d1d1e6;  /* 18% */
+  --color-midnight-sky-500: #8080bc;  /* 50% */
+  --color-midnight-sky-600: #6666af;  /* 60% */
+  --color-midnight-sky-700: #4d4da1;  /* 70% */
+  --color-midnight-sky-800: #333394;  /* 80% */
+  --color-midnight-sky-900: #000079;  /* 100% — full brand navy */
+  --color-midnight-sky:     #000079;  /* alias for default */
+
+  /* Action / accent palette */
+  --color-hot-pink:     #ff0065;
+  --color-sky-blue:     #00b0ff;
+  --color-fresh-green:  #42db66;
+  --color-golden-sun:   #ffc709;
+
+  /* Typography */
+  --font-sans: "Poppins", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-display: "Poppins", ui-sans-serif, system-ui, sans-serif;
+
+  /* Motion */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Base layer — reset + global type
+   ───────────────────────────────────────────────────────────────────────── */
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    margin: 0;
+    background-color: #ffffff;
+    color: var(--color-midnight-sky-900);
+    font-weight: 300; /* Poppins Light — per Alaya brand book */
+    line-height: 1.5;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: 600; /* Poppins SemiBold — per Alaya brand book */
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+
+  /* Per Alaya brand: "alaya" wordmark is always lowercase except sentence start */
+  ::selection {
+    background-color: var(--color-hot-pink);
+    color: #ffffff;
+  }
+}
