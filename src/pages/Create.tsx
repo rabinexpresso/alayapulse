@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, type ReactNode } from 'react'
+import React, { useState, useCallback, useRef, useEffect, type ReactNode } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { createSession, updateSessionState } from '@/lib/session'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -14,11 +14,17 @@ import {
 import {
   Plus, Trash2, GripVertical, FileText,
   Cloud, AlignLeft, Star, Upload, Play,
-  ArrowLeft, LayoutList,
+  LayoutList, Bookmark, BookmarkCheck, Monitor,
 } from 'lucide-react'
 import * as pdfjsLib from 'pdfjs-dist'
 import { AlayaMark } from '@/components/AlayaMark'
 import { cn } from '@/lib/utils'
+import {
+  getStorageBackend, setStorageBackend,
+  browserSaveDeck, cloudSaveDeck,
+  signInWithGoogle, onAuthStateChanged, auth,
+  type StorageBackend, type Deck, type User,
+} from '@/lib/deckStorage'
 
 /* ─────────────────────────────────────────────────────────────────────────
    PDF.js worker — Vite resolves new URL() at build time, so the worker
@@ -39,7 +45,7 @@ interface PdfSlide {
   id: string
   type: 'pdf'
   pageNum: number
-  imgUrl: string
+  imgUrl?: string   // undefined when loaded from cloud (images are not stored there)
 }
 interface QuestionSlide {
   id: string
@@ -82,14 +88,79 @@ export default function Create() {
   // Restore slides + title when returning from present mode
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const returnState  = (location.state as any) ?? {}
-  const resumeCode   = returnState.sessionCode as string | undefined  // existing session to resume
+  const resumeCode   = returnState.sessionCode as string | undefined
+  const deckFromState = returnState.deck as Deck | undefined   // loaded from My Decks
 
-  const [slides, setSlides]         = useState<Slide[]>(returnState.slides ?? [])
-  const [selectedId, setSelectedId] = useState<string | null>(returnState.slides?.[0]?.id ?? null)
-  const [deckTitle, setDeckTitle]   = useState(returnState.deckTitle ?? 'Untitled session')
+  const [slides, setSlides]         = useState<Slide[]>(
+    deckFromState?.slides as Slide[] ?? returnState.slides ?? [],
+  )
+  const [selectedId, setSelectedId] = useState<string | null>(
+    (deckFromState?.slides?.[0] as any)?.id ?? returnState.slides?.[0]?.id ?? null,
+  )
+  const [deckTitle, setDeckTitle]   = useState(
+    deckFromState?.title ?? returnState.deckTitle ?? 'Untitled session',
+  )
+  const [currentDeckId, setCurrentDeckId] = useState<string | undefined>(deckFromState?.id)
   const [isImporting, setImporting] = useState(false)
   const [isStarting,  setStarting]  = useState(false)
   const [addMenuAfter, setAddMenu]  = useState<string | undefined>(undefined)
+
+  // Deck saving state
+  const [storageBackend, setStorageBackend_] = useState<StorageBackend | null>(getStorageBackend)
+  const [authUser,       setAuthUser]        = useState<User | null>(null)
+  const [showSaveModal,  setShowSaveModal]   = useState(false)
+  const [isSaving,       setIsSaving]        = useState(false)
+  const [savedToast,     setSavedToast]      = useState(false)
+
+  useEffect(() => {
+    return onAuthStateChanged(auth, u => setAuthUser(u))
+  }, [])
+
+  const saveDeck = async (backend?: StorageBackend) => {
+    const b = backend ?? storageBackend
+    if (!b) { setShowSaveModal(true); return }
+    setIsSaving(true)
+    try {
+      const deck: Deck = {
+        id:        currentDeckId ?? uid(),
+        title:     deckTitle,
+        slides:    slides as unknown[],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }
+      if (b === 'browser') {
+        await browserSaveDeck(deck)
+      } else {
+        if (!authUser) {
+          const u = await signInWithGoogle()
+          setAuthUser(u)
+          setStorageBackend('cloud')
+          setStorageBackend_('cloud')
+        }
+        await cloudSaveDeck(deck)
+      }
+      if (!currentDeckId) setCurrentDeckId(deck.id)
+      setSavedToast(true)
+      setTimeout(() => setSavedToast(false), 2000)
+    } catch (err) {
+      console.error('Save failed:', err)
+    } finally {
+      setIsSaving(false)
+      setShowSaveModal(false)
+    }
+  }
+
+  const handleChooseBrowser = () => {
+    setStorageBackend('browser')
+    setStorageBackend_('browser')
+    saveDeck('browser')
+  }
+
+  const handleChooseCloud = async () => {
+    setStorageBackend('cloud')
+    setStorageBackend_('cloud')
+    await saveDeck('cloud')
+  }
   // addMenuAfter = id of slide to insert after; undefined = menu closed
 
   const selectedSlide = slides.find(s => s.id === selectedId) ?? null
@@ -202,11 +273,11 @@ export default function Create() {
 
         <div className="flex items-center gap-4">
           <button
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/decks')}
             className="flex items-center gap-1.5 text-sm text-midnight-sky-500 transition-colors hover:text-midnight-sky-800"
           >
-            <ArrowLeft className="size-4" />
-            Back
+            <Bookmark className="size-4" />
+            My Decks
           </button>
           <span className="h-4 w-px bg-midnight-sky-200" />
           <AlayaMark />
@@ -218,6 +289,31 @@ export default function Create() {
           onChange={e => setDeckTitle(e.target.value)}
           className="w-56 rounded-lg px-3 py-1.5 text-center text-sm font-medium text-midnight-sky-800 outline-none ring-0 transition hover:bg-midnight-sky-50 focus:bg-midnight-sky-50 focus:ring-1 focus:ring-midnight-sky-200"
         />
+
+        {/* Save deck button */}
+        <div className="flex items-center gap-2">
+          <motion.button
+            onClick={() => saveDeck()}
+            disabled={slides.length === 0 || isSaving}
+            whileTap={slides.length > 0 ? { scale: 0.96 } : {}}
+            className={cn(
+              'flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm font-medium transition-all duration-200',
+              savedToast
+                ? 'border-fresh-green/40 bg-fresh-green/10 text-fresh-green'
+                : slides.length > 0
+                ? 'border-midnight-sky-200 bg-white text-midnight-sky-600 hover:border-midnight-sky-400'
+                : 'cursor-not-allowed border-midnight-sky-100 text-midnight-sky-300',
+            )}
+          >
+            {savedToast ? (
+              <><BookmarkCheck className="size-3.5" />Saved</>
+            ) : isSaving ? (
+              <LoadingDots color="pink" />
+            ) : (
+              <><Bookmark className="size-3.5" />Save</>
+            )}
+          </motion.button>
+        </div>
 
         {/* Start / Resume session */}
         {resumeCode && slides.length > 0 ? (
@@ -257,6 +353,18 @@ export default function Create() {
           </motion.button>
         )}
       </header>
+
+      {/* ── Save storage choice modal ───────────────────────────────── */}
+      <AnimatePresence>
+        {showSaveModal && (
+          <SaveStorageModal
+            onBrowser={handleChooseBrowser}
+            onCloud={handleChooseCloud}
+            onCancel={() => setShowSaveModal(false)}
+            saving={isSaving}
+          />
+        )}
+      </AnimatePresence>
 
       {/* ── Main area ───────────────────────────────────────────────── */}
       <div className="flex flex-1 overflow-hidden">
@@ -448,7 +556,14 @@ function SlideThumbnail({
         {/* Thumbnail */}
         <div className="aspect-video flex-1 overflow-hidden rounded-lg bg-midnight-sky-800">
           {slide.type === 'pdf' ? (
-            <img src={slide.imgUrl} alt={`Page ${slide.pageNum}`} className="h-full w-full object-cover" />
+            slide.imgUrl ? (
+              <img src={slide.imgUrl} alt={`Page ${slide.pageNum}`} className="h-full w-full object-cover" />
+            ) : (
+              <div className="flex h-full w-full flex-col items-center justify-center gap-1">
+                <FileText className="size-4 text-white/30" />
+                <span className="text-[8px] text-white/25">Page {slide.pageNum}</span>
+              </div>
+            )
           ) : (
             <div className={cn(
               'flex h-full w-full items-center justify-center p-2',
@@ -561,6 +676,24 @@ function SlideEditor({ slide, onUpdate }: {
   onUpdate: (id: string, patch: Partial<QuestionSlide>) => void
 }) {
   if (slide.type === 'pdf') {
+    if (!slide.imgUrl) {
+      return (
+        <div className="flex flex-1 items-center justify-center bg-midnight-sky-900 p-10">
+          <div className="flex flex-col items-center gap-5 text-center">
+            <div className="flex size-16 items-center justify-center rounded-2xl bg-white/8">
+              <FileText className="size-8 text-white/30" />
+            </div>
+            <div>
+              <p className="text-base font-semibold text-white/70">Page {slide.pageNum}</p>
+              <p className="mt-2 max-w-xs text-sm font-light leading-relaxed text-white/40">
+                PDF images aren't saved to the cloud to keep file sizes small.
+                Re-import your PDF using the button in the left panel to restore this slide.
+              </p>
+            </div>
+          </div>
+        </div>
+      )
+    }
     return (
       <div className="flex flex-1 items-center justify-center bg-midnight-sky-900 p-10">
         <img
@@ -933,6 +1066,70 @@ function EmptyEditorState({ onImport, isImporting }: {
         )}
       </motion.div>
     </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Save Storage Modal — first-time save: choose browser or cloud
+   ───────────────────────────────────────────────────────────────────────── */
+
+function SaveStorageModal({ onBrowser, onCloud, onCancel, saving }: {
+  onBrowser: () => void
+  onCloud:   () => void
+  onCancel:  () => void
+  saving:    boolean
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-6"
+      onClick={onCancel}
+    >
+      <motion.div
+        initial={{ scale: 0.94, opacity: 0, y: 8 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.94, opacity: 0 }}
+        transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+        onClick={e => e.stopPropagation()}
+        className="w-full max-w-lg rounded-3xl bg-white p-8 shadow-2xl"
+      >
+        <h3 className="mb-1.5 text-xl font-semibold text-midnight-sky-900">
+          Where would you like to save?
+        </h3>
+        <p className="mb-6 text-sm font-light text-midnight-sky-500">
+          Choose once — you can always change it later from My Decks.
+        </p>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <button
+            onClick={onBrowser}
+            disabled={saving}
+            className="group flex flex-col gap-3 rounded-2xl border-2 border-midnight-sky-200 p-5 text-left transition-all hover:border-midnight-sky-400 hover:bg-midnight-sky-50 disabled:opacity-60"
+          >
+            <Monitor className="size-6 text-midnight-sky-500" />
+            <div>
+              <p className="font-semibold text-midnight-sky-900">This browser</p>
+              <p className="mt-0.5 text-xs font-light text-midnight-sky-500">No login · instant · this device only</p>
+            </div>
+          </button>
+
+          <button
+            onClick={onCloud}
+            disabled={saving}
+            className="group flex flex-col gap-3 rounded-2xl border-2 border-hot-pink/25 bg-hot-pink/[0.03] p-5 text-left transition-all hover:border-hot-pink/50 hover:bg-hot-pink/5 disabled:opacity-60"
+          >
+            {saving ? <LoadingDots color="pink" /> : <Cloud className="size-6 text-hot-pink" />}
+            <div>
+              <p className="font-semibold text-midnight-sky-900">Google account</p>
+              <p className="mt-0.5 text-xs font-light text-midnight-sky-500">Sign in · any device · any browser</p>
+              <p className="mt-1.5 text-[10px] font-light text-midnight-sky-400">PDF slide images are kept on this device only</p>
+            </div>
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
   )
 }
 
