@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect, type ReactNode } from 'react'
+import React, { useState, useCallback, useRef, type ReactNode } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { createSession, updateSessionState } from '@/lib/session'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -142,14 +142,27 @@ export default function Create() {
 
   // Deck saving state
   const [storageBackend, setStorageBackend_] = useState<StorageBackend | null>(getStorageBackend)
-  const [authUser,       setAuthUser]        = useState<User | null>(null)
   const [showSaveModal,  setShowSaveModal]   = useState(false)
   const [isSaving,       setIsSaving]        = useState(false)
   const [savedToast,     setSavedToast]      = useState(false)
+  const [saveError,      setSaveError]       = useState<string | null>(null)
 
-  useEffect(() => {
-    return onAuthStateChanged(auth, u => setAuthUser(u))
-  }, [])
+  /**
+   * Firebase restores auth state from storage asynchronously on page load.
+   * Waiting here prevents a race where auth.currentUser is still null
+   * in the first second after navigating to this page.
+   */
+  const waitForAuth = (): Promise<User | null> => {
+    if (auth.currentUser) return Promise.resolve(auth.currentUser)
+    return new Promise(resolve => {
+      const timer = setTimeout(() => { unsub(); resolve(null) }, 4000)
+      const unsub = onAuthStateChanged(auth, user => {
+        clearTimeout(timer)
+        unsub()
+        resolve(user)
+      })
+    })
+  }
 
   const saveDeck = async (backend?: StorageBackend) => {
     const b = backend ?? storageBackend
@@ -171,9 +184,10 @@ export default function Create() {
       if (b === 'browser') {
         await browserSaveDeck(deck)
       } else {
-        if (!authUser) {
-          const u = await signInWithGoogle()
-          setAuthUser(u)
+        // Wait for Firebase to restore auth state (handles race on first page load)
+        const existingUser = await waitForAuth()
+        if (!existingUser) {
+          await signInWithGoogle()
           setStorageBackend('cloud')
           setStorageBackend_('cloud')
         }
@@ -181,9 +195,12 @@ export default function Create() {
       }
       if (!currentDeckId) setCurrentDeckId(deck.id)
       setSavedToast(true)
-      setTimeout(() => setSavedToast(false), 2000)
+      setTimeout(() => setSavedToast(false), 2500)
     } catch (err) {
       console.error('Save failed:', err)
+      const msg = err instanceof Error ? err.message : 'Unknown error'
+      setSaveError(`Save failed: ${msg}`)
+      setTimeout(() => setSaveError(null), 5000)
     } finally {
       setIsSaving(false)
       setShowSaveModal(false)
@@ -330,8 +347,20 @@ export default function Create() {
           className="w-56 rounded-lg px-3 py-1.5 text-center text-sm font-medium text-midnight-sky-800 outline-none ring-0 transition hover:bg-midnight-sky-50 focus:bg-midnight-sky-50 focus:ring-1 focus:ring-midnight-sky-200"
         />
 
-        {/* Save deck button */}
+        {/* Save deck button + error toast */}
         <div className="flex items-center gap-2">
+          <AnimatePresence>
+            {saveError && (
+              <motion.span
+                initial={{ opacity: 0, x: 8 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 8 }}
+                className="rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600"
+              >
+                {saveError}
+              </motion.span>
+            )}
+          </AnimatePresence>
           <motion.button
             onClick={() => saveDeck()}
             disabled={slides.length === 0 || isSaving}
@@ -340,6 +369,8 @@ export default function Create() {
               'flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm font-medium transition-all duration-200',
               savedToast
                 ? 'border-fresh-green/40 bg-fresh-green/10 text-fresh-green'
+                : saveError
+                ? 'border-red-200 bg-red-50 text-red-500'
                 : slides.length > 0
                 ? 'border-midnight-sky-200 bg-white text-midnight-sky-600 hover:border-midnight-sky-400'
                 : 'cursor-not-allowed border-midnight-sky-100 text-midnight-sky-300',
