@@ -44,16 +44,21 @@ const CLOUDINARY_CLOUD  = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME  as string
 const CLOUDINARY_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET as string
 
 async function uploadToCloudinary(base64DataUrl: string): Promise<string> {
-  const res = await fetch(
+  // Convert base64 data URL → Blob → proper file upload (avoids filename/slash issues)
+  const blob = await fetch(base64DataUrl).then(r => r.blob())
+  const form = new FormData()
+  form.append('file', blob, `slide-${uid()}.jpg`)
+  form.append('upload_preset', CLOUDINARY_PRESET)
+
+  const res  = await fetch(
     `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/image/upload`,
-    {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ file: base64DataUrl, upload_preset: CLOUDINARY_PRESET }),
-    },
+    { method: 'POST', body: form },
   )
-  if (!res.ok) throw new Error(`Cloudinary upload failed: ${res.status}`)
   const data = await res.json()
+  if (!res.ok) {
+    const reason = data?.error?.message ?? `HTTP ${res.status}`
+    throw new Error(`Cloudinary: ${reason}`)
+  }
   return data.secure_url as string
 }
 
