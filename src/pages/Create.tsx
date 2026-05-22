@@ -36,6 +36,41 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 ).href
 
 /* ─────────────────────────────────────────────────────────────────────────
+   Cloudinary — unsigned upload helper
+   Images are uploaded when saving to cloud so Firestore only stores a URL.
+   ───────────────────────────────────────────────────────────────────────── */
+
+const CLOUDINARY_CLOUD  = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME  as string
+const CLOUDINARY_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET as string
+
+async function uploadToCloudinary(base64DataUrl: string): Promise<string> {
+  const res = await fetch(
+    `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/image/upload`,
+    {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ file: base64DataUrl, upload_preset: CLOUDINARY_PRESET }),
+    },
+  )
+  if (!res.ok) throw new Error(`Cloudinary upload failed: ${res.status}`)
+  const data = await res.json()
+  return data.secure_url as string
+}
+
+/** Replaces any base64 imgUrls with Cloudinary URLs before cloud-saving. */
+async function toCloudinarySlides(slides: Slide[]): Promise<Slide[]> {
+  return Promise.all(
+    slides.map(async slide => {
+      if (slide.type !== 'pdf' || !slide.imgUrl || slide.imgUrl.startsWith('https://')) {
+        return slide   // already a URL or no image — nothing to do
+      }
+      const cloudUrl = await uploadToCloudinary(slide.imgUrl)
+      return { ...slide, imgUrl: cloudUrl }
+    }),
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
    Types
    ───────────────────────────────────────────────────────────────────────── */
 
@@ -121,10 +156,15 @@ export default function Create() {
     if (!b) { setShowSaveModal(true); return }
     setIsSaving(true)
     try {
+      // For cloud saves: upload any base64 PDF images to Cloudinary first
+      const slidesToSave = b === 'cloud'
+        ? await toCloudinarySlides(slides)
+        : slides
+
       const deck: Deck = {
         id:        currentDeckId ?? uid(),
         title:     deckTitle,
-        slides:    slides as unknown[],
+        slides:    slidesToSave as unknown[],
         createdAt: Date.now(),
         updatedAt: Date.now(),
       }
