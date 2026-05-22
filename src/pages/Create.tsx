@@ -782,8 +782,10 @@ function SlideEditor({ slide, onUpdate }: {
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-auto px-10 py-8">
-      <QuestionEditor slide={slide} onUpdate={patch => onUpdate(slide.id, patch)} />
+    <div className="flex flex-1 flex-col overflow-auto" style={{ background: 'oklch(0.972 0.006 258)' }}>
+      <div className="mx-auto w-full max-w-2xl px-8 py-8">
+        <QuestionEditor slide={slide} onUpdate={patch => onUpdate(slide.id, patch)} />
+      </div>
     </div>
   )
 }
@@ -806,58 +808,71 @@ function QuestionEditor({ slide, onUpdate }: {
   }
 
   return (
-    <div className="mx-auto w-full max-w-2xl">
-
-      {/* Type chip */}
+    <div className="w-full">
       <motion.div
         key={slide.id}
-        initial={{ opacity: 0, y: 8 }}
+        initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
       >
-        <div className={cn(
-          'mb-5 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold',
-          'bg-midnight-sky-50',
-          qInfo.color,
-        )}>
-          {qInfo.icon}
-          {qInfo.label}
-        </div>
 
-        {/* Question text */}
-        <div className="mb-6">
-          <label className="mb-1.5 block text-sm font-medium text-midnight-sky-700">
-            Question text
-          </label>
-          <textarea
-            value={slide.question}
-            onChange={e => onUpdate({ question: e.target.value })}
-            placeholder={PLACEHOLDERS[slide.type]}
-            rows={3}
-            className="w-full resize-none rounded-2xl border border-midnight-sky-200 bg-white px-4 py-3 text-base text-midnight-sky-900 placeholder:font-light placeholder:text-midnight-sky-400 outline-none transition-all focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/15"
-          />
-        </div>
+        {/* Form card */}
+        <div className="rounded-2xl bg-white p-6 shadow-[0_2px_12px_-2px_rgba(0,0,121,0.08)]">
 
-        {/* Type-specific fields */}
-        {slide.type === 'mcq' && <MCQEditor slide={slide} onUpdate={onUpdate} />}
-        {slide.type === 'rating' && <RatingEditor slide={slide} onUpdate={onUpdate} />}
-        {(slide.type === 'wordcloud' || slide.type === 'openended') && (
-          <div className="mb-6 rounded-2xl border border-dashed border-midnight-sky-200 bg-midnight-sky-50 p-5 text-center">
-            <p className="text-sm font-light text-midnight-sky-500">
-              {slide.type === 'wordcloud'
-                ? 'Audience members type one word each. Results appear as a live word cloud on the big screen.'
-                : 'Audience members type a short answer (up to 280 characters). Responses stream in live on the big screen.'}
-            </p>
+          {/* Type chip */}
+          <div className={cn(
+            'mb-5 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold tracking-wide',
+            slide.type === 'mcq'       ? 'bg-sky-blue/10 text-sky-blue'    :
+            slide.type === 'wordcloud' ? 'bg-fresh-green/10 text-fresh-green' :
+            slide.type === 'openended' ? 'bg-golden-sun/10 text-golden-sun' :
+            'bg-hot-pink/10 text-hot-pink',
+          )}>
+            {qInfo.icon}
+            {qInfo.label}
           </div>
-        )}
 
-        {/* Audience preview card */}
-        <div className="mt-2 rounded-2xl border border-midnight-sky-100 bg-midnight-sky-50 p-5">
-          <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-midnight-sky-400">
-            Audience preview
-          </p>
-          <SlidePreviewCard slide={slide} />
+          {/* Question text */}
+          <div className="mb-5">
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-midnight-sky-400">
+              Question
+            </label>
+            <textarea
+              value={slide.question}
+              onChange={e => onUpdate({ question: e.target.value })}
+              placeholder={PLACEHOLDERS[slide.type]}
+              rows={3}
+              className="w-full resize-none rounded-xl border border-midnight-sky-150 bg-white px-4 py-3 text-base text-midnight-sky-900 placeholder:font-light placeholder:text-midnight-sky-300 outline-none transition-all focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/10"
+            />
+          </div>
+
+          {/* Type-specific fields */}
+          {slide.type === 'mcq' && <MCQEditor slide={slide} onUpdate={onUpdate} />}
+          {slide.type === 'rating' && <RatingEditor slide={slide} onUpdate={onUpdate} />}
+          {(slide.type === 'wordcloud' || slide.type === 'openended') && (
+            <div className="mb-1 flex items-start gap-2.5 rounded-xl bg-midnight-sky-50 p-4">
+              <div className={cn(
+                'mt-0.5 shrink-0 size-1.5 rounded-full',
+                slide.type === 'wordcloud' ? 'bg-fresh-green' : 'bg-golden-sun',
+              )} />
+              <p className="text-sm text-midnight-sky-500">
+                {slide.type === 'wordcloud'
+                  ? 'Each audience member types one word. Results appear as a live word cloud on the big screen.'
+                  : 'Audience members type a short answer. Responses stream in live on the big screen.'}
+              </p>
+            </div>
+          )}
         </div>
+
+        {/* Audience preview — dark phone-style card */}
+        <div className="mt-4">
+          <p className="mb-2.5 px-1 text-[10px] font-semibold uppercase tracking-wider text-midnight-sky-400">
+            What the audience sees
+          </p>
+          <div className="overflow-hidden rounded-2xl bg-midnight-sky-900 p-5 shadow-[0_8px_32px_-8px_rgba(0,0,121,0.3)]">
+            <SlidePreviewCard slide={slide} />
+          </div>
+        </div>
+
       </motion.div>
     </div>
   )
@@ -997,8 +1012,8 @@ function SlidePreviewCard({ slide }: { slide: QuestionSlide }) {
   const empty = !slide.question
 
   const QuestionText = () => (
-    <p className="mb-3 text-sm font-semibold text-midnight-sky-900">
-      {empty ? <span className="font-light text-midnight-sky-400">Your question appears here</span> : slide.question}
+    <p className="mb-4 text-sm font-semibold leading-snug text-white">
+      {empty ? <span className="font-light text-white/30">Your question appears here…</span> : slide.question}
     </p>
   )
 
@@ -1009,11 +1024,13 @@ function SlidePreviewCard({ slide }: { slide: QuestionSlide }) {
         <QuestionText />
         <div className="space-y-1.5">
           {opts.map((opt, i) => (
-            <div key={i} className="flex items-center gap-2 rounded-xl border border-midnight-sky-200 bg-white px-3 py-2 text-sm text-midnight-sky-700">
-              <span className="flex size-5 shrink-0 items-center justify-center rounded-lg bg-midnight-sky-100 text-[10px] font-bold text-midnight-sky-600">
+            <div key={i} className="flex items-center gap-2.5 rounded-xl bg-white/10 px-3 py-2.5 text-sm text-white transition-colors hover:bg-white/15">
+              <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-white/15 text-[10px] font-bold text-white/70">
                 {String.fromCharCode(65 + i)}
               </span>
-              {opt || <span className="text-midnight-sky-400">{`Option ${String.fromCharCode(65 + i)}`}</span>}
+              <span className={opt ? 'text-white' : 'text-white/30'}>
+                {opt || `Option ${String.fromCharCode(65 + i)}`}
+              </span>
             </div>
           ))}
         </div>
@@ -1025,9 +1042,9 @@ function SlidePreviewCard({ slide }: { slide: QuestionSlide }) {
     return (
       <div>
         <QuestionText />
-        <div className="flex items-center gap-2 rounded-2xl border border-midnight-sky-200 bg-white px-3 py-2.5">
-          <span className="flex-1 text-sm text-midnight-sky-400">Type one word…</span>
-          <span className="rounded-lg bg-hot-pink px-2.5 py-1 text-xs font-medium text-white">Send</span>
+        <div className="flex items-center gap-2 rounded-xl bg-white/10 px-3.5 py-2.5">
+          <span className="flex-1 text-sm text-white/30">Type one word…</span>
+          <span className="rounded-lg bg-hot-pink px-3 py-1.5 text-xs font-semibold text-white">Send</span>
         </div>
       </div>
     )
@@ -1037,11 +1054,11 @@ function SlidePreviewCard({ slide }: { slide: QuestionSlide }) {
     return (
       <div>
         <QuestionText />
-        <div className="rounded-2xl border border-midnight-sky-200 bg-white px-3 py-2.5 text-sm text-midnight-sky-400">
+        <div className="min-h-[56px] rounded-xl bg-white/10 px-3.5 py-3 text-sm text-white/30">
           Share your thoughts…
         </div>
-        <div className="mt-2 flex justify-end">
-          <span className="rounded-xl bg-midnight-sky-200 px-3 py-1.5 text-xs font-medium text-midnight-sky-500">Submit</span>
+        <div className="mt-2.5 flex justify-end">
+          <span className="rounded-xl bg-white/15 px-4 py-1.5 text-xs font-semibold text-white/60">Submit</span>
         </div>
       </div>
     )
@@ -1054,11 +1071,11 @@ function SlidePreviewCard({ slide }: { slide: QuestionSlide }) {
         <QuestionText />
         <div className="space-y-2">
           {params.slice(0, 3).map((p, i) => (
-            <div key={i} className="flex items-center justify-between rounded-xl border border-midnight-sky-200 bg-white px-3 py-2">
-              <span className="text-xs text-midnight-sky-700">{p || `Parameter ${i + 1}`}</span>
-              <div className="flex gap-0.5">
+            <div key={i} className="flex items-center justify-between rounded-xl bg-white/10 px-3.5 py-2.5">
+              <span className="text-xs font-medium text-white/70">{p || `Parameter ${i + 1}`}</span>
+              <div className="flex gap-1">
                 {[1, 2, 3, 4, 5].map(s => (
-                  <Star key={s} className="size-3.5 text-midnight-sky-200" />
+                  <Star key={s} className="size-3.5 text-white/20" />
                 ))}
               </div>
             </div>

@@ -134,30 +134,34 @@ export default function Decks() {
   }
 
   return (
-    <main className="min-h-screen bg-white">
+    <main className="min-h-screen" style={{ background: 'oklch(0.972 0.006 258)' }}>
 
       {/* ── Header ──────────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-10 border-b border-midnight-sky-100 bg-white/90 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+      <header className="sticky top-0 z-10 border-b border-midnight-sky-100/60 bg-white/80 backdrop-blur-md">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
           <Link to="/"><AlayaMark /></Link>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             {/* Storage badge */}
             {backend === 'browser' ? (
-              <span className="flex items-center gap-1.5 rounded-full bg-midnight-sky-50 px-3 py-1 text-xs text-midnight-sky-500">
+              <span className="flex items-center gap-1.5 rounded-full border border-midnight-sky-100 bg-white px-3 py-1 text-xs font-medium text-midnight-sky-500">
                 <Monitor className="size-3" />
-                Saved to this browser
+                This browser
               </span>
             ) : user ? (
-              <div className="flex items-center gap-2">
-                {user.photoURL && (
+              <div className="flex items-center gap-2.5 rounded-full border border-midnight-sky-100 bg-white pl-1 pr-3 py-1">
+                {user.photoURL ? (
                   <img
                     src={user.photoURL}
                     alt={user.displayName ?? ''}
-                    className="size-7 rounded-full ring-2 ring-midnight-sky-100"
+                    className="size-6 rounded-full"
                   />
+                ) : (
+                  <div className="flex size-6 items-center justify-center rounded-full bg-hot-pink/10 text-[10px] font-bold text-hot-pink">
+                    {user.displayName?.[0] ?? '?'}
+                  </div>
                 )}
-                <span className="text-sm text-midnight-sky-700">
+                <span className="text-xs font-medium text-midnight-sky-700">
                   {user.displayName?.split(' ')[0]}
                 </span>
               </div>
@@ -167,9 +171,9 @@ export default function Decks() {
             {backend === 'browser' && (
               <button
                 onClick={handleSwitchStorage}
-                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-midnight-sky-400 transition hover:bg-midnight-sky-50 hover:text-midnight-sky-700"
+                className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs text-midnight-sky-400 transition hover:bg-midnight-sky-50 hover:text-midnight-sky-700"
               >
-                <ArrowRightLeft className="size-3.5" />
+                <ArrowRightLeft className="size-3" />
                 Change
               </button>
             )}
@@ -178,9 +182,9 @@ export default function Decks() {
             {backend === 'cloud' && user && (
               <button
                 onClick={handleSignOut}
-                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-midnight-sky-400 transition hover:bg-midnight-sky-50 hover:text-midnight-sky-700"
+                className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs text-midnight-sky-400 transition hover:bg-midnight-sky-50 hover:text-midnight-sky-700"
               >
-                <LogOut className="size-3.5" />
+                <LogOut className="size-3" />
                 Sign out
               </button>
             )}
@@ -189,14 +193,14 @@ export default function Decks() {
       </header>
 
       {/* ── Page body ───────────────────────────────────────────────────── */}
-      <div className="mx-auto max-w-6xl px-6 py-10">
+      <div className="mx-auto max-w-6xl px-6 pb-16 pt-10">
 
         {/* Title row */}
-        <div className="mb-8 flex items-center justify-between">
+        <div className="mb-10 flex items-end justify-between">
           <div>
-            <h1 className="text-2xl font-semibold text-midnight-sky-900">My Decks</h1>
-            <p className="mt-0.5 text-sm font-light text-midnight-sky-500">
-              {decks.length > 0
+            <h1 className="text-[2rem] font-bold tracking-tight text-midnight-sky-900">My Decks</h1>
+            <p className="mt-1 text-sm text-midnight-sky-400">
+              {loading ? 'Loading…' : decks.length > 0
                 ? `${decks.length} saved ${decks.length === 1 ? 'deck' : 'decks'}`
                 : 'Your saved presentations'}
             </p>
@@ -204,8 +208,9 @@ export default function Decks() {
 
           <motion.button
             onClick={() => navigate('/create')}
-            whileTap={{ scale: 0.96 }}
-            className="flex items-center gap-2 rounded-2xl bg-hot-pink px-5 py-2.5 text-sm font-medium text-white shadow-[0_0_20px_-4px] shadow-hot-pink/50 transition-all hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/70"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.97 }}
+            className="flex items-center gap-2 rounded-2xl bg-hot-pink px-5 py-2.5 text-sm font-semibold text-white shadow-[0_4px_24px_-4px] shadow-hot-pink/50 transition-shadow hover:shadow-[0_4px_32px_-2px] hover:shadow-hot-pink/60"
           >
             <Plus className="size-4" />
             New deck
@@ -221,14 +226,14 @@ export default function Decks() {
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+            className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
           >
             {decks.map((deck, i) => (
               <motion.div
                 key={deck.id}
-                initial={{ opacity: 0, y: 16 }}
+                initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.35, delay: i * 0.06, ease: [0.16, 1, 0.3, 1] }}
+                transition={{ duration: 0.4, delay: i * 0.07, ease: [0.16, 1, 0.3, 1] }}
               >
                 <DeckCard
                   deck={deck}
@@ -372,8 +377,12 @@ function DeckCard({ deck, onOpen, onDelete }: {
   const slideCount = slides.length
 
   return (
-    <div className="group flex flex-col overflow-hidden rounded-2xl border border-midnight-sky-200 bg-white transition-all hover:border-midnight-sky-300 hover:shadow-lg">
-
+    <motion.div
+      whileHover={{ y: -4 }}
+      transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+      className="group flex flex-col overflow-hidden rounded-2xl bg-white shadow-[0_2px_12px_-2px_rgba(0,0,121,0.08)] hover:shadow-[0_12px_40px_-8px_rgba(0,0,121,0.18)]"
+      style={{ transition: 'box-shadow 0.2s ease' }}
+    >
       {/* Thumbnail */}
       <button
         onClick={onOpen}
@@ -383,30 +392,46 @@ function DeckCard({ deck, onOpen, onDelete }: {
           <img
             src={firstPdf.imgUrl}
             alt="Deck preview"
-            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
           />
         ) : (
           <div className="flex h-full w-full flex-col items-center justify-center gap-3 p-4">
             <Layers className="size-8 text-white/20" />
             <div className="flex flex-wrap justify-center gap-1">
               {qTypes.slice(0, 3).map(t => (
-                <span key={t} className={cn('rounded-md px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide', TYPE_COLORS[t] ?? 'bg-white/10 text-white/50')}>
+                <span key={t} className={cn('rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide', TYPE_COLORS[t] ?? 'bg-white/10 text-white/50')}>
                   {TYPE_LABELS[t] ?? t}
                 </span>
               ))}
             </div>
           </div>
         )}
+
+        {/* Hover overlay */}
+        <div className="absolute inset-0 flex items-center justify-center bg-midnight-sky-900/0 transition-all duration-300 group-hover:bg-midnight-sky-900/40">
+          <span className="translate-y-2 rounded-xl bg-white px-4 py-2 text-xs font-semibold text-midnight-sky-900 opacity-0 shadow-lg transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
+            Open deck
+          </span>
+        </div>
+
         {/* Slide count badge */}
-        <span className="absolute right-2 top-2 rounded-lg bg-black/50 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur-sm">
+        <span className="absolute left-2.5 top-2.5 rounded-lg bg-black/40 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur-sm">
           {slideCount} {slideCount === 1 ? 'slide' : 'slides'}
         </span>
+
+        {/* Delete button — top right, only on hover */}
+        <button
+          onClick={e => { e.stopPropagation(); onDelete() }}
+          className="absolute right-2.5 top-2.5 flex size-6 items-center justify-center rounded-lg bg-black/40 text-white/60 opacity-0 backdrop-blur-sm transition-all duration-200 hover:bg-red-500/80 hover:text-white group-hover:opacity-100"
+        >
+          <Trash2 className="size-3" />
+        </button>
       </button>
 
       {/* Info */}
-      <div className="flex flex-1 flex-col p-4">
+      <div className="flex flex-1 flex-col px-4 py-3.5">
         <button onClick={onOpen} className="text-left">
-          <h3 className="line-clamp-2 text-sm font-semibold text-midnight-sky-900 transition-colors group-hover:text-hot-pink">
+          <h3 className="line-clamp-1 text-sm font-semibold text-midnight-sky-900">
             {deck.title}
           </h3>
         </button>
@@ -415,7 +440,7 @@ function DeckCard({ deck, onOpen, onDelete }: {
         {qTypes.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1">
             {qTypes.slice(0, 4).map(t => (
-              <span key={t} className={cn('rounded-md px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide', TYPE_COLORS[t] ?? 'bg-midnight-sky-100 text-midnight-sky-500')}>
+              <span key={t} className={cn('rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide', TYPE_COLORS[t] ?? 'bg-midnight-sky-100 text-midnight-sky-500')}>
                 {TYPE_LABELS[t] ?? t}
               </span>
             ))}
@@ -423,28 +448,20 @@ function DeckCard({ deck, onOpen, onDelete }: {
         )}
 
         {/* Footer */}
-        <div className="mt-auto flex items-center justify-between pt-3">
-          <span className="flex items-center gap-1 text-[11px] text-midnight-sky-400">
+        <div className="mt-3 flex items-center justify-between border-t border-midnight-sky-50 pt-3">
+          <span className="flex items-center gap-1 text-[11px] text-midnight-sky-300">
             <Clock className="size-3" />
             {timeAgo(deck.updatedAt)}
           </span>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={onOpen}
-              className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-midnight-sky-600 transition hover:bg-midnight-sky-50"
-            >
-              Open
-            </button>
-            <button
-              onClick={e => { e.stopPropagation(); onDelete() }}
-              className="rounded-lg p-1.5 text-midnight-sky-300 transition hover:bg-red-50 hover:text-red-400"
-            >
-              <Trash2 className="size-3.5" />
-            </button>
-          </div>
+          <button
+            onClick={onOpen}
+            className="rounded-lg px-2.5 py-1 text-xs font-semibold text-midnight-sky-500 transition hover:bg-midnight-sky-50 hover:text-midnight-sky-900"
+          >
+            Open
+          </button>
         </div>
       </div>
-    </div>
+    </motion.div>
   )
 }
 
@@ -455,24 +472,46 @@ function DeckCard({ deck, onOpen, onDelete }: {
 function EmptyState({ onNew }: { onNew: () => void }) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 16 }}
+      initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-      className="flex flex-col items-center justify-center gap-6 py-24 text-center"
+      className="flex flex-col items-center justify-center py-28 text-center"
     >
-      <div className="flex size-20 items-center justify-center rounded-3xl bg-midnight-sky-50">
-        <Layers className="size-9 text-midnight-sky-300" />
+      {/* Decorative placeholder cards */}
+      <div className="relative mb-10 h-24 w-72">
+        {[
+          'rotate-[-6deg] translate-x-[-56px] translate-y-2 scale-95',
+          'rotate-[4deg] translate-x-[56px] translate-y-3 scale-95',
+          'rotate-0 translate-y-0 scale-100 z-10',
+        ].map((cls, i) => (
+          <div
+            key={i}
+            className={cn(
+              'absolute inset-0 rounded-2xl bg-white shadow-md',
+              i < 2 ? 'opacity-50' : 'opacity-100',
+              cls,
+            )}
+          >
+            <div className="h-full overflow-hidden rounded-2xl">
+              <div className="h-3/5 bg-midnight-sky-900/5" />
+              <div className="p-2.5 space-y-1.5">
+                <div className="h-2 w-3/4 rounded-full bg-midnight-sky-100" />
+                <div className="h-2 w-1/2 rounded-full bg-midnight-sky-50" />
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
-      <div>
-        <h3 className="text-xl font-semibold text-midnight-sky-900">No saved decks yet</h3>
-        <p className="mt-2 max-w-xs text-sm font-light text-midnight-sky-500">
-          Create your first deck and save it here — your questions will be ready to use any time.
-        </p>
-      </div>
+
+      <h3 className="text-xl font-bold text-midnight-sky-900">No saved decks yet</h3>
+      <p className="mt-2.5 max-w-sm text-sm text-midnight-sky-400">
+        Build your first deck with PDF slides and question cards, then save it here to reuse any time.
+      </p>
       <motion.button
         onClick={onNew}
-        whileTap={{ scale: 0.96 }}
-        className="flex items-center gap-2 rounded-2xl bg-hot-pink px-6 py-3 text-sm font-medium text-white shadow-[0_0_20px_-4px] shadow-hot-pink/50"
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.97 }}
+        className="mt-8 flex items-center gap-2 rounded-2xl bg-hot-pink px-6 py-3 text-sm font-semibold text-white shadow-[0_4px_24px_-4px] shadow-hot-pink/50"
       >
         <Plus className="size-4" />
         Create my first deck
@@ -487,13 +526,18 @@ function EmptyState({ onNew }: { onNew: () => void }) {
 
 function LoadingGrid() {
   return (
-    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       {[0, 1, 2, 3].map(i => (
-        <div key={i} className="overflow-hidden rounded-2xl border border-midnight-sky-100">
-          <div className="aspect-video animate-pulse bg-midnight-sky-50" />
-          <div className="p-4 space-y-2">
-            <div className="h-4 w-3/4 animate-pulse rounded bg-midnight-sky-50" />
-            <div className="h-3 w-1/2 animate-pulse rounded bg-midnight-sky-50" />
+        <div key={i} className="overflow-hidden rounded-2xl bg-white shadow-[0_2px_12px_-2px_rgba(0,0,121,0.07)]">
+          <div className="aspect-video overflow-hidden">
+            <div className="h-full w-full animate-[shimmer_1.6s_ease-in-out_infinite] bg-gradient-to-r from-midnight-sky-50 via-white to-midnight-sky-50 bg-[length:400%_100%]" />
+          </div>
+          <div className="px-4 py-3.5 space-y-2.5">
+            <div className="h-3.5 w-3/4 rounded-full bg-midnight-sky-50" />
+            <div className="flex gap-1.5">
+              <div className="h-2.5 w-10 rounded-full bg-midnight-sky-50" />
+              <div className="h-2.5 w-14 rounded-full bg-midnight-sky-50" />
+            </div>
           </div>
         </div>
       ))}

@@ -9,6 +9,7 @@
   /* Primary navy (Midnight Sky) with full 50→900 tint scale */
   --color-midnight-sky-50:  #f7f7fa;  /* 3%  */
   --color-midnight-sky-100: #f0f0f5;  /* 6%  */
+  --color-midnight-sky-150: #ecebf3;  /* 7.5% */
   --color-midnight-sky-200: #e8e8f1;  /* 9%  */
   --color-midnight-sky-300: #dedeec;  /* 13% */
   --color-midnight-sky-400: #d1d1e6;  /* 18% */
@@ -65,4 +66,19 @@
     background-color: var(--color-hot-pink);
     color: #ffffff;
   }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Custom animations
+   ───────────────────────────────────────────────────────────────────────── */
+
+@keyframes shimmer {
+  0%   { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Tailwind v4: expose as animate-[shimmer_...] via bg-[length:400%_100%] */
+.animate-shimmer {
+  animation: shimmer 1.6s ease-in-out infinite;
+  background-size: 400% 100%;
 }
