@@ -1,16 +1,21 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { PersistentHtmlIframe } from '@/components/PersistentHtmlIframe'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ChevronLeft, ChevronRight, X,
-  BarChart2, Wifi, ArrowRight,
+  BarChart2, ChevronDown, ChevronUp, Clock,
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { cn } from '@/lib/utils'
 import {
-  updateSessionState, endSession, subscribeToSlideResponses,
+  updateSessionState, endSession, subscribeToSlideResponses, subscribeToViewerCount,
+  fetchAllSessionResponses, startTimer, clearTimer,
   type Response as FirestoreResponse,
 } from '@/lib/session'
+import type {
+  DeckResults, ResultQuestion, ResultQuestionType, ResultResponse,
+} from '@/lib/deckStorage'
 
 /* ─────────────────────────────────────────────────────────────────────────
    Presenter full-screen slideshow mode.
@@ -39,14 +44,70 @@ interface PdfSlide {
   subtitle?: string   // demo fallback
 }
 
-interface QSlide {
-  id:       string
-  type:     QType
-  question: string
-  options:  string[]
+interface ContentSlide {
+  id:          string
+  type:        'content'
+  template:    'heading' | 'bullets' | 'quote'
+  title:       string
+  body:        string
+  attribution: string
+  theme:       string
+  imgUrl?:     string
+  imgLayout?:  'top' | 'right' | 'background'
 }
 
-type AnySlide = PdfSlide | QSlide
+interface ImageSlide {
+  id:       string
+  type:     'image'
+  imgUrl:   string
+  fileName: string
+}
+
+interface VideoSlide {
+  id:        string
+  type:      'video'
+  videoUrl:  string
+  videoType: string
+  fileName:  string
+}
+
+interface HtmlSlide {
+  id:          string
+  type:        'html'
+  html:        string
+  fileName:    string
+  /** 0-based index of which internal slide to jump to via hash navigation (#/N). */
+  slideIndex?: number
+  slideTotal?: number
+}
+
+interface QSlide {
+  id:           string
+  type:         QType
+  question:     string
+  options:      string[]
+  vizType?:     'bar' | 'pie' | 'donut'
+  ratingMax?:   5 | 10
+  /** Per-parameter scale labels (parallel to options). */
+  leftLabels?:  string[]
+  rightLabels?: string[]
+  /** @deprecated slide-wide fallback. */
+  leftLabel?:   string
+  rightLabel?:  string
+  theme?:       string
+  imgUrl?:      string
+  imgLayout?:   'top' | 'right' | 'background'
+}
+
+interface CanvasBg     { type: 'color' | 'gradient'; value: string }
+interface CanvasBaseEl { id: string; kind: 'text' | 'table' | 'image'; x: number; y: number; w: number; h: number }
+interface CanvasTextEl extends CanvasBaseEl { kind: 'text'; html: string; fontSize: number; align: 'left' | 'center' | 'right'; color: string }
+interface CanvasTableEl extends CanvasBaseEl { kind: 'table'; rows: number; cols: number; cells: string[][]; hasHeader: boolean }
+interface CanvasImageEl extends CanvasBaseEl { kind: 'image'; imgUrl: string; objectFit: 'cover' | 'contain' }
+type CanvasEl = CanvasTextEl | CanvasTableEl | CanvasImageEl
+interface CanvasSlide  { id: string; type: 'canvas'; bg: CanvasBg; elements: CanvasEl[] }
+
+type AnySlide = PdfSlide | ContentSlide | ImageSlide | VideoSlide | HtmlSlide | QSlide | CanvasSlide
 
 // ── Demo deck — used when navigating directly to /present ─────────────────
 
@@ -80,6 +141,12 @@ const DEMO_OPEN_ANSWERS = [
   { name: 'Priya K.',   text: 'Psychological safety to try new ideas without fear of failure.' },
 ]
 const DEMO_RATING_AVGS = [4.2, 3.8, 4.6]
+// Distribution per parameter: [1★ count, 2★ count, 3★ count, 4★ count, 5★ count]
+const DEMO_RATING_DIST = [
+  [0, 1, 3, 8,  9],  // Giving feedback   — skews high
+  [1, 2, 5, 6,  6],  // Decision making   — spread
+  [0, 0, 1, 5, 14],  // Coaching others   — mostly 5★
+]
 
 // ── Response aggregators ───────────────────────────────────────────────────
 
@@ -123,6 +190,24 @@ function aggregateRating(responses: FirestoreResponse[], count: number): number[
   return sums.map((s, i) => (cnts[i] > 0 ? s / cnts[i] : 0))
 }
 
+/** Returns dist[paramIdx][bucket] where bucket 0..N maps to value 0..N
+ *  (scale is now 0..ratingMax inclusive, so bucket count = ratingMax + 1). */
+function aggregateRatingDistribution(responses: FirestoreResponse[], paramCount: number, ratingMax: number = 5): number[][] {
+  const buckets = ratingMax + 1
+  const dist = Array.from({ length: paramCount }, () => Array(buckets).fill(0))
+  responses.forEach(r => {
+    try {
+      const arr = JSON.parse(r.value) as number[]
+      arr.forEach((v, i) => {
+        if (i < paramCount && v >= 0 && v <= ratingMax) {
+          dist[i][v]++
+        }
+      })
+    } catch { /* skip invalid */ }
+  })
+  return dist
+}
+
 // ── Transition variants ────────────────────────────────────────────────────
 
 const slideVariants = {
@@ -154,21 +239,49 @@ export default function Present() {
   const locationState  = (location.state as any) ?? {}
   const stateSlides: AnySlide[] | undefined = locationState.slides
   const stateDeckTitle: string | undefined  = locationState.deckTitle
+  const stateDeckId: string | undefined     = locationState.deckId
   const isRealSession = !!stateSlides
   const deck          = stateSlides ?? DEMO_DECK
+  // Honour the slide selected in the editor when session starts
+  const startSlide: number = Math.min(locationState.startSlide ?? 0, (stateSlides ?? DEMO_DECK).length - 1)
 
-  const [current,   setCurrent]   = useState(0)
+  const [current,   setCurrent]   = useState(startSlide)
   const [direction, setDirection] = useState(1)
   const [transType, setTransType] = useState<'slide' | 'phase'>('slide')
   const [phase,     setPhase]     = useState<SlidePhase>('question')
   const [responses,       setResponses]       = useState<FirestoreResponse[]>([])
+  const [viewerCount,     setViewerCount]     = useState(0)
   const [showExitConfirm, setShowExitConfirm] = useState(false)
   const [showQRModal,     setShowQRModal]     = useState(false)
+  const [showHUD,         setShowHUD]         = useState(true)
+  // Results capture — track peak viewer count + session start time so we
+  // can build a complete DeckResults snapshot when the presenter ends
+  // the session and hands it back to the editor for save.
+  const peakViewerRef     = useRef(0)
+  const sessionStartedAt  = useRef<number>(Date.now())
+
+  // ── Question timer ─────────────────────────────────────────────────────
+  const [timerEndsAt,   setTimerEndsAt]   = useState<number | null>(null)
+  const [timerDuration, setTimerDuration] = useState<number | null>(null)
+  const [showTimerMenu, setShowTimerMenu] = useState(false)
+  // Refs so callbacks always read current values without stale closures.
+  // isQuestion/code are not yet computed at this point — initialised with dummies,
+  // then kept in sync via useEffects further down (after those values are computed).
+  const phaseRef          = useRef(phase)
+  const isQuestionRef     = useRef(false)           // dummy init — synced below
+  const isRealSessionRef  = useRef(isRealSession)
+  const codeRef           = useRef('')              // dummy init — synced below
 
   const slide      = deck[current] as AnySlide
-  const isQuestion = slide.type !== 'pdf'
+  const isQuestion = slide.type !== 'pdf' && slide.type !== 'image' && slide.type !== 'video' && slide.type !== 'content' && slide.type !== 'canvas' && slide.type !== 'html'
   const code       = (sessionId ?? 'DEMO').slice(0, 6).toUpperCase()
   const joinUrl    = `${window.location.origin}/join?code=${code}`
+
+  // Keep timer refs in sync (these must come after isQuestion / code are computed)
+  useEffect(() => { phaseRef.current = phase },               [phase])
+  useEffect(() => { isQuestionRef.current = isQuestion },     [isQuestion])
+  useEffect(() => { isRealSessionRef.current = isRealSession }, [isRealSession])
+  useEffect(() => { codeRef.current = code },                 [code])
 
   // ── Sync presenter state to Firestore so audience knows current slide ──
   useEffect(() => {
@@ -176,9 +289,21 @@ export default function Present() {
     updateSessionState(code, current, phase).catch(console.error)
   }, [isRealSession, code, current, phase])
 
+  // ── Subscribe to live viewer count ────────────────────────────────────
+  // Skip only for the hard-coded DEMO fallback, always subscribe for real sessions.
+  // Also track the PEAK viewer count for the participation % calculation
+  // on the Results page.
+  useEffect(() => {
+    if (code === 'DEMO') return
+    return subscribeToViewerCount(code, n => {
+      setViewerCount(n)
+      if (n > peakViewerRef.current) peakViewerRef.current = n
+    })
+  }, [code])
+
   // ── Subscribe to live responses for the current question slide ─────────
   useEffect(() => {
-    if (!isRealSession || !slide || slide.type === 'pdf') {
+    if (!isRealSession || !slide || !isQuestion) {
       setResponses([])
       return
     }
@@ -188,32 +313,74 @@ export default function Present() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRealSession, code, current]) // re-subscribe each time slide changes
 
+  // ── Timer helpers (defined before goNext/goPrev so they can reference stopTimer) ──
+
+  // Stop the running timer locally (and optionally in Firestore).
+  // The interval lives inside TimerCount — we just clear the state.
+  const stopTimer = useCallback((syncFirestore = true) => {
+    setTimerEndsAt(null)
+    setTimerDuration(null)
+    if (syncFirestore && isRealSessionRef.current) {
+      clearTimer(codeRef.current).catch(console.error)
+    }
+  }, [])
+
+  // Called by TimerCount when the countdown hits zero
+  const handleTimerExpire = useCallback(() => {
+    setTimerEndsAt(null)
+    setTimerDuration(null)
+    if (isRealSessionRef.current) clearTimer(codeRef.current).catch(console.error)
+    // Auto-reveal results if still collecting responses
+    if (isQuestionRef.current && phaseRef.current === 'question') {
+      setTransType('phase')
+      setDirection(1)
+      setPhase('results')
+    }
+  }, [])
+
+  // Start a countdown for `seconds` — the interval runs inside TimerCount
+  const handleStartTimer = useCallback((seconds: number) => {
+    const endsAt = Date.now() + seconds * 1000
+    setTimerEndsAt(endsAt)
+    setTimerDuration(seconds)
+    setShowTimerMenu(false)
+    if (isRealSessionRef.current) startTimer(codeRef.current, seconds).catch(console.error)
+  }, [])
+
   // ── Navigation ────────────────────────────────────────────────────────
   const goNext = useCallback(() => {
     if (isQuestion && phase === 'question') {
+      // Reveal results — keep timer running so it stays visible on results page
       setTransType('phase'); setDirection(1); setPhase('results')
       return
     }
+    // Navigating to a different slide — stop any running timer
+    stopTimer()
     if (current >= deck.length - 1) return
     setTransType('slide'); setDirection(1); setPhase('question')
     setCurrent(prev => prev + 1)
-  }, [isQuestion, phase, current, deck.length])
+  }, [isQuestion, phase, current, deck.length, stopTimer])
 
   const goPrev = useCallback(() => {
     if (isQuestion && phase === 'results') {
+      // Go back to collection — stop timer (will be reset if needed)
+      stopTimer()
       setTransType('phase'); setDirection(-1); setPhase('question')
       return
     }
+    // Navigating to a different slide — stop any running timer
+    stopTimer()
     if (current <= 0) return
     setTransType('slide'); setDirection(-1); setPhase('question')
     setCurrent(prev => prev - 1)
-  }, [isQuestion, phase, current])
+  }, [isQuestion, phase, current, stopTimer])
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') { e.preventDefault(); goNext() }
       else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp')                { e.preventDefault(); goPrev() }
       else if (e.key === 'Escape')                                           { setShowExitConfirm(true) }
+      else if (e.key === 'i' || e.key === 'I')                               { setShowHUD(h => !h) }
     }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
@@ -226,13 +393,45 @@ export default function Present() {
   // ── Compute aggregated results (real or demo fallback) ─────────────────
   const qSlide     = isQuestion ? (slide as QSlide) : null
   const optCount   = qSlide?.options.length ?? 0
-  const mcqVotes   = isRealSession ? aggregateMCQ(responses, optCount)    : DEMO_MCQ_VOTES
-  const cloudWords = isRealSession ? aggregateCloud(responses)             : DEMO_CLOUD_WORDS
-  const openAns    = isRealSession ? aggregateOpen(responses)              : DEMO_OPEN_ANSWERS
-  const ratingAvgs = isRealSession ? aggregateRating(responses, optCount) : DEMO_RATING_AVGS
+  const mcqVotes   = isRealSession ? aggregateMCQ(responses, optCount)                   : DEMO_MCQ_VOTES
+  const cloudWords = isRealSession ? aggregateCloud(responses)                            : DEMO_CLOUD_WORDS
+  const openAns    = isRealSession ? aggregateOpen(responses)                             : DEMO_OPEN_ANSWERS
+  const ratingMax  = (qSlide?.ratingMax === 10 ? 10 : 5)
+  const ratingAvgs = isRealSession ? aggregateRating(responses, optCount)                            : DEMO_RATING_AVGS
+  const ratingDist = isRealSession ? aggregateRatingDistribution(responses, optCount, ratingMax)     : DEMO_RATING_DIST
+
+  // ── Persistent HTML iframe groups ─────────────────────────────────────
+  // Each unique HTML source file (split or whole) gets its own iframe that
+  // stays alive across Pulse slide changes. Navigation within an iframe is
+  // a single postMessage — no remount, no re-catchup.
+  const htmlGroupMap = useMemo(() => {
+    const map = new Map<string, HtmlSlide>()
+    for (const s of deck) {
+      if (s.type === 'html' && (s as HtmlSlide).html) {
+        const hs  = s as HtmlSlide
+        const key = `${hs.fileName}::${hs.slideTotal ?? 0}`
+        if (!map.has(key)) map.set(key, hs)
+      }
+    }
+    return map
+  }, [deck])
+
+  const currentHtmlGroupKey = slide.type === 'html'
+    ? `${(slide as HtmlSlide).fileName}::${(slide as HtmlSlide).slideTotal ?? 0}`
+    : null
+
+  // Lazy-mount: only spin up iframes for HTML groups that have been visited
+  const [mountedHtmlGroups, setMountedHtmlGroups] = useState<Set<string>>(
+    () => currentHtmlGroupKey ? new Set([currentHtmlGroupKey]) : new Set(),
+  )
+  useEffect(() => {
+    if (currentHtmlGroupKey && !mountedHtmlGroups.has(currentHtmlGroupKey)) {
+      setMountedHtmlGroups(prev => new Set([...prev, currentHtmlGroupKey]))
+    }
+  }, [currentHtmlGroupKey, mountedHtmlGroups])
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-midnight-sky-900 text-white">
+    <div className="relative h-screen overflow-hidden bg-midnight-sky-900 text-white">
 
       {/* Gradient orbs */}
       <div aria-hidden className="pointer-events-none fixed inset-0 z-0">
@@ -240,180 +439,278 @@ export default function Present() {
         <div className="absolute -right-40 -top-40 size-[500px] rounded-full bg-sky-blue/10 blur-[110px]" />
       </div>
 
-      {/* ── Top bar ─────────────────────────────────────────────────── */}
-      <header className="relative z-10 flex h-12 shrink-0 items-center justify-between border-b border-white/10 px-6 backdrop-blur-sm">
-
-        {/* Logo + session code */}
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-semibold text-white">
-            alaya <span className="text-hot-pink">pulse</span>
-          </span>
-          <span className="h-3.5 w-px bg-white/20" />
-          <div className="flex items-center gap-1.5">
-            <Wifi className="size-3 text-white/30" />
-            <span className="font-mono text-xs font-bold tracking-widest text-white/70">{code}</span>
-          </div>
-        </div>
-
-        {/* Slide counter + nav */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={goPrev} disabled={!canGoPrev}
-            className="rounded-lg p-1.5 text-white/50 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-25"
-          >
-            <ChevronLeft className="size-4" />
-          </button>
-          <span className="min-w-[72px] text-center text-xs font-medium text-white/50">
-            <span className="text-white/80">{current + 1}</span>{' / '}{deck.length}
-          </span>
-          <button
-            onClick={goNext} disabled={!canGoNext}
-            className="rounded-lg p-1.5 text-white/50 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-25"
-          >
-            <ChevronRight className="size-4" />
-          </button>
-        </div>
-
-        {/* Response count + exit */}
-        <div className="flex items-center gap-3">
-          {isQuestion && (
-            <div className="flex items-center gap-1.5 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs">
-              <motion.span
-                key={responseCount}
-                animate={{ scale: [1, 1.25, 1] }}
-                transition={{ duration: 0.2 }}
-                className="tabular-nums font-semibold text-white/80"
-              >
-                {responseCount}
-              </motion.span>
-              <span className="text-white/40">responses</span>
-            </div>
-          )}
-          <button
-            onClick={() => setShowExitConfirm(true)}
-            className="rounded-lg p-1.5 text-white/40 transition hover:bg-white/10 hover:text-white"
-            title="Exit (Esc)"
-          >
-            <X className="size-4" />
-          </button>
-        </div>
-      </header>
-
-      {/* ── Slide area ──────────────────────────────────────────────── */}
-      <div className="relative z-10 flex flex-1 overflow-hidden">
-        <div className="relative flex flex-1 items-center justify-center overflow-hidden">
-          <AnimatePresence custom={{ dir: direction, type: transType }} mode="wait">
-            <motion.div
-              key={`${current}-${phase}`}
-              custom={{ dir: direction, type: transType }}
-              variants={slideVariants}
-              initial="enter"
-              animate="center"
-              exit="exit"
-              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-              className="flex h-full w-full items-center justify-center px-16 py-8"
-            >
-              <SlideContent
-                slide={slide}
-                phase={phase}
-                responseCount={responseCount}
-                mcqVotes={mcqVotes}
-                cloudWords={cloudWords}
-                openAnswers={openAns}
-                ratingAvgs={ratingAvgs}
-                onReveal={() => { setTransType('phase'); setDirection(1); setPhase('results') }}
-              />
-            </motion.div>
-          </AnimatePresence>
-
-          {/* Left nav hover zone */}
-          {canGoPrev && (
-            <button
-              onClick={goPrev}
-              className="absolute left-0 top-0 flex h-full w-24 items-center justify-start pl-5 opacity-0 transition-opacity hover:opacity-100"
-            >
-              <div className="rounded-full bg-white/10 p-3 backdrop-blur-sm transition hover:bg-white/20">
-                <ChevronLeft className="size-6 text-white" />
-              </div>
-            </button>
-          )}
-
-          {/* Right nav hover zone */}
-          {canGoNext && (
-            <button
-              onClick={goNext}
-              className="absolute right-0 top-0 flex h-full w-24 items-center justify-end pr-5 opacity-0 transition-opacity hover:opacity-100"
-            >
-              <div className="rounded-full bg-white/10 p-3 backdrop-blur-sm transition hover:bg-white/20">
-                <ChevronRight className="size-6 text-white" />
-              </div>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* ── Bottom bar — always-visible join strip ───────────────────── */}
-      <footer className="relative z-10 flex h-[68px] shrink-0 items-center gap-5 border-t border-white/10 px-6">
-
-        {/* QR code — tap to enlarge */}
-        <button
-          onClick={() => setShowQRModal(true)}
-          className="shrink-0 rounded-xl bg-white p-1.5 shadow-lg transition hover:scale-105 hover:shadow-xl"
-          title="Click to enlarge"
-        >
-          <QRCodeSVG
-            value={joinUrl}
-            size={46}
-            bgColor="#ffffff"
-            fgColor="#000079"
-            level="M"
+      {/* ── Persistent HTML iframe layer ──────────────────────────────────
+          Lives outside the slide carousel so navigating between internal
+          slides of the same HTML deck is a single postMessage (no remount).
+          interactive=true for UNSPLIT HTML decks so the presenter can use
+          the HTML's own nav buttons; interactive=false for SPLIT decks
+          where Pulse owns navigation between internal slides. */}
+      {Array.from(htmlGroupMap.entries()).map(([key, htmlSlide]) => {
+        if (!mountedHtmlGroups.has(key)) return null
+        const isCurrent = currentHtmlGroupKey === key
+        const targetIdx = isCurrent ? ((slide as HtmlSlide).slideIndex ?? 0) : null
+        const isSplit   = (htmlSlide.slideTotal ?? 0) >= 2
+        return (
+          <PersistentHtmlIframe
+            key={key}
+            html={htmlSlide.html ?? ''}
+            fileName={htmlSlide.fileName}
+            visible={isCurrent}
+            targetIndex={targetIdx}
+            interactive={!isSplit}
           />
-        </button>
+        )
+      })}
 
-        {/* Join text */}
-        <div className="flex flex-col leading-tight">
-          <span className="text-[10px] font-medium uppercase tracking-wider text-white/40">Join at</span>
-          <span className="text-sm font-medium text-white/80">
-            {window.location.host}/join?code={code}
-          </span>
-        </div>
+      {/* ── Full-screen slide ──────────────────────────────────────────── */}
+      <div className="absolute inset-0 z-10">
+        <AnimatePresence custom={{ dir: direction, type: transType }} mode="wait">
+          <motion.div
+            key={`${current}-${phase}`}
+            custom={{ dir: direction, type: transType }}
+            variants={slideVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+            className="h-full w-full"
+          >
+            <SlideContent
+              slide={slide}
+              phase={phase}
+              responseCount={responseCount}
+              mcqVotes={mcqVotes}
+              cloudWords={cloudWords}
+              openAnswers={openAns}
+              ratingAvgs={ratingAvgs}
+              ratingDist={ratingDist}
+              onReveal={() => { setTransType('phase'); setDirection(1); setPhase('results') }}
+            />
+          </motion.div>
+        </AnimatePresence>
 
-        <div className="h-8 w-px shrink-0 bg-white/15" />
-
-        {/* Session code */}
-        <div className="flex flex-col leading-tight">
-          <span className="text-[10px] font-medium uppercase tracking-wider text-white/40">Code</span>
-          <span className="font-mono text-2xl font-bold tracking-[0.18em] text-white">{code}</span>
-        </div>
-
-        <div className="flex-1" />
-
-        {/* Live response count */}
-        {isQuestion && (
-          <div className="flex items-center gap-1.5 text-sm text-white/50">
-            <BarChart2 className="size-4" />
-            <motion.span
-              key={responseCount}
-              animate={{ scale: [1, 1.2, 1] }}
-              transition={{ duration: 0.2 }}
-              className="tabular-nums font-semibold text-white/70"
-            >
-              {responseCount}
-            </motion.span>
-            <span>responses</span>
-          </div>
+        {/* Left nav hover zone */}
+        {canGoPrev && (
+          <button
+            onClick={goPrev}
+            className="absolute left-0 top-0 z-20 flex h-full w-20 items-center justify-start pl-4 opacity-0 transition-opacity hover:opacity-100"
+          >
+            <div className="rounded-full bg-black/30 p-3 backdrop-blur-sm transition hover:bg-black/50">
+              <ChevronLeft className="size-6 text-white" />
+            </div>
+          </button>
         )}
 
-        {/* Keyboard hints */}
-        <div className="hidden items-center gap-1 text-[10px] text-white/25 lg:flex">
-          <kbd className="rounded border border-white/20 px-1.5 py-0.5">←</kbd>
-          <kbd className="rounded border border-white/20 px-1.5 py-0.5">→</kbd>
-          <span className="ml-1">navigate</span>
-          <span className="mx-2 text-white/15">·</span>
-          <kbd className="rounded border border-white/20 px-1.5 py-0.5">Esc</kbd>
-          <span className="ml-1">exit</span>
-        </div>
-      </footer>
+        {/* Right nav hover zone */}
+        {canGoNext && (
+          <button
+            onClick={goNext}
+            className="absolute right-0 top-0 z-20 flex h-full w-20 items-center justify-end pr-4 opacity-0 transition-opacity hover:opacity-100"
+          >
+            <div className="rounded-full bg-black/30 p-3 backdrop-blur-sm transition hover:bg-black/50">
+              <ChevronRight className="size-6 text-white" />
+            </div>
+          </button>
+        )}
+
+        {/* Timer overlay — self-contained so only it re-renders on each tick */}
+        {timerEndsAt && timerDuration && isQuestion && (
+          <TimerCount
+            timerEndsAt={timerEndsAt}
+            timerDuration={timerDuration}
+            slideTheme={(slide as QSlide).theme}
+            onExpire={handleTimerExpire}
+          />
+        )}
+      </div>
+
+      {/* ── HUD — floating info overlay at bottom ───────────────────── */}
+      <AnimatePresence>
+        {showHUD ? (
+          <motion.div
+            key="hud"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+            transition={{ duration: 0.2 }}
+            className="absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/70 to-transparent pb-3 pt-10"
+          >
+            <div className="flex items-center gap-3 px-4">
+
+              {/* QR thumbnail — tap to enlarge */}
+              <button
+                onClick={() => setShowQRModal(true)}
+                className="shrink-0 rounded-md bg-white p-1 shadow-lg transition hover:scale-105"
+                title="Click to enlarge QR code"
+              >
+                <QRCodeSVG value={joinUrl} size={32} bgColor="#ffffff" fgColor="#000079" level="M" />
+              </button>
+
+              {/* Brand + join URL */}
+              <div className="flex flex-col gap-0.5 leading-none">
+                <span className="text-[10px] font-bold tracking-tight text-white">
+                  alaya <span className="text-hot-pink">pulse</span>
+                </span>
+                <span className="text-[9px] font-medium text-white/38">
+                  {window.location.host}/join
+                </span>
+              </div>
+
+              <div className="h-5 w-px shrink-0 bg-white/15" />
+
+              {/* Session code */}
+              <span className="font-mono text-lg font-bold tracking-[0.18em] text-white">{code}</span>
+
+              <div className="flex-1" />
+
+              {/* Audience count */}
+              <div className="flex items-center gap-1.5 text-xs text-white/50">
+                <motion.span
+                  key={viewerCount}
+                  animate={viewerCount > 0 ? { scale: [1, 1.15, 1] } : {}}
+                  transition={{ duration: 0.2 }}
+                  className="tabular-nums font-semibold text-white/70"
+                >
+                  {viewerCount}
+                </motion.span>
+                <span>audience</span>
+              </div>
+
+              {/* Live response count */}
+              {isQuestion && (
+                <>
+                  <div className="h-3.5 w-px shrink-0 bg-white/15" />
+                  <div className="flex items-center gap-1.5 text-xs text-white/50">
+                    <BarChart2 className="size-3.5" />
+                    <motion.span
+                      key={responseCount}
+                      animate={{ scale: [1, 1.2, 1] }}
+                      transition={{ duration: 0.2 }}
+                      className="tabular-nums font-semibold text-white/70"
+                    >
+                      {responseCount}
+                    </motion.span>
+                    <span>responses</span>
+                  </div>
+                </>
+              )}
+
+              {/* Timer controls — shown when on a question slide */}
+              {isQuestion && (
+                <>
+                  <div className="h-5 w-px shrink-0 bg-white/15" />
+                  {timerEndsAt ? (
+                    /* Timer running: live countdown (self-contained) + stop button */
+                    <div className="flex items-center gap-1.5">
+                      <HudTimerCount timerEndsAt={timerEndsAt} />
+                      <button
+                        onClick={() => stopTimer()}
+                        className="rounded-lg p-1 text-white/35 transition hover:bg-white/10 hover:text-white"
+                        title="Stop timer"
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </div>
+                  ) : phase === 'question' ? (
+                    /* No timer, still collecting: show clock button with preset dropdown */
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowTimerMenu(v => !v)}
+                        className={cn(
+                          'rounded-lg p-1.5 transition hover:bg-white/10',
+                          showTimerMenu ? 'text-white' : 'text-white/40 hover:text-white',
+                        )}
+                        title="Set question timer"
+                      >
+                        <Clock className="size-4" />
+                      </button>
+                      <AnimatePresence>
+                        {showTimerMenu && (
+                          <motion.div
+                            initial={{ opacity: 0, scale: 0.92, y: 4 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.92, y: 4 }}
+                            transition={{ duration: 0.15 }}
+                            className="absolute bottom-full right-0 mb-2 flex flex-col gap-0.5 overflow-hidden rounded-xl border border-white/15 bg-midnight-sky-800 p-1.5 shadow-xl"
+                          >
+                            <p className="px-3 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-white/35">
+                              Timer
+                            </p>
+                            {[15, 30, 60, 90].map(s => (
+                              <button
+                                key={s}
+                                onClick={() => handleStartTimer(s)}
+                                className="rounded-lg px-4 py-1.5 text-left text-sm font-medium text-white/70 transition hover:bg-white/10 hover:text-white"
+                              >
+                                {s}s
+                              </button>
+                            ))}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  ) : null}
+                </>
+              )}
+
+              <div className="h-5 w-px shrink-0 bg-white/15" />
+
+              {/* Slide nav + counter */}
+              <div className="flex items-center gap-0.5">
+                <button
+                  onClick={goPrev} disabled={!canGoPrev}
+                  className="rounded-lg p-1.5 text-white/50 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-20"
+                >
+                  <ChevronLeft className="size-4" />
+                </button>
+                <span className="min-w-[44px] text-center text-xs font-medium text-white/50">
+                  <span className="text-white/80">{current + 1}</span>{'/'}{deck.length}
+                </span>
+                <button
+                  onClick={goNext} disabled={!canGoNext}
+                  className="rounded-lg p-1.5 text-white/50 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-20"
+                >
+                  <ChevronRight className="size-4" />
+                </button>
+              </div>
+
+              <div className="h-5 w-px shrink-0 bg-white/15" />
+
+              {/* Exit */}
+              <button
+                onClick={() => setShowExitConfirm(true)}
+                className="rounded-lg p-1.5 text-white/40 transition hover:bg-white/10 hover:text-white"
+                title="Exit (Esc)"
+              >
+                <X className="size-4" />
+              </button>
+
+              {/* Hide HUD */}
+              <button
+                onClick={() => setShowHUD(false)}
+                className="rounded-lg p-1.5 text-white/25 transition hover:text-white/60"
+                title="Hide info bar (press I)"
+              >
+                <ChevronDown className="size-3.5" />
+              </button>
+            </div>
+          </motion.div>
+        ) : (
+          /* Minimal restore tab when HUD is hidden */
+          <motion.button
+            key="hud-hidden"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowHUD(true)}
+            title="Show info bar (press I)"
+            className="absolute bottom-2 right-3 z-30 flex items-center gap-1.5 rounded-full bg-black/40 px-2.5 py-1 text-[10px] font-medium text-white/40 backdrop-blur-sm transition hover:text-white/80"
+          >
+            <ChevronUp className="size-3" />
+            <span className="font-mono tracking-widest">{code}</span>
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       {/* ── QR code enlarged modal ──────────────────────────────────── */}
       <AnimatePresence>
@@ -481,8 +778,7 @@ export default function Present() {
             >
               <h3 className="text-xl font-semibold text-white">End this session?</h3>
               <p className="mt-2 text-sm font-light text-white/50">
-                Audience members will lose their connection.<br />
-                To resume, keep the same tab open instead.
+                If you end the session, you can resume it anytime — just click the Resume button on the Create page. Your audience won't need to re-enter the room code.
               </p>
               <div className="mt-7 flex gap-3">
                 <button
@@ -492,10 +788,31 @@ export default function Present() {
                   Keep presenting
                 </button>
                 <button
-                  onClick={() => {
-                    // Mark session ended so audience sees "That's a wrap" instead of the open question
-                    if (isRealSession) endSession(code).catch(console.error)
-                    navigate('/create', { state: { slides: stateSlides, deckTitle: stateDeckTitle, sessionCode: isRealSession ? code : undefined } })
+                  onClick={async () => {
+                    // Snapshot results from this session so the editor can
+                    // save them with the deck for later analysis.
+                    let lastResults: DeckResults | undefined
+                    if (isRealSession) {
+                      try {
+                        const all = await fetchAllSessionResponses(code)
+                        lastResults = buildResultsSnapshot(
+                          deck, all, code,
+                          sessionStartedAt.current,
+                          peakViewerRef.current,
+                        )
+                      } catch (e) {
+                        console.error('Failed to capture session results:', e)
+                      }
+                      endSession(code).catch(console.error)
+                    }
+                    navigate('/create', { state: {
+                      slides: stateSlides,
+                      deckTitle: stateDeckTitle,
+                      sessionCode: isRealSession ? code : undefined,
+                      deckId: stateDeckId,
+                      lastResults,
+                      selectedSlideId: deck[current]?.id,
+                    } })
                   }}
                   className="flex-1 rounded-xl bg-hot-pink py-3 text-sm font-medium text-white shadow-[0_0_20px_-4px] shadow-hot-pink/50 transition hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/70"
                 >
@@ -516,19 +833,25 @@ export default function Present() {
 
 function SlideContent({
   slide, phase, responseCount,
-  mcqVotes, cloudWords, openAnswers, ratingAvgs,
+  mcqVotes, cloudWords, openAnswers, ratingAvgs, ratingDist,
   onReveal,
 }: {
-  slide:         AnySlide
-  phase:         SlidePhase
-  responseCount: number
-  mcqVotes:      number[]
-  cloudWords:    { text: string; count: number }[]
-  openAnswers:   { name: string; text: string }[]
-  ratingAvgs:    number[]
-  onReveal:      () => void
+  slide:          AnySlide
+  phase:          SlidePhase
+  responseCount:  number
+  mcqVotes:       number[]
+  cloudWords:     { text: string; count: number }[]
+  openAnswers:    { name: string; text: string }[]
+  ratingAvgs:     number[]
+  ratingDist:     number[][]
+  onReveal:       () => void
 }) {
-  if (slide.type === 'pdf') return <PdfSlideView slide={slide} />
+  if (slide.type === 'pdf')     return <PdfSlideView slide={slide} />
+  if (slide.type === 'image')   return <ImageSlideView slide={slide} />
+  if (slide.type === 'video')   return <VideoSlideView slide={slide} />
+  if (slide.type === 'html')    return null   // rendered by PersistentHtmlIframe layer
+  if (slide.type === 'content') return <ContentSlideView slide={slide as ContentSlide} />
+  if (slide.type === 'canvas')  return <CanvasSlideView slide={slide as CanvasSlide} />
   if (phase === 'results')  return (
     <ResultsSlideView
       slide={slide}
@@ -536,9 +859,16 @@ function SlideContent({
       cloudWords={cloudWords}
       openAnswers={openAnswers}
       ratingAvgs={ratingAvgs}
+      ratingDist={ratingDist}
     />
   )
-  return <QuestionSlideView slide={slide} responseCount={responseCount} onReveal={onReveal} />
+  return (
+    <QuestionSlideView
+      slide={slide}
+      responseCount={responseCount}
+      onReveal={onReveal}
+    />
+  )
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -548,23 +878,24 @@ function SlideContent({
 function PdfSlideView({ slide }: { slide: PdfSlide }) {
   if (slide.imgUrl) {
     return (
-      <div className="relative flex aspect-video w-full max-w-5xl overflow-hidden rounded-3xl border border-white/10 bg-midnight-sky-800 shadow-[0_32px_100px_-16px_rgba(0,0,121,0.5)]">
-        <img
-          src={slide.imgUrl}
-          alt={`Slide ${slide.pageNum ?? ''}`}
-          className="h-full w-full object-contain"
-        />
+      <div className="absolute inset-0 overflow-hidden bg-midnight-sky-900">
+        {/* Blurred fill for letterbox areas */}
+        <img src={slide.imgUrl} alt="" aria-hidden
+          className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-25" />
+        {/* Sharp main image */}
+        <img src={slide.imgUrl} alt={`Slide ${slide.pageNum ?? ''}`}
+          className="absolute inset-0 h-full w-full object-contain" />
       </div>
     )
   }
 
   // Demo / fallback title card
   return (
-    <div className="relative flex aspect-video w-full max-w-5xl items-center justify-center overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-midnight-sky-800 to-midnight-sky-900 shadow-[0_32px_100px_-16px_rgba(0,0,121,0.5)]">
+    <div className="absolute inset-0 flex items-center justify-center overflow-hidden bg-gradient-to-br from-midnight-sky-800 to-midnight-sky-900">
       <div className="absolute inset-0 flex items-center justify-center">
-        <div className="size-96 rounded-full bg-hot-pink/8 blur-[100px]" />
+        <div className="size-[600px] rounded-full bg-hot-pink/8 blur-[120px]" />
       </div>
-      <div className="relative z-10 px-14 text-center">
+      <div className="relative z-10 px-20 text-center">
         <h1 className="text-5xl font-semibold leading-tight tracking-tight text-white lg:text-6xl xl:text-7xl">
           {slide.title}
         </h1>
@@ -572,6 +903,374 @@ function PdfSlideView({ slide }: { slide: PdfSlide }) {
           <p className="mt-5 text-xl font-light text-white/45 lg:text-2xl">{slide.subtitle}</p>
         )}
       </div>
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Image slide — full-screen image with cinematic blur fill
+   ───────────────────────────────────────────────────────────────────────── */
+
+function ImageSlideView({ slide }: { slide: ImageSlide }) {
+  return (
+    <div className="absolute inset-0 overflow-hidden bg-midnight-sky-900">
+      <img src={slide.imgUrl} alt="" aria-hidden
+        className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-25" />
+      <img src={slide.imgUrl} alt={slide.fileName}
+        className="absolute inset-0 h-full w-full object-contain" />
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Video slide — auto-plays in slideshow mode
+   ───────────────────────────────────────────────────────────────────────── */
+
+function VideoSlideView({ slide }: { slide: VideoSlide }) {
+  if (!slide.videoUrl) {
+    return (
+      <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-midnight-sky-900">
+        <p className="text-base font-semibold text-white/50">{slide.fileName}</p>
+        <p className="text-sm font-light text-white/30">Video not available — re-import to restore</p>
+      </div>
+    )
+  }
+  return (
+    <div className="absolute inset-0 bg-black">
+      <video src={slide.videoUrl} controls autoPlay className="h-full w-full object-contain" />
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   HTML slide — imported .html file rendered in a sandboxed iframe.
+   Sandbox is empty (= maximum restrictions): no scripts, no forms, no nav.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* PersistentHtmlIframe and injectPersistentHtmlNavScript are now shared in
+   src/components/PersistentHtmlIframe.tsx so the Create editor can use the
+   same persistent iframe pattern (no rebuild when switching split slides). */
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Content slide — heading / bullets / quote templates
+   ───────────────────────────────────────────────────────────────────────── */
+
+type ThemeKey = 'navy' | 'pink' | 'sky' | 'green' | 'golden' | 'white'
+const CONTENT_COLORS: Record<ThemeKey, {
+  bg: string; text: string; textDim: string; accent: string; quoteMark: string
+}> = {
+  navy:   { bg: '#000079', text: '#ffffff',           textDim: 'rgba(255,255,255,0.58)', accent: '#ff0065', quoteMark: 'rgba(255,0,101,0.18)' },
+  pink:   { bg: '#ff0065', text: '#ffffff',           textDim: 'rgba(255,255,255,0.72)', accent: '#ffffff', quoteMark: 'rgba(255,255,255,0.18)' },
+  sky:    { bg: '#00b0ff', text: '#000079',           textDim: 'rgba(0,0,121,0.62)',     accent: '#000079', quoteMark: 'rgba(0,0,121,0.14)' },
+  green:  { bg: '#42db66', text: '#000079',           textDim: 'rgba(0,0,121,0.62)',     accent: '#000079', quoteMark: 'rgba(0,0,121,0.14)' },
+  golden: { bg: '#ffc709', text: '#000079',           textDim: 'rgba(0,0,121,0.62)',     accent: '#000079', quoteMark: 'rgba(0,0,121,0.14)' },
+  white:  { bg: '#f4f4f9', text: '#000079',           textDim: 'rgba(0,0,121,0.52)',     accent: '#ff0065', quoteMark: 'rgba(255,0,101,0.1)'  },
+}
+function contentColors(theme: string) { return CONTENT_COLORS[theme as ThemeKey] ?? CONTENT_COLORS.navy }
+
+/* Question-slide theme colours — same palette as content slides */
+type QColorSet = {
+  bg:         string
+  fg:         string
+  fgDim:      string
+  fgFaint:    string
+  cardBorder: string
+  cardBg:     string
+  isDark:     boolean
+}
+const QSLIDE_COLORS: Record<string, QColorSet> = {
+  navy:   { bg: '#000079', fg: '#ffffff', fgDim: 'rgba(255,255,255,0.60)', fgFaint: 'rgba(255,255,255,0.25)', cardBorder: 'rgba(255,255,255,0.10)', cardBg: 'rgba(255,255,255,0.05)', isDark: true  },
+  pink:   { bg: '#ff0065', fg: '#ffffff', fgDim: 'rgba(255,255,255,0.72)', fgFaint: 'rgba(255,255,255,0.30)', cardBorder: 'rgba(255,255,255,0.15)', cardBg: 'rgba(255,255,255,0.08)', isDark: true  },
+  sky:    { bg: '#00b0ff', fg: '#000079', fgDim: 'rgba(0,0,121,0.65)',     fgFaint: 'rgba(0,0,121,0.30)',     cardBorder: 'rgba(0,0,121,0.12)',      cardBg: 'rgba(0,0,121,0.06)',    isDark: false },
+  green:  { bg: '#42db66', fg: '#000079', fgDim: 'rgba(0,0,121,0.65)',     fgFaint: 'rgba(0,0,121,0.30)',     cardBorder: 'rgba(0,0,121,0.12)',      cardBg: 'rgba(0,0,121,0.06)',    isDark: false },
+  golden: { bg: '#ffc709', fg: '#000079', fgDim: 'rgba(0,0,121,0.65)',     fgFaint: 'rgba(0,0,121,0.30)',     cardBorder: 'rgba(0,0,121,0.12)',      cardBg: 'rgba(0,0,121,0.06)',    isDark: false },
+  white:  { bg: '#f4f4f9', fg: '#000079', fgDim: 'rgba(0,0,121,0.55)',     fgFaint: 'rgba(0,0,121,0.25)',     cardBorder: 'rgba(0,0,121,0.10)',      cardBg: 'rgba(0,0,121,0.04)',    isDark: false },
+}
+function qColors(theme?: string): QColorSet {
+  return QSLIDE_COLORS[theme ?? 'navy'] ?? QSLIDE_COLORS.navy
+}
+
+function ContentSlideView({ slide }: { slide: ContentSlide }) {
+  const c       = contentColors(slide.theme)
+  const bullets = slide.body.split('\n').filter(b => b.trim())
+
+  return (
+    <div
+      className="absolute inset-0 overflow-hidden"
+      style={{ backgroundColor: c.bg }}
+    >
+      {/* Soft ambient glow — navy only */}
+      {slide.theme === 'navy' && (
+        <div
+          className="pointer-events-none absolute -bottom-24 -left-24 size-[500px] rounded-full blur-[130px] opacity-25"
+          style={{ backgroundColor: '#ff0065' }}
+        />
+      )}
+
+      {/* Background layout — full-bleed image with overlay */}
+      {slide.imgUrl && slide.imgLayout === 'background' && (
+        <>
+          <img src={slide.imgUrl} alt="" className="absolute inset-0 z-0 h-full w-full object-cover" />
+          <div className="absolute inset-0 z-0" style={{ backgroundColor: `${c.bg}cc` }} />
+        </>
+      )}
+
+      {/* Side layout — image on right (absolute, fills right 40%) */}
+      {slide.imgUrl && slide.imgLayout === 'right' && (
+        <motion.img
+          src={slide.imgUrl}
+          alt=""
+          initial={{ opacity: 0, x: 30 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
+          className="absolute right-0 top-0 z-20 h-full w-[40%] object-cover"
+          style={{ borderRadius: '0 0 0 2rem' }}
+        />
+      )}
+
+      {/* Top layout — image floated top-right corner */}
+      {slide.imgUrl && (!slide.imgLayout || slide.imgLayout === 'top') && (
+        <motion.img
+          src={slide.imgUrl}
+          alt=""
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.45, delay: 0.04 }}
+          className="absolute right-10 top-10 z-20 h-44 max-w-xs rounded-2xl object-cover shadow-xl xl:h-56"
+        />
+      )}
+
+      {/* ── Heading template ─────────────────────────────── */}
+      {slide.template === 'heading' && (
+        <div className={cn(
+          'relative z-10 flex h-full w-full flex-col items-center justify-center text-center',
+          slide.imgUrl && slide.imgLayout === 'right' ? 'px-16 pr-[44%]' : 'px-16',
+        )}>
+          <h1
+            className="max-w-5xl text-5xl font-bold leading-tight tracking-tight xl:text-6xl 2xl:text-7xl"
+            style={{ color: c.text }}
+          >
+            {slide.title || <span style={{ opacity: 0.28 }}>Untitled</span>}
+          </h1>
+          {slide.body && (
+            <p className="mt-6 max-w-3xl text-2xl font-light leading-relaxed xl:text-3xl" style={{ color: c.textDim }}>
+              {slide.body}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* ── Bullets template ─────────────────────────────── */}
+      {slide.template === 'bullets' && (
+        <div className={cn(
+          'relative z-10 flex h-full w-full flex-col justify-center py-14',
+          slide.imgUrl && slide.imgLayout === 'right' ? 'px-16 pr-[44%]' : 'px-16',
+        )}>
+          {slide.title && (
+            <h2 className="mb-8 text-3xl font-bold tracking-tight xl:text-4xl" style={{ color: c.text }}>
+              {slide.title}
+            </h2>
+          )}
+          <ul className="space-y-5">
+            {bullets.length > 0
+              ? bullets.map((b, i) => (
+                  <motion.li
+                    key={i}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: i * 0.1, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+                    className="flex items-start gap-5"
+                  >
+                    <span
+                      className="mt-2.5 size-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: c.accent }}
+                    />
+                    <span
+                      className="text-xl font-medium leading-relaxed xl:text-2xl"
+                      style={{ color: c.text }}
+                    >
+                      {b}
+                    </span>
+                  </motion.li>
+                ))
+              : (
+                <p className="text-xl" style={{ color: c.textDim }}>
+                  Add bullet points in the editor…
+                </p>
+              )
+            }
+          </ul>
+        </div>
+      )}
+
+      {/* ── Quote template ────────────────────────────────── */}
+      {slide.template === 'quote' && (
+        <div className="relative z-10 flex h-full w-full flex-col items-center justify-center px-20 text-center">
+          {/* Big decorative " */}
+          <div
+            className="pointer-events-none absolute left-10 top-6 select-none font-serif text-[11rem] leading-none"
+            style={{ color: c.quoteMark }}
+            aria-hidden
+          >
+            &#8220;
+          </div>
+          {slide.title && (
+            <p
+              className="mb-6 text-xs font-bold uppercase tracking-[0.2em]"
+              style={{ color: c.accent }}
+            >
+              {slide.title}
+            </p>
+          )}
+          <blockquote
+            className="relative z-10 max-w-4xl text-3xl font-light leading-relaxed xl:text-4xl"
+            style={{ color: c.text }}
+          >
+            {slide.body || (
+              <span style={{ opacity: 0.28 }}>Quote text appears here…</span>
+            )}
+          </blockquote>
+          {slide.attribution && (
+            <p className="mt-8 text-lg tracking-wide" style={{ color: c.textDim }}>
+              &mdash;&nbsp;{slide.attribution}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Subtle branding watermark */}
+      <div className="absolute bottom-4 right-5 z-10">
+        <span
+          className="text-[11px] font-bold tracking-tight"
+          style={{ color: c.textDim, opacity: 0.45 }}
+        >
+          alaya{' '}
+          <span style={{ color: c.accent }}>pulse</span>
+        </span>
+      </div>
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Canvas slide — free-form presenter view
+   ───────────────────────────────────────────────────────────────────────── */
+
+function CanvasSlideView({ slide }: { slide: CanvasSlide }) {
+  // Defensive defaults — protect against malformed data so canvas always renders
+  const bg       = slide.bg ?? { type: 'color' as const, value: '#000079' }
+  const elements = slide.elements ?? []
+  const bgStyle: React.CSSProperties = bg.type === 'color'
+    ? { backgroundColor: bg.value }
+    : { backgroundImage: bg.value }
+
+  // Detect if bg is light so we know whether to use light or dark text for the empty hint
+  const isLightBg = bg.type === 'color' && /^#(f|e|d|c)/i.test(bg.value)
+
+  return (
+    <div className="absolute inset-0 overflow-hidden" style={bgStyle}>
+      {/* Empty canvas hint — only when slide has no elements */}
+      {elements.length === 0 && (
+        <div
+          className="absolute inset-0 flex flex-col items-center justify-center gap-3 select-none"
+          style={{ color: isLightBg ? 'rgba(0,0,121,0.35)' : 'rgba(255,255,255,0.35)' }}
+        >
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M12 2L2 7l10 5 10-5-10-5z" />
+            <path d="M2 17l10 5 10-5" />
+            <path d="M2 12l10 5 10-5" />
+          </svg>
+          <p className="text-sm font-light">Empty canvas slide</p>
+        </div>
+      )}
+
+      {elements.map(el => (
+        <div
+          key={el.id}
+          style={{
+            position: 'absolute',
+            left:    `${el.x}%`,
+            top:     `${el.y}%`,
+            width:   `${el.w}%`,
+            height:  `${el.h}%`,
+            overflow: 'hidden',
+            boxSizing: 'border-box',
+          }}
+        >
+          {el.kind === 'text' && (
+            <div
+              // eslint-disable-next-line react/no-danger
+              dangerouslySetInnerHTML={{ __html: (el as CanvasTextEl).html ?? '' }}
+              style={{
+                width: '100%', height: '100%',
+                fontSize:   `${(el as CanvasTextEl).fontSize ?? 24}px`,
+                textAlign:  (el as CanvasTextEl).align ?? 'left',
+                color:      (el as CanvasTextEl).color ?? (isLightBg ? '#000079' : '#ffffff'),
+                padding:    '6px 8px',
+                lineHeight: 1.4,
+                wordBreak:  'break-word',
+                overflow:   'hidden',
+                boxSizing:  'border-box',
+              }}
+            />
+          )}
+          {el.kind === 'image' && (
+            <img
+              src={(el as CanvasImageEl).imgUrl}
+              alt=""
+              style={{
+                width: '100%', height: '100%',
+                objectFit: (el as CanvasImageEl).objectFit ?? 'cover',
+                borderRadius: 4,
+                display: 'block',
+              }}
+            />
+          )}
+          {el.kind === 'table' && (() => {
+            // Reconstruct 2D cells if Firestore-flattened (string[]) arrives here
+            const tableEl  = el as CanvasTableEl
+            const rawCells = tableEl.cells ?? []
+            const is2D     = rawCells.length > 0 && Array.isArray(rawCells[0])
+            const cells2D: string[][] = is2D
+              ? (rawCells as unknown as string[][])
+              : (() => {
+                  const flat = rawCells as unknown as string[]
+                  const cols = tableEl.cols ?? 1
+                  const out: string[][] = []
+                  for (let i = 0; i < flat.length; i += cols) out.push(flat.slice(i, i + cols))
+                  return out
+                })()
+            return (
+              <table style={{ width: '100%', height: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                <tbody>
+                  {cells2D.map((row, ri) => (
+                    <tr key={ri}>
+                      {row.map((cell, ci) => (
+                        <td
+                          key={ci}
+                          style={{
+                            border:          '1px solid rgba(255,255,255,0.22)',
+                            padding:         '4px 8px',
+                            fontSize:        13,
+                            color:           '#ffffff',
+                            backgroundColor: tableEl.hasHeader && ri === 0 ? 'rgba(0,0,121,0.65)' : 'rgba(255,255,255,0.05)',
+                            fontWeight:      tableEl.hasHeader && ri === 0 ? 600 : 400,
+                            verticalAlign:   'middle',
+                            overflow:        'hidden',
+                            whiteSpace:      'nowrap',
+                          }}
+                        >
+                          {cell}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )
+          })()}
+        </div>
+      ))}
     </div>
   )
 }
@@ -590,76 +1289,204 @@ const QTYPE_META: Record<QType, { label: string; ring: string; bg: string; text:
 function QuestionSlideView({
   slide, responseCount, onReveal,
 }: {
-  slide:         QSlide
-  responseCount: number
-  onReveal:      () => void
+  slide:          QSlide
+  responseCount:  number
+  onReveal:       () => void
 }) {
-  const meta = QTYPE_META[slide.type]
+  const meta   = QTYPE_META[slide.type]
+  const c      = qColors(slide.theme)
+  const layout = slide.imgLayout ?? 'top'
+  const hasSideImg = !!(slide.imgUrl && layout === 'right')
+  const hasBgImg   = !!(slide.imgUrl && layout === 'background')
 
-  return (
-    <div className="flex w-full max-w-4xl flex-col items-center gap-8 text-center">
+  /* Shared MCQ options block */
+  const MCQOptions = () => slide.type === 'mcq' ? (
+    <div className={cn('mt-8 grid gap-3', hasSideImg ? 'grid-cols-1 max-w-full' : 'grid-cols-2 max-w-3xl')}>
+      {slide.options.map((opt, i) => (
+        <motion.div
+          key={i}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.12 + i * 0.07, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+          className="flex items-center gap-3 rounded-2xl px-4 py-3.5 text-left backdrop-blur-sm"
+          style={{ border: `1px solid ${c.cardBorder}`, backgroundColor: c.cardBg }}
+        >
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold" style={{ backgroundColor: c.fg, color: c.bg }}>
+            {String.fromCharCode(65 + i)}
+          </span>
+          <span className="text-sm font-medium leading-snug" style={{ color: c.fg }}>{opt}</span>
+        </motion.div>
+      ))}
+    </div>
+  ) : null
 
-      {/* Type badge */}
-      <span className={cn('rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wider', meta.ring, meta.bg, meta.text)}>
-        {meta.label}
-      </span>
-
-      {/* Question */}
-      <h1 className="text-4xl font-semibold leading-tight tracking-tight text-white md:text-5xl lg:text-[3.5rem]">
-        {slide.question}
-      </h1>
-
-      {/* MCQ — show options on the big screen */}
-      {slide.type === 'mcq' && (
-        <div className="grid w-full max-w-2xl grid-cols-2 gap-3">
-          {slide.options.map((opt, i) => (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.08, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-              className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3.5 text-left backdrop-blur-sm"
-            >
-              <span className={cn('flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold', meta.bg, meta.text)}>
-                {String.fromCharCode(65 + i)}
-              </span>
-              <span className="text-sm font-medium leading-snug text-white/80">{opt}</span>
-            </motion.div>
-          ))}
+  /* Shared Rating block */
+  const RatingParams = () => slide.type === 'rating' ? (() => {
+    const rmax   = slide.ratingMax === 10 ? 10 : 5
+    const lefts  = slide.leftLabels  ?? slide.options.map(() => slide.leftLabel  ?? '')
+    const rights = slide.rightLabels ?? slide.options.map(() => slide.rightLabel ?? '')
+    return (
+      <div className="mt-8 max-w-4xl">
+        <p className="mb-3 text-sm font-medium" style={{ color: c.fgDim }}>Rate each on a 0–{rmax} scale</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {slide.options.map((opt, i) => {
+            const left  = lefts[i]  ?? ''
+            const right = rights[i] ?? ''
+            const hasLabels = !!(left || right)
+            return (
+              <motion.div key={i} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.12 + i * 0.07, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                className="rounded-2xl px-4 py-3.5 backdrop-blur-sm"
+                style={{ border: `1px solid ${c.cardBorder}`, backgroundColor: c.cardBg }}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold" style={{ backgroundColor: c.fg, color: c.bg }}>{i + 1}</span>
+                  <span className="text-sm font-medium leading-snug" style={{ color: c.fg }}>{opt}</span>
+                </div>
+                {hasLabels && (
+                  <div className="mt-2 flex justify-between pl-9 text-[10px] font-semibold uppercase tracking-wider" style={{ color: c.fgDim }}>
+                    <span className="truncate pr-2">{left}</span>
+                    <span className="truncate pl-2 text-right">{right}</span>
+                  </div>
+                )}
+              </motion.div>
+            )
+          })}
         </div>
+      </div>
+    )
+  })() : null
+
+  /* Shared bottom bar — response count + show results */
+  const BottomBar = () => (
+    <div className="flex flex-wrap items-center gap-3">
+      {/* Response count pill */}
+      <div className="flex items-center gap-2.5 rounded-full px-5 py-2.5 backdrop-blur-sm"
+        style={{ border: `1px solid ${c.cardBorder}`, backgroundColor: c.cardBg }}
+      >
+        <span className="relative flex size-2">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-fresh-green opacity-75" />
+          <span className="relative inline-flex size-2 rounded-full bg-fresh-green" />
+        </span>
+        <span className="text-sm font-medium" style={{ color: c.fgDim }}>Collecting responses</span>
+        <motion.span key={responseCount} animate={{ scale: [1, 1.3, 1] }} transition={{ duration: 0.2 }}
+          className="tabular-nums font-bold" style={{ color: c.fg }}
+        >
+          {responseCount}
+        </motion.span>
+        <span className="text-sm" style={{ color: c.fgFaint }}>so far</span>
+      </div>
+
+      {/* Show results button */}
+      <motion.button onClick={onReveal} whileTap={{ scale: 0.97 }}
+        className="flex items-center gap-2.5 rounded-2xl bg-hot-pink px-7 py-3.5 text-sm font-semibold text-white shadow-[0_0_28px_-6px] shadow-hot-pink/60 transition-shadow hover:shadow-[0_0_36px_-4px] hover:shadow-hot-pink/80"
+      >
+        <BarChart2 className="size-4" />
+        Show results
+      </motion.button>
+    </div>
+  )
+
+  /* ── BACKGROUND layout ─────────────────────────────────────────────── */
+  if (hasBgImg) {
+    return (
+      <div className="absolute inset-0 flex flex-col overflow-hidden pb-24" style={{ backgroundColor: c.bg }}>
+        <img src={slide.imgUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
+        <div className="absolute inset-0" style={{ backgroundColor: `${c.bg}cc` }} />
+        <div className="relative z-10 flex flex-1 flex-col overflow-hidden px-14 pt-12">
+          <motion.span initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+            className="w-fit rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
+            style={{ backgroundColor: c.fg, color: c.bg }}
+          >
+            {meta.label}
+          </motion.span>
+          <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
+            className="mt-6 max-w-5xl text-4xl font-semibold leading-tight tracking-tight md:text-5xl lg:text-[3.2rem]"
+            style={{ color: c.fg }}
+          >
+            {slide.question}
+          </motion.h1>
+          <MCQOptions />
+          <RatingParams />
+          <div className="flex-1" />
+        </div>
+        <div className="relative z-10 px-14 pb-0"><BottomBar /></div>
+      </div>
+    )
+  }
+
+  /* ── SIDE (right) layout ────────────────────────────────────────────── */
+  if (hasSideImg) {
+    return (
+      <div className="absolute inset-0 flex flex-col overflow-hidden pb-24" style={{ backgroundColor: c.bg }}>
+        <div className="flex flex-1 overflow-hidden">
+          {/* Left: badge + question + options */}
+          <div className="flex flex-1 flex-col overflow-hidden px-14 pt-12">
+            <motion.span initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+              className="w-fit rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
+              style={{ backgroundColor: c.fg, color: c.bg }}
+            >
+              {meta.label}
+            </motion.span>
+            <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
+              className="mt-6 max-w-3xl text-4xl font-semibold leading-tight tracking-tight md:text-5xl lg:text-[3rem]"
+              style={{ color: c.fg }}
+            >
+              {slide.question}
+            </motion.h1>
+            <MCQOptions />
+            <RatingParams />
+          </div>
+          {/* Right: image */}
+          <motion.div
+            initial={{ opacity: 0, x: 30 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
+            className="w-[40%] shrink-0 p-8 pl-0"
+          >
+            <img src={slide.imgUrl} alt="" className="h-full w-full rounded-3xl object-cover shadow-2xl" />
+          </motion.div>
+        </div>
+        <div className="px-14"><BottomBar /></div>
+      </div>
+    )
+  }
+
+  /* ── TOP layout (default) ───────────────────────────────────────────── */
+  return (
+    <div className="absolute inset-0 flex flex-col overflow-hidden px-14 pt-12 pb-24" style={{ backgroundColor: c.bg }}>
+      <motion.span initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+        className="w-fit rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
+        style={{ backgroundColor: c.fg, color: c.bg }}
+      >
+        {meta.label}
+      </motion.span>
+
+      {slide.imgUrl && (
+        <motion.img src={slide.imgUrl} alt=""
+          initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.45, delay: 0.04 }}
+          className="mt-5 h-36 max-w-sm rounded-2xl object-cover shadow-xl xl:h-44"
+        />
       )}
 
-      {/* Collecting indicator + reveal button */}
-      <div className="flex flex-col items-center gap-4">
-        <div className="flex items-center gap-2.5 rounded-full border border-white/15 bg-white/5 px-5 py-2.5 backdrop-blur-sm">
-          <span className="relative flex size-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-fresh-green opacity-75" />
-            <span className="relative inline-flex size-2 rounded-full bg-fresh-green" />
-          </span>
-          <span className="text-sm font-medium text-white/70">Collecting responses</span>
-          <motion.span
-            key={responseCount}
-            animate={{ scale: [1, 1.3, 1] }}
-            transition={{ duration: 0.2 }}
-            className="tabular-nums font-bold text-white"
-          >
-            {responseCount}
-          </motion.span>
-          <span className="text-sm text-white/40">so far</span>
-        </div>
+      <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
+        className="mt-6 max-w-5xl text-4xl font-semibold leading-tight tracking-tight md:text-5xl lg:text-[3.2rem]"
+        style={{ color: c.fg }}
+      >
+        {slide.question}
+      </motion.h1>
 
-        <motion.button
-          onClick={onReveal}
-          whileTap={{ scale: 0.97 }}
-          className="flex items-center gap-2.5 rounded-2xl bg-hot-pink px-7 py-3.5 text-sm font-semibold text-white shadow-[0_0_28px_-6px] shadow-hot-pink/60 transition-shadow hover:shadow-[0_0_36px_-4px] hover:shadow-hot-pink/80"
-        >
-          <BarChart2 className="size-4" />
-          Show results
-          <span className="flex items-center gap-1 text-xs font-normal text-white/60">
-            or press <kbd className="rounded border border-white/30 px-1 py-0.5 font-mono text-[10px] text-white/70">Space</kbd>
-          </span>
-        </motion.button>
-      </div>
+      <MCQOptions />
+      <RatingParams />
+      <div className="flex-1" />
+      <BottomBar />
     </div>
   )
 }
@@ -669,56 +1496,103 @@ function QuestionSlideView({
    ───────────────────────────────────────────────────────────────────────── */
 
 function ResultsSlideView({
-  slide, mcqVotes, cloudWords, openAnswers, ratingAvgs,
+  slide, mcqVotes, cloudWords, openAnswers, ratingAvgs, ratingDist,
 }: {
   slide:       QSlide
   mcqVotes:    number[]
   cloudWords:  { text: string; count: number }[]
   openAnswers: { name: string; text: string }[]
   ratingAvgs:  number[]
+  ratingDist:  number[][]
 }) {
-  const meta = QTYPE_META[slide.type]
+  const c         = qColors(slide.theme)
+  const ratingMax = slide.ratingMax === 10 ? 10 : 5
+  // We always wrap viz in a dark panel unless the slide is already navy —
+  // that way bright bg colors (pink/yellow/sky/green/white) get a
+  // high-contrast dark surface so colored charts/words don't camouflage.
+  const needsDarkPanel = (slide.theme ?? 'navy') !== 'navy'
+
+  // Wrap viz in a dark panel for ANY non-navy theme — keeps colored charts
+  // readable on pink / yellow / green / sky / white backgrounds.
+  const vizWrap = needsDarkPanel
+    ? 'mt-6 flex-1 overflow-y-auto overflow-x-hidden rounded-2xl bg-midnight-sky-900/95 px-8 py-6'
+    : 'mt-6 flex-1 overflow-y-auto overflow-x-hidden'
 
   return (
-    <div className="flex w-full max-w-5xl flex-col gap-6">
+    <div
+      className="absolute inset-0 flex flex-col overflow-hidden px-14 pt-10 pb-24"
+      style={{ backgroundColor: c.bg }}
+    >
+      {/* Badge + question — solid contrast colour for any background */}
       <div className="flex items-center gap-3">
-        <span className={cn('rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider', meta.ring, meta.bg, meta.text)}>
+        <span
+          className="shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+          style={{ backgroundColor: c.fg, color: c.bg }}
+        >
           Results live
         </span>
-        <h2 className="text-2xl font-semibold text-white md:text-3xl">
+        <h2
+          className="text-2xl font-semibold md:text-3xl"
+          style={{ color: c.fg }}
+        >
           {slide.question}
         </h2>
       </div>
 
-      {slide.type === 'mcq'       && <MCQResults    options={slide.options} votes={mcqVotes} />}
-      {slide.type === 'wordcloud' && <WordCloudResults words={cloudWords} />}
-      {slide.type === 'openended' && <OpenEndedResults answers={openAnswers} />}
-      {slide.type === 'rating'    && <RatingResults   params={slide.options} avgs={ratingAvgs} />}
-
-      <div className="flex justify-end">
-        <div className="flex items-center gap-1.5 text-xs text-white/25">
-          <ArrowRight className="size-3" />
-          <span>Press → to continue</span>
-        </div>
+      {/* Results fill remaining space */}
+      <div className={vizWrap}>
+        {slide.type === 'mcq'       && <MCQResults    options={slide.options} votes={mcqVotes} vizType={slide.vizType ?? 'bar'} />}
+        {slide.type === 'wordcloud' && <WordCloudResults words={cloudWords} />}
+        {slide.type === 'openended' && <OpenEndedResults answers={openAnswers} />}
+        {slide.type === 'rating'    && (() => {
+          // Per-parameter labels with slide-wide fallback for legacy data
+          const lefts  = slide.leftLabels  ?? slide.options.map(() => slide.leftLabel  ?? '')
+          const rights = slide.rightLabels ?? slide.options.map(() => slide.rightLabel ?? '')
+          return (
+            <RatingResults
+              params={slide.options}
+              avgs={ratingAvgs}
+              distributions={ratingDist}
+              ratingMax={ratingMax}
+              leftLabels ={lefts}
+              rightLabels={rights}
+            />
+          )
+        })()}
       </div>
     </div>
   )
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   MCQ Results — animated horizontal bars
+   MCQ Results — dispatcher for bar / pie / donut
    ───────────────────────────────────────────────────────────────────────── */
 
-function MCQResults({ options, votes }: { options: string[]; votes: number[] }) {
+// Shared palette for pie / donut segments
+const VIZ_COLORS = ['#ff0065', '#00b0ff', '#42db66', '#ffc709', '#a855f7', '#f97316']
+
+function MCQResults({ options, votes, vizType = 'bar' }: {
+  options:  string[]
+  votes:    number[]
+  vizType?: 'bar' | 'pie' | 'donut'
+}) {
+  if (vizType === 'pie')   return <MCQPieChart   options={options} votes={votes} />
+  if (vizType === 'donut') return <MCQDonutChart options={options} votes={votes} />
+  return <MCQBarChart options={options} votes={votes} />
+}
+
+/* ── Bar chart (original) ─────────────────────────────────────────────── */
+
+function MCQBarChart({ options, votes }: { options: string[]; votes: number[] }) {
   const total = votes.reduce((s, v) => s + v, 0)
   const maxV  = Math.max(...votes, 1)
 
   return (
     <div className="flex flex-col gap-4">
       {options.map((opt, i) => {
-        const v         = votes[i] ?? 0
-        const pct       = total > 0 ? Math.round((v / total) * 100) : 0
-        const isWinner  = v > 0 && v === maxV
+        const v        = votes[i] ?? 0
+        const pct      = total > 0 ? Math.round((v / total) * 100) : 0
+        const isWinner = v > 0 && v === maxV
         return (
           <motion.div
             key={i}
@@ -730,10 +1604,11 @@ function MCQResults({ options, votes }: { options: string[]; votes: number[] }) 
             <span className={cn('flex size-10 shrink-0 items-center justify-center rounded-xl text-sm font-bold', isWinner ? 'bg-hot-pink text-white' : 'bg-white/10 text-white/50')}>
               {String.fromCharCode(65 + i)}
             </span>
-            <span className={cn('w-52 shrink-0 text-base font-medium leading-tight', isWinner ? 'text-white' : 'text-white/65')}>
+            {/* Label: percentage-based width so it scales with zoom */}
+            <span className={cn('w-[20%] shrink-0 truncate text-base font-medium leading-tight', isWinner ? 'text-white' : 'text-white/65')}>
               {opt}
             </span>
-            <div className="relative h-10 flex-1 overflow-hidden rounded-xl bg-white/10">
+            <div className="relative h-10 min-w-0 flex-1 overflow-hidden rounded-xl bg-white/10">
               <motion.div
                 className={cn('absolute inset-y-0 left-0 rounded-xl', isWinner ? 'bg-hot-pink' : 'bg-white/25')}
                 initial={{ width: '0%' }}
@@ -748,7 +1623,8 @@ function MCQResults({ options, votes }: { options: string[]; votes: number[] }) 
                 />
               )}
             </div>
-            <span className={cn('w-14 text-right text-2xl font-bold tabular-nums', isWinner ? 'text-hot-pink' : 'text-white/50')}>
+            {/* Percentage: wide enough for "100%" at any zoom, shrink-0 so it never squeezes */}
+            <span className={cn('w-[4.5rem] shrink-0 text-right text-2xl font-bold tabular-nums', isWinner ? 'text-hot-pink' : 'text-white/50')}>
               {pct}%
             </span>
           </motion.div>
@@ -758,54 +1634,232 @@ function MCQResults({ options, votes }: { options: string[]; votes: number[] }) 
   )
 }
 
+/* ── Shared SVG helpers for pie / donut ───────────────────────────────── */
+
+function polarToXY(cx: number, cy: number, r: number, angleDeg: number) {
+  const rad = (angleDeg * Math.PI) / 180
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) }
+}
+
+function describeArc(cx: number, cy: number, r: number, startAngle: number, endAngle: number): string {
+  // Offset by -90 so 0° starts at 12 o'clock
+  if (endAngle - startAngle >= 359.99) {
+    const m = polarToXY(cx, cy, r, -90)
+    const h = polarToXY(cx, cy, r, 90)
+    return `M ${cx} ${cy} L ${m.x} ${m.y} A ${r} ${r} 0 0 1 ${h.x} ${h.y} A ${r} ${r} 0 0 1 ${m.x} ${m.y} Z`
+  }
+  const s = polarToXY(cx, cy, r, startAngle - 90)
+  const e = polarToXY(cx, cy, r, endAngle   - 90)
+  const large = endAngle - startAngle > 180 ? 1 : 0
+  return `M ${cx} ${cy} L ${s.x} ${s.y} A ${r} ${r} 0 ${large} 1 ${e.x} ${e.y} Z`
+}
+
+/* ── Legend shared by pie / donut ─────────────────────────────────────── */
+
+function VizLegend({ options, votes, total, maxV }: {
+  options: string[]; votes: number[]; total: number; maxV: number
+}) {
+  return (
+    <div className="flex flex-1 flex-col justify-center gap-3">
+      {options.map((opt, i) => {
+        const v        = votes[i] ?? 0
+        const pct      = total > 0 ? Math.round((v / total) * 100) : 0
+        const isWinner = v > 0 && v === maxV
+        return (
+          <motion.div
+            key={i}
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: i * 0.08, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+            className="flex items-center gap-3"
+          >
+            <span
+              className="size-3 shrink-0 rounded-full"
+              style={{ backgroundColor: VIZ_COLORS[i % VIZ_COLORS.length] }}
+            />
+            <span className={cn('flex-1 text-base font-medium leading-snug', isWinner ? 'text-white' : 'text-white/60')}>
+              {opt}
+            </span>
+            <span className={cn('text-xl font-bold tabular-nums', isWinner ? 'text-white' : 'text-white/40')}>
+              {pct}%
+            </span>
+          </motion.div>
+        )
+      })}
+    </div>
+  )
+}
+
+/* ── Donut chart ──────────────────────────────────────────────────────── */
+
+function MCQDonutChart({ options, votes }: { options: string[]; votes: number[] }) {
+  const total  = votes.reduce((s, v) => s + v, 0)
+  const maxV   = Math.max(...votes, 1)
+  const winner = votes.indexOf(Math.max(...votes))
+
+  const R    = 42
+  const CX   = 60; const CY = 60
+  const circ = 2 * Math.PI * R
+
+  let cumulative = 0
+  const segments = options.map((opt, i) => {
+    const v       = votes[i] ?? 0
+    const dashLen = total > 0 ? (v / total) * circ : 0
+    const offset  = cumulative
+    cumulative   += dashLen
+    return { opt, v, dashLen, offset, color: VIZ_COLORS[i % VIZ_COLORS.length] }
+  })
+
+  return (
+    <div className="flex items-center gap-12">
+      {/* Donut */}
+      <div className="relative shrink-0">
+        <svg viewBox="0 0 120 120" className="size-56" style={{ transform: 'rotate(-90deg)' }}>
+          {/* Track ring */}
+          <circle r={R} cx={CX} cy={CY} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={20} />
+          {total === 0 ? (
+            <circle r={R} cx={CX} cy={CY} fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth={20}
+              strokeDasharray={`${circ * 0.99} ${circ * 0.01}`} />
+          ) : (
+            segments.map((seg, i) => (
+              <motion.circle
+                key={i}
+                r={R} cx={CX} cy={CY}
+                fill="none"
+                stroke={seg.color}
+                strokeWidth={20}
+                strokeDasharray={`${seg.dashLen} ${circ - seg.dashLen}`}
+                strokeDashoffset={-seg.offset}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.5, delay: i * 0.12 }}
+              />
+            ))
+          )}
+        </svg>
+        {/* Centre label */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+          {total > 0 ? (
+            <>
+              <span className="text-3xl font-bold tabular-nums"
+                style={{ color: VIZ_COLORS[winner % VIZ_COLORS.length] }}>
+                {Math.round((votes[winner] / total) * 100)}%
+              </span>
+              <span className="mt-0.5 max-w-[80px] text-xs font-medium leading-tight text-white/55">
+                {options[winner]}
+              </span>
+            </>
+          ) : (
+            <span className="text-sm text-white/30">No votes</span>
+          )}
+        </div>
+      </div>
+      <VizLegend options={options} votes={votes} total={total} maxV={maxV} />
+    </div>
+  )
+}
+
+/* ── Pie chart ────────────────────────────────────────────────────────── */
+
+function MCQPieChart({ options, votes }: { options: string[]; votes: number[] }) {
+  const total = votes.reduce((s, v) => s + v, 0)
+  const maxV  = Math.max(...votes, 1)
+
+  let cumAngle = 0
+  const segments = options.map((opt, i) => {
+    const v     = votes[i] ?? 0
+    const frac  = total > 0 ? v / total : 0
+    const start = cumAngle
+    cumAngle   += frac * 360
+    return { opt, v, frac, startAngle: start, endAngle: cumAngle, color: VIZ_COLORS[i % VIZ_COLORS.length] }
+  })
+
+  return (
+    <div className="flex items-center gap-12">
+      {/* Pie */}
+      <svg viewBox="0 0 120 120" className="size-56 shrink-0">
+        {total === 0 ? (
+          <circle r={54} cx={60} cy={60} fill="rgba(255,255,255,0.08)" />
+        ) : (
+          segments.map((seg, i) => (
+            <motion.path
+              key={i}
+              d={describeArc(60, 60, 54, seg.startAngle, seg.endAngle)}
+              fill={seg.color}
+              initial={{ opacity: 0, scale: 0.85 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.5, delay: i * 0.08, ease: [0.16, 1, 0.3, 1] }}
+              style={{ transformOrigin: '60px 60px' }}
+            />
+          ))
+        )}
+      </svg>
+      <VizLegend options={options} votes={votes} total={total} maxV={maxV} />
+    </div>
+  )
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    Word Cloud Results
    ───────────────────────────────────────────────────────────────────────── */
 
+// Palette tuned for a navy-900 background — every color clears WCAG AA
+// against #000079 so no word can ever blend into the background.
 const CLOUD_COLORS = [
-  'text-white', 'text-sky-blue', 'text-fresh-green', 'text-white/80',
-  'text-golden-sun', 'text-sky-blue/80', 'text-white/70', 'text-fresh-green/80',
+  'text-white', 'text-sky-blue', 'text-fresh-green', 'text-golden-sun',
+  'text-white/90', 'text-sky-blue', 'text-fresh-green', 'text-golden-sun',
 ]
 const ROTATIONS = [-7, -3, 0, 3, 7, -5, 5, -2, 2, 0, -4, 4]
 
-function cloudSize(count: number) {
-  if (count >= 17) return 'text-6xl font-bold   md:text-7xl'
-  if (count >= 13) return 'text-5xl font-bold   md:text-6xl'
-  if (count >= 10) return 'text-4xl font-semibold md:text-5xl'
-  if (count >=  7) return 'text-3xl font-semibold md:text-4xl'
-  if (count >=  5) return 'text-2xl font-medium   md:text-3xl'
-  return                   'text-xl  font-medium   md:text-2xl'
+/** Returns a Tailwind class for the word's font size, computed RELATIVE to
+ *  the top word in the cloud. The most-frequent word always lands in the
+ *  largest size; every other word scales proportionally so "2 mentions"
+ *  is visibly bigger than "1 mention". */
+function cloudSize(count: number, maxCount: number): string {
+  const r = maxCount > 0 ? count / maxCount : 0
+  if (r >= 0.85) return 'text-6xl font-extrabold   md:text-8xl'
+  if (r >= 0.65) return 'text-5xl font-bold        md:text-7xl'
+  if (r >= 0.45) return 'text-4xl font-semibold    md:text-6xl'
+  if (r >= 0.25) return 'text-3xl font-semibold    md:text-5xl'
+  if (r >= 0.10) return 'text-2xl font-medium      md:text-4xl'
+  return                'text-xl  font-medium      md:text-3xl'
 }
 
 function WordCloudResults({ words }: { words: { text: string; count: number }[] }) {
   if (words.length === 0) {
     return (
-      <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-sm text-white/35">
+      <div className="flex min-h-[260px] items-center justify-center rounded-3xl bg-gradient-to-br from-midnight-sky-800 via-midnight-sky-900 to-midnight-sky-900 text-sm text-white/40">
         Waiting for responses…
       </div>
     )
   }
-  const top = words.reduce((a, b) => a.count > b.count ? a : b).text
+  const maxCount = Math.max(...words.map(w => w.count))
+  const top      = words.reduce((a, b) => a.count > b.count ? a : b).text
+
   return (
-    <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-4 py-4">
-      {words.map((w, i) => (
-        <motion.span
-          key={w.text}
-          initial={{ opacity: 0, scale: 0.1 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ type: 'spring', stiffness: 280, damping: 20, delay: i * 0.05 }}
-          style={{ rotate: ROTATIONS[i % ROTATIONS.length] }}
-          className={cn(
-            cloudSize(w.count),
-            w.text === top
-              ? 'text-hot-pink drop-shadow-[0_0_24px_rgba(255,0,101,0.65)]'
-              : CLOUD_COLORS[i % CLOUD_COLORS.length],
-            'select-none leading-none',
-          )}
-        >
-          {w.text}
-        </motion.span>
-      ))}
+    <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-midnight-sky-800 via-midnight-sky-900 to-midnight-sky-900 px-8 py-12 md:py-16 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+      {/* Soft hot-pink glow behind the top word for premium feel */}
+      <div className="pointer-events-none absolute left-1/2 top-1/2 size-[420px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-hot-pink/12 blur-[120px]" />
+      <div className="relative flex flex-wrap items-center justify-center gap-x-8 gap-y-5">
+        {words.map((w, i) => (
+          <motion.span
+            key={w.text}
+            initial={{ opacity: 0, scale: 0.1 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ type: 'spring', stiffness: 280, damping: 20, delay: i * 0.05 }}
+            style={{ rotate: ROTATIONS[i % ROTATIONS.length] }}
+            className={cn(
+              cloudSize(w.count, maxCount),
+              w.text === top
+                ? 'text-hot-pink drop-shadow-[0_0_30px_rgba(255,0,101,0.75)]'
+                : CLOUD_COLORS[i % CLOUD_COLORS.length],
+              'select-none leading-none',
+            )}
+          >
+            {w.text}
+          </motion.span>
+        ))}
+      </div>
     </div>
   )
 }
@@ -843,42 +1897,133 @@ function OpenEndedResults({ answers }: { answers: { name: string; text: string }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Rating Results — average bars
+   Rating Results — average score + distribution histogram per parameter
    ───────────────────────────────────────────────────────────────────────── */
 
-function RatingResults({ params, avgs }: { params: string[]; avgs: number[] }) {
+function RatingResults({ params, avgs, distributions, ratingMax = 5, leftLabels = [], rightLabels = [] }: {
+  params:        string[]
+  avgs:          number[]
+  distributions: number[][]
+  ratingMax?:    number
+  leftLabels?:   string[]
+  rightLabels?:  string[]
+}) {
+  // Scale row size to the number of parameters so 3+ rows fit a 1080p
+  // screen without a scrollbar. Few rows → roomy. Many rows → compact.
+  const dense = params.length >= 4
   return (
-    <div className="flex flex-col gap-4">
+    <div className={cn('flex flex-col', dense ? 'gap-2.5' : 'gap-3.5')}>
       {params.map((label, idx) => (
-        <RatingRow key={idx} label={label} avg={avgs[idx] ?? 0} delay={idx * 0.13} />
+        <RatingRow
+          key={idx}
+          label={label}
+          avg={avgs[idx] ?? 0}
+          dist={distributions[idx] ?? Array(ratingMax + 1).fill(0)}
+          ratingMax={ratingMax}
+          dense={dense}
+          leftLabel ={leftLabels[idx]  ?? ''}
+          rightLabel={rightLabels[idx] ?? ''}
+          delay={idx * 0.13}
+        />
       ))}
     </div>
   )
 }
 
-function RatingRow({ label, avg, delay }: { label: string; avg: number; delay: number }) {
-  const displayed = useCountUp(Math.round(avg * 10), 950) / 10
+// Gradient from cool (0) to hot-pink (max). Computed on the fly so we
+// get a smooth gradient regardless of scale (5 or 10).
+function ratingBarColor(bucketIdx: number, total: number): string {
+  if (total <= 1) return '#ff0065'
+  const t = bucketIdx / (total - 1)          // 0 (lowest) → 1 (highest)
+  if (t === 1) return '#ff0065'              // top: solid hot-pink
+  if (t >= 0.75) return 'rgba(255,0,101,0.55)'
+  if (t >= 0.5)  return 'rgba(255,199,9,0.65)'
+  if (t >= 0.25) return 'rgba(255,199,9,0.38)'
+  return 'rgba(255,255,255,0.20)'
+}
+
+function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, leftLabel, rightLabel, delay }: {
+  label: string; avg: number; dist: number[]; ratingMax?: number
+  dense?: boolean
+  leftLabel?: string; rightLabel?: string
+  delay: number
+}) {
+  const displayed  = useCountUp(Math.round(avg * 10), 950) / 10
+  const maxCount   = Math.max(...dist, 1)
+  const BAR_MAX_PX = dense ? 26 : 36
+  const hasEndLabels = !!leftLabel || !!rightLabel
 
   return (
     <motion.div
       initial={{ opacity: 0, x: -24 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.5, delay, ease: [0.16, 1, 0.3, 1] }}
-      className="flex items-center gap-6 rounded-2xl border border-white/10 bg-white/5 px-6 py-4 backdrop-blur-sm"
+      className={cn(
+        'rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm',
+        dense ? 'px-5 py-3' : 'px-6 py-4',
+      )}
     >
-      <span className="w-44 shrink-0 text-lg font-medium text-white">{label}</span>
-      <div className="relative h-3 flex-1 overflow-hidden rounded-full bg-white/10">
-        <motion.div
-          className="absolute inset-y-0 left-0 rounded-full bg-hot-pink"
-          initial={{ width: '0%' }}
-          animate={{ width: `${(avg / 5) * 100}%` }}
-          transition={{ duration: 1, delay, ease: [0.16, 1, 0.3, 1] }}
-        />
+      {/* Top row: parameter label + animated average — sized for readability
+          from across the room without overflowing the viewport */}
+      <div className={cn('flex items-center justify-between gap-4', dense ? 'mb-2.5' : 'mb-3')}>
+        <span className={cn('font-semibold text-white', dense ? 'text-lg md:text-xl' : 'text-xl md:text-2xl')}>
+          {label}
+        </span>
+        <div className="flex items-baseline gap-1">
+          <span className={cn(
+            'font-extrabold tabular-nums text-hot-pink',
+            dense ? 'text-3xl md:text-4xl' : 'text-4xl md:text-5xl',
+          )}>
+            {displayed.toFixed(1)}
+          </span>
+          <span className={cn(
+            'font-semibold text-white/70',
+            dense ? 'text-base md:text-lg' : 'text-xl md:text-2xl',
+          )}>/{ratingMax}</span>
+        </div>
       </div>
-      <span className="w-16 shrink-0 text-right text-3xl font-bold tabular-nums text-hot-pink">
-        {displayed.toFixed(1)}
-      </span>
-      <span className="text-lg text-white/30">/5</span>
+
+      {/* Distribution mini-histogram — one bar per scale value (0..N).
+          Each bar carries an explicit count label above so the presenter
+          can see "2 voted 10, 1 voted 0" at a glance. */}
+      <div className="flex items-end gap-1" style={{ height: BAR_MAX_PX + 30 }}>
+        {dist.map((count, bucketIdx) => {
+          const barH = count > 0 ? Math.max((count / maxCount) * BAR_MAX_PX, 3) : 0
+          return (
+            <div key={bucketIdx} className="flex flex-1 flex-col items-center gap-0.5">
+              {/* Vote count above bar — only rendered when > 0 so empty
+                  buckets don't add noise */}
+              <motion.span
+                key={`c-${bucketIdx}-${count}`}
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: count > 0 ? 1 : 0, y: 0 }}
+                transition={{ duration: 0.25, delay: delay + bucketIdx * 0.04 + 0.5 }}
+                className={cn('text-[11px] font-bold tabular-nums', count > 0 ? 'text-white' : 'text-transparent')}
+              >
+                {count > 0 ? count : ''}
+              </motion.span>
+              <div className="flex w-full items-end" style={{ height: BAR_MAX_PX }}>
+                <motion.div
+                  className="w-full rounded-t-sm"
+                  style={{ backgroundColor: ratingBarColor(bucketIdx, dist.length) }}
+                  initial={{ height: 0 }}
+                  animate={{ height: barH }}
+                  transition={{ duration: 0.7, delay: delay + bucketIdx * 0.04, ease: [0.16, 1, 0.3, 1] }}
+                />
+              </div>
+              <span className={cn('text-[10px] font-medium tabular-nums', count > 0 ? 'text-white/75' : 'text-white/40')}>{bucketIdx}</span>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Anchor labels at the ends of the scale (Mentimeter-style) */}
+      {hasEndLabels && (
+        <div className="mt-1 flex justify-between text-[10px] font-semibold uppercase tracking-wider text-white/55">
+          <span className="truncate pr-2">{leftLabel}</span>
+          <span className="truncate pl-2 text-right">{rightLabel}</span>
+        </div>
+      )}
     </motion.div>
   )
 }
@@ -901,4 +2046,208 @@ function useCountUp(target: number, duration = 900) {
     return () => cancelAnimationFrame(raf)
   }, [target, duration])
   return count
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   buildResultsSnapshot — turns the deck + raw response docs into a clean
+   DeckResults snapshot suitable for storage on the deck. Only question
+   slides are included; non-question slides are skipped.
+   ───────────────────────────────────────────────────────────────────────── */
+
+function buildResultsSnapshot(
+  deck: AnySlide[],
+  responses: FirestoreResponse[],
+  sessionCode: string,
+  startedAt: number,
+  peakAudience: number,
+): DeckResults {
+  const QTYPES = new Set<string>(['mcq', 'wordcloud', 'openended', 'rating'])
+  // Group responses by slideId for fast lookup
+  const byId = new Map<string, FirestoreResponse[]>()
+  for (const r of responses) {
+    const arr = byId.get(r.slideId) ?? []
+    arr.push(r)
+    byId.set(r.slideId, arr)
+  }
+  const questions: ResultQuestion[] = []
+  for (const s of deck) {
+    if (!QTYPES.has(s.type)) continue
+    const q     = s as QSlide
+    const raws  = byId.get(q.id) ?? []
+    // Sort responses chronologically (oldest → newest)
+    const responsesForSlide: ResultResponse[] = raws
+      .map(r => ({
+        name:  (r.respondentName && r.respondentName.trim()) || 'Anonymous',
+        value: String(r.value ?? ''),
+        // Firestore Timestamp → unix ms (handles plain objects too)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        time:  ((r.submittedAt as any)?.toMillis?.() ?? Date.now()) as number,
+      }))
+      .sort((a, b) => a.time - b.time)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const qany = q as any
+    const leftLabels  = Array.isArray(qany.leftLabels)  ? qany.leftLabels  : (qany.leftLabel  ? (q.options ?? []).map(() => qany.leftLabel)  : undefined)
+    const rightLabels = Array.isArray(qany.rightLabels) ? qany.rightLabels : (qany.rightLabel ? (q.options ?? []).map(() => qany.rightLabel) : undefined)
+    // Firestore rejects any document containing `undefined` field values, so
+    // we conditionally spread only the optional fields that have a real value.
+    questions.push({
+      slideId:       q.id,
+      question:      q.question ?? '',
+      type:          q.type as ResultQuestionType,
+      options:       q.options ?? [],
+      responses:     responsesForSlide,
+      responseCount: responsesForSlide.length,
+      ...(qany.ratingMax ? { ratingMax: qany.ratingMax } : {}),
+      ...(leftLabels  ? { leftLabels  } : {}),
+      ...(rightLabels ? { rightLabels } : {}),
+      ...(q.vizType   ? { vizType: q.vizType } : {}),
+    })
+  }
+  return {
+    sessionCode,
+    conductedAt:   startedAt,
+    endedAt:       Date.now(),
+    audienceCount: peakAudience,
+    questions,
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Timer overlay components — self-contained so only they re-render per tick,
+   not the entire Present component tree (which would cause slide flashing).
+   ───────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Pick timer bar / text / pill colors that contrast against the slide background.
+ * E.g. a pink slide should NOT use hot-pink for urgency (it would vanish).
+ */
+function getTimerColors(
+  theme: string | undefined,
+  secsLeft: number,
+): { bar: string; text: string; pill: string } {
+  const t = theme ?? 'navy'
+
+  if (t === 'pink') {
+    if (secsLeft <= 10) return { bar: '#ffffff',  text: '#ffffff',           pill: 'rgba(255,255,255,0.22)' }
+    if (secsLeft <= 30) return { bar: '#ffc709',  text: '#ffc709',           pill: 'rgba(255,199,9,0.22)'   }
+    return                     { bar: '#ffffff',  text: 'rgba(255,255,255,0.80)', pill: 'rgba(255,255,255,0.14)' }
+  }
+  if (t === 'sky' || t === 'green') {
+    if (secsLeft <= 10) return { bar: '#000079',  text: '#000079',           pill: 'rgba(0,0,121,0.18)'     }
+    if (secsLeft <= 30) return { bar: '#ff0065',  text: '#ff0065',           pill: 'rgba(255,0,101,0.15)'   }
+    return                     { bar: '#000079',  text: '#000079',           pill: 'rgba(0,0,121,0.12)'     }
+  }
+  if (t === 'golden') {
+    if (secsLeft <= 10) return { bar: '#ff0065',  text: '#ff0065',           pill: 'rgba(255,0,101,0.18)'   }
+    if (secsLeft <= 30) return { bar: '#000079',  text: '#000079',           pill: 'rgba(0,0,121,0.18)'     }
+    return                     { bar: '#000079',  text: '#000079',           pill: 'rgba(0,0,121,0.12)'     }
+  }
+  if (t === 'white') {
+    if (secsLeft <= 10) return { bar: '#ff0065',  text: '#ff0065',           pill: 'rgba(255,0,101,0.12)'   }
+    if (secsLeft <= 30) return { bar: '#000079',  text: '#000079',           pill: 'rgba(0,0,121,0.12)'     }
+    return                     { bar: '#00b0ff',  text: '#000079',           pill: 'rgba(0,176,255,0.12)'   }
+  }
+  // navy (default) and anything else
+  if (secsLeft <= 10) return   { bar: '#ff0065',  text: '#ff0065',           pill: 'rgba(255,0,101,0.20)'   }
+  if (secsLeft <= 30) return   { bar: '#ffc709',  text: '#ffc709',           pill: 'rgba(255,199,9,0.20)'   }
+  return                       { bar: '#00b0ff',  text: '#00b0ff',           pill: 'rgba(0,176,255,0.16)'   }
+}
+
+/**
+ * Full-slide timer overlay — depleting progress bar along the bottom edge
+ * plus a floating pill showing the live countdown.
+ * Has its own useState + setInterval so ONLY this component re-renders per
+ * 250 ms tick. The parent Present component stays still → no slide flashing.
+ */
+function TimerCount({
+  timerEndsAt,
+  timerDuration,
+  slideTheme,
+  onExpire,
+}: {
+  timerEndsAt:  number
+  timerDuration: number
+  slideTheme?:  string
+  onExpire:     () => void
+}) {
+  const [secsLeft, setSecsLeft] = useState(() =>
+    Math.max(0, Math.ceil((timerEndsAt - Date.now()) / 1000)),
+  )
+  const onExpireRef  = useRef(onExpire)
+  const expiredRef   = useRef(false)
+  useEffect(() => { onExpireRef.current = onExpire }, [onExpire])
+
+  useEffect(() => {
+    expiredRef.current = false
+    const tick = () => {
+      const r = Math.max(0, Math.ceil((timerEndsAt - Date.now()) / 1000))
+      setSecsLeft(r)
+      if (r === 0 && !expiredRef.current) {
+        expiredRef.current = true
+        onExpireRef.current()
+      }
+    }
+    tick()
+    const id = setInterval(tick, 250)
+    return () => clearInterval(id)
+  }, [timerEndsAt])
+
+  const colors = getTimerColors(slideTheme, secsLeft)
+  const pct    = Math.max(0, (secsLeft / timerDuration) * 100)
+
+  return (
+    <>
+      {/* Depleting bar along the very bottom of the slide */}
+      <div className="absolute inset-x-0 bottom-0 z-[22] h-1.5 bg-white/10">
+        <motion.div
+          className="h-full"
+          style={{ backgroundColor: colors.bar }}
+          animate={{ width: `${pct}%` }}
+          transition={{ duration: 0.3, ease: 'linear' }}
+        />
+      </div>
+
+      {/* Floating countdown pill — above the HUD */}
+      <div
+        className={cn(
+          'absolute bottom-20 right-6 z-[22] flex items-center gap-1.5 rounded-full px-3.5 py-2 backdrop-blur-sm',
+          secsLeft <= 10 ? 'animate-pulse' : '',
+        )}
+        style={{ backgroundColor: colors.pill, color: colors.text }}
+      >
+        <Clock className="size-3.5 shrink-0" />
+        <span className="font-mono text-sm font-bold tabular-nums">{secsLeft}</span>
+        <span className="text-xs font-medium opacity-70">s</span>
+      </div>
+    </>
+  )
+}
+
+/**
+ * Compact countdown used inside the HUD bar.
+ * Also self-contained so the HUD countdown doesn't re-render the whole page.
+ */
+function HudTimerCount({ timerEndsAt }: { timerEndsAt: number }) {
+  const [secsLeft, setSecsLeft] = useState(() =>
+    Math.max(0, Math.ceil((timerEndsAt - Date.now()) / 1000)),
+  )
+  useEffect(() => {
+    const tick = () => setSecsLeft(Math.max(0, Math.ceil((timerEndsAt - Date.now()) / 1000)))
+    tick()
+    const id = setInterval(tick, 250)
+    return () => clearInterval(id)
+  }, [timerEndsAt])
+
+  const isUrgent = secsLeft <= 10
+  return (
+    <div className="flex items-center gap-1.5">
+      <Clock className={cn('size-3.5', isUrgent ? 'text-hot-pink' : 'text-white/50')} />
+      <span className={cn(
+        'min-w-[2.5rem] text-center font-mono text-sm font-bold tabular-nums',
+        isUrgent ? 'animate-pulse text-hot-pink' : 'text-white/80',
+      )}>
+        {secsLeft}s
+      </span>
+    </div>
+  )
 }
