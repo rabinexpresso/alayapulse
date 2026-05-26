@@ -1507,16 +1507,17 @@ function ResultsSlideView({
 }) {
   const c         = qColors(slide.theme)
   const ratingMax = slide.ratingMax === 10 ? 10 : 5
-  // We always wrap viz in a dark panel unless the slide is already navy —
-  // that way bright bg colors (pink/yellow/sky/green/white) get a
-  // high-contrast dark surface so colored charts/words don't camouflage.
-  const needsDarkPanel = (slide.theme ?? 'navy') !== 'navy'
 
-  // Wrap viz in a dark panel for ANY non-navy theme — keeps colored charts
-  // readable on pink / yellow / green / sky / white backgrounds.
+  // For non-navy themes, charts/text need a dark surface to stay readable.
+  // Word cloud is exempt — it floats directly on the slide bg with its own
+  // theme-aware color palette, so no dark panel is needed.
+  const needsDarkPanel = (slide.theme ?? 'navy') !== 'navy' && slide.type !== 'wordcloud'
+
   const vizWrap = needsDarkPanel
     ? 'mt-6 flex-1 overflow-y-auto overflow-x-hidden rounded-2xl bg-midnight-sky-900/95 px-8 py-6'
-    : 'mt-6 flex-1 overflow-y-auto overflow-x-hidden'
+    : slide.type === 'wordcloud'
+      ? 'mt-2 flex-1 min-h-0 overflow-hidden'   // tighter top gap, fill to HUD
+      : 'mt-6 flex-1 overflow-y-auto overflow-x-hidden'
 
   return (
     <div
@@ -1542,7 +1543,7 @@ function ResultsSlideView({
       {/* Results fill remaining space */}
       <div className={vizWrap}>
         {slide.type === 'mcq'       && <MCQResults    options={slide.options} votes={mcqVotes} vizType={slide.vizType ?? 'bar'} />}
-        {slide.type === 'wordcloud' && <WordCloudResults words={cloudWords} />}
+        {slide.type === 'wordcloud' && <WordCloudResults words={cloudWords} slideTheme={slide.theme} />}
         {slide.type === 'openended' && <OpenEndedResults answers={openAnswers} />}
         {slide.type === 'rating'    && (() => {
           // Per-parameter labels with slide-wide fallback for legacy data
@@ -1800,66 +1801,171 @@ function MCQPieChart({ options, votes }: { options: string[]; votes: number[] })
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Word Cloud Results
+   Word Cloud Results — Archimedean spiral placement (no external library)
    ───────────────────────────────────────────────────────────────────────── */
 
-// Palette tuned for a navy-900 background — every color clears WCAG AA
-// against #000079 so no word can ever blend into the background.
-const CLOUD_COLORS = [
-  'text-white', 'text-sky-blue', 'text-fresh-green', 'text-golden-sun',
-  'text-white/90', 'text-sky-blue', 'text-fresh-green', 'text-golden-sun',
-]
-const ROTATIONS = [-7, -3, 0, 3, 7, -5, 5, -2, 2, 0, -4, 4]
-
-/** Returns a Tailwind class for the word's font size, computed RELATIVE to
- *  the top word in the cloud. The most-frequent word always lands in the
- *  largest size; every other word scales proportionally so "2 mentions"
- *  is visibly bigger than "1 mention". */
-function cloudSize(count: number, maxCount: number): string {
-  const r = maxCount > 0 ? count / maxCount : 0
-  if (r >= 0.85) return 'text-6xl font-extrabold   md:text-8xl'
-  if (r >= 0.65) return 'text-5xl font-bold        md:text-7xl'
-  if (r >= 0.45) return 'text-4xl font-semibold    md:text-6xl'
-  if (r >= 0.25) return 'text-3xl font-semibold    md:text-5xl'
-  if (r >= 0.10) return 'text-2xl font-medium      md:text-4xl'
-  return                'text-xl  font-medium      md:text-3xl'
+// Per-theme word palettes — every color vetted to contrast against that bg.
+// No word will ever blend into its slide background.
+const CLOUD_THEME_PALETTES: Record<string, string[]> = {
+  // Dark navy (#000079): all bright vivid colors read well
+  navy:   ['#ff0065','#00b0ff','#42db66','#ffc709','#c084fc','#fb923c','#22d3ee','#f472b6','#4ade80','#facc15','#a78bfa','#34d399'],
+  // Hot pink (#ff0065): avoid red/magenta; white, cyan, gold, green, navy, purple
+  pink:   ['#ffffff','#ffc709','#22d3ee','#000079','#4ade80','#818cf8','#a3e635','#06b6d4','#c084fc','#e0f2fe','#34d399','#60a5fa'],
+  // Sky blue (#00b0ff): avoid light blue/cyan; navy, hot-pink, dark green, dark gold, dark purple
+  sky:    ['#000079','#ff0065','#166534','#92400e','#6b21a8','#9f1239','#1d4ed8','#7c2d12','#14532d','#581c87','#c2410c','#1e3a5f'],
+  // Fresh green (#42db66): avoid green/lime; navy, hot-pink, dark blue, dark gold, purple
+  green:  ['#000079','#ff0065','#1d4ed8','#92400e','#6b21a8','#9f1239','#0c4a6e','#7c2d12','#581c87','#164e63','#c2410c','#1e1b4b'],
+  // Golden (#ffc709): avoid yellow/gold/orange; navy, hot-pink, blue, forest-green, purple
+  golden: ['#000079','#ff0065','#1d4ed8','#166534','#6b21a8','#9f1239','#0c4a6e','#14532d','#581c87','#164e63','#c2410c','#1e1b4b'],
+  // White (#f4f4f9): avoid light colors; navy, hot-pink, dark blue, dark green, purple, dark red
+  white:  ['#000079','#ff0065','#0369a1','#166534','#6b21a8','#be185d','#1d4ed8','#9f1239','#92400e','#581c87','#134e4a','#7c2d12'],
 }
 
-function WordCloudResults({ words }: { words: { text: string; count: number }[] }) {
-  if (words.length === 0) {
-    return (
-      <div className="flex min-h-[260px] items-center justify-center rounded-3xl bg-gradient-to-br from-midnight-sky-800 via-midnight-sky-900 to-midnight-sky-900 text-sm text-white/40">
-        Waiting for responses…
-      </div>
-    )
+interface PlacedWord {
+  text: string; x: number; y: number
+  fontSize: number; fontWeight: string; color: string; isTop: boolean
+}
+
+/** Measure a word's pixel bounding box using an offscreen canvas. */
+function measureWord(text: string, size: number, weight: string): { w: number; h: number } {
+  const canvas = document.createElement('canvas')
+  const ctx    = canvas.getContext('2d')!
+  ctx.font     = `${weight} ${size}px Inter, system-ui, sans-serif`
+  return { w: ctx.measureText(text).width + size * 0.25, h: size * 1.3 }
+}
+
+/**
+ * Archimedean spiral word-cloud layout.
+ * Words are sorted largest-first (already true from aggregateCloud).
+ * Each word spirals outward from center until it finds a collision-free slot.
+ * The golden-angle offset (idx × 137.5°) distributes starting directions
+ * evenly so words radiate in all directions rather than stacking on one side.
+ */
+function layoutWordCloud(
+  words: { text: string; count: number }[],
+  cw: number, ch: number,
+  palette: string[],
+): PlacedWord[] {
+  if (!words.length || cw < 10 || ch < 10) return []
+
+  const maxC  = Math.max(...words.map(w => w.count))
+  const minF  = 13
+  const maxF  = Math.min(88, ch * 0.22)
+  const placed: Array<{ x1: number; y1: number; x2: number; y2: number }> = []
+  const result: PlacedWord[]  = []
+  const cx = cw / 2, cy = ch / 2
+
+  words.forEach((word, idx) => {
+    const ratio  = maxC > 0 ? word.count / maxC : 0
+    const size   = Math.round(minF + ratio * (maxF - minF))
+    const weight = ratio >= 0.65 ? '800' : ratio >= 0.4 ? '700' : ratio >= 0.2 ? '600' : '500'
+    const { w, h } = measureWord(word.text, size, weight)
+    const color  = palette[idx % palette.length]
+    const isTop  = idx === 0
+
+    // Archimedean spiral — golden-angle offset per word distributes directions evenly
+    for (let step = 0; step < 800; step++) {
+      const t  = step * 0.26 + idx * 2.39996  // golden angle ≈ 137.5°
+      const r  = 0.46 * step
+      const x  = cx + r * Math.cos(t)
+      const y  = cy + r * Math.sin(t) * 0.56   // flatten vertically
+      const x1 = x - w / 2, y1 = y - h / 2
+      const x2 = x + w / 2, y2 = y + h / 2
+
+      if (x1 < 6 || y1 < 6 || x2 > cw - 6 || y2 > ch - 6) continue
+
+      const gap = 5
+      if (placed.some(p =>
+        x2 + gap > p.x1 && x1 - gap < p.x2 &&
+        y2 + gap > p.y1 && y1 - gap < p.y2,
+      )) continue
+
+      placed.push({ x1, y1, x2, y2 })
+      result.push({ text: word.text, x, y, fontSize: size, fontWeight: weight, color, isTop })
+      return
+    }
+  })
+
+  return result
+}
+
+/**
+ * Word cloud rendered directly on the slide background — no inner box.
+ * An elliptical CSS mask softly fades words near the edges so the cloud
+ * has organic boundaries instead of a hard rectangle.
+ */
+function WordCloudResults({
+  words,
+  slideTheme,
+}: {
+  words: { text: string; count: number }[]
+  slideTheme?: string
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [layout, setLayout] = useState<PlacedWord[]>([])
+
+  const palette = CLOUD_THEME_PALETTES[slideTheme ?? 'navy'] ?? CLOUD_THEME_PALETTES.navy
+
+  useEffect(() => {
+    if (!containerRef.current) return
+    const compute = () => {
+      const el = containerRef.current
+      if (!el) return
+      const { width, height } = el.getBoundingClientRect()
+      setLayout(layoutWordCloud(words, width, height, palette))
+    }
+    compute()
+    const ro = new ResizeObserver(compute)
+    ro.observe(containerRef.current)
+    return () => ro.disconnect()
+  // palette changes whenever slideTheme changes — include it in deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [words, slideTheme])
+
+  // Soft elliptical mask — words near edges fade into the slide background.
+  // This gives a natural cloud-like boundary without any hard rectangle.
+  const maskStyle: React.CSSProperties = {
+    maskImage:       'radial-gradient(ellipse 90% 86% at 50% 50%, black 42%, rgba(0,0,0,0.6) 65%, transparent 100%)',
+    WebkitMaskImage: 'radial-gradient(ellipse 90% 86% at 50% 50%, black 42%, rgba(0,0,0,0.6) 65%, transparent 100%)',
   }
-  const maxCount = Math.max(...words.map(w => w.count))
-  const top      = words.reduce((a, b) => a.count > b.count ? a : b).text
 
   return (
-    <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-midnight-sky-800 via-midnight-sky-900 to-midnight-sky-900 px-8 py-12 md:py-16 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-      {/* Soft hot-pink glow behind the top word for premium feel */}
-      <div className="pointer-events-none absolute left-1/2 top-1/2 size-[420px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-hot-pink/12 blur-[120px]" />
-      <div className="relative flex flex-wrap items-center justify-center gap-x-8 gap-y-5">
-        {words.map((w, i) => (
-          <motion.span
-            key={w.text}
-            initial={{ opacity: 0, scale: 0.1 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ type: 'spring', stiffness: 280, damping: 20, delay: i * 0.05 }}
-            style={{ rotate: ROTATIONS[i % ROTATIONS.length] }}
-            className={cn(
-              cloudSize(w.count, maxCount),
-              w.text === top
-                ? 'text-hot-pink drop-shadow-[0_0_30px_rgba(255,0,101,0.75)]'
-                : CLOUD_COLORS[i % CLOUD_COLORS.length],
-              'select-none leading-none',
-            )}
-          >
-            {w.text}
-          </motion.span>
-        ))}
-      </div>
+    <div
+      ref={containerRef}
+      className="relative"
+      style={{ height: '100%', minHeight: 300, ...maskStyle }}
+    >
+      {/* Empty state — shown before any responses arrive */}
+      {layout.length === 0 && (
+        <div
+          className="flex h-full min-h-[260px] items-center justify-center text-sm"
+          style={{ color: `${palette[0]}80` }}
+        >
+          Waiting for responses…
+        </div>
+      )}
+
+      {/* Placed words */}
+      {layout.map((item, i) => (
+        <motion.span
+          key={item.text}
+          initial={{ opacity: 0, scale: 0.1 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ type: 'spring', stiffness: 320, damping: 26, delay: i * 0.04 }}
+          className="absolute select-none leading-none"
+          style={{
+            left:       item.x,
+            top:        item.y,
+            fontSize:   item.fontSize,
+            fontWeight: item.fontWeight,
+            color:      item.color,
+            transform:  'translate(-50%, -50%)',
+            textShadow: item.isTop ? `0 0 48px ${item.color}bb` : undefined,
+          }}
+        >
+          {item.text}
+        </motion.span>
+      ))}
     </div>
   )
 }
@@ -2124,33 +2230,33 @@ function buildResultsSnapshot(
 function getTimerColors(
   theme: string | undefined,
   secsLeft: number,
-): { bar: string; text: string; pill: string } {
+): { bar: string; text: string; pill: string; border: string } {
   const t = theme ?? 'navy'
 
   if (t === 'pink') {
-    if (secsLeft <= 10) return { bar: '#ffffff',  text: '#ffffff',           pill: 'rgba(255,255,255,0.22)' }
-    if (secsLeft <= 30) return { bar: '#ffc709',  text: '#ffc709',           pill: 'rgba(255,199,9,0.22)'   }
-    return                     { bar: '#ffffff',  text: 'rgba(255,255,255,0.80)', pill: 'rgba(255,255,255,0.14)' }
+    if (secsLeft <= 10) return { bar: '#ffffff',  text: '#ffffff',           pill: 'rgba(180,0,50,0.55)',   border: 'rgba(255,255,255,0.30)' }
+    if (secsLeft <= 30) return { bar: '#ffc709',  text: '#7a3a00',           pill: 'rgba(255,199,9,0.55)',  border: 'rgba(255,199,9,0.40)'   }
+    return                     { bar: '#ffffff',  text: '#ffffff',           pill: 'rgba(180,0,50,0.45)',   border: 'rgba(255,255,255,0.25)' }
   }
   if (t === 'sky' || t === 'green') {
-    if (secsLeft <= 10) return { bar: '#000079',  text: '#000079',           pill: 'rgba(0,0,121,0.18)'     }
-    if (secsLeft <= 30) return { bar: '#ff0065',  text: '#ff0065',           pill: 'rgba(255,0,101,0.15)'   }
-    return                     { bar: '#000079',  text: '#000079',           pill: 'rgba(0,0,121,0.12)'     }
+    if (secsLeft <= 10) return { bar: '#000079',  text: '#ffffff',           pill: 'rgba(200,0,60,0.75)',   border: 'rgba(255,255,255,0.20)' }
+    if (secsLeft <= 30) return { bar: '#ff0065',  text: '#ffffff',           pill: 'rgba(200,0,60,0.60)',   border: 'rgba(255,0,101,0.30)'   }
+    return                     { bar: '#000079',  text: '#ffffff',           pill: 'rgba(0,0,90,0.60)',     border: 'rgba(0,0,121,0.30)'     }
   }
   if (t === 'golden') {
-    if (secsLeft <= 10) return { bar: '#ff0065',  text: '#ff0065',           pill: 'rgba(255,0,101,0.18)'   }
-    if (secsLeft <= 30) return { bar: '#000079',  text: '#000079',           pill: 'rgba(0,0,121,0.18)'     }
-    return                     { bar: '#000079',  text: '#000079',           pill: 'rgba(0,0,121,0.12)'     }
+    if (secsLeft <= 10) return { bar: '#ff0065',  text: '#ffffff',           pill: 'rgba(200,0,60,0.75)',   border: 'rgba(255,255,255,0.20)' }
+    if (secsLeft <= 30) return { bar: '#000079',  text: '#ffffff',           pill: 'rgba(0,0,90,0.60)',     border: 'rgba(0,0,121,0.30)'     }
+    return                     { bar: '#000079',  text: '#ffffff',           pill: 'rgba(0,0,90,0.55)',     border: 'rgba(0,0,121,0.25)'     }
   }
   if (t === 'white') {
-    if (secsLeft <= 10) return { bar: '#ff0065',  text: '#ff0065',           pill: 'rgba(255,0,101,0.12)'   }
-    if (secsLeft <= 30) return { bar: '#000079',  text: '#000079',           pill: 'rgba(0,0,121,0.12)'     }
-    return                     { bar: '#00b0ff',  text: '#000079',           pill: 'rgba(0,176,255,0.12)'   }
+    if (secsLeft <= 10) return { bar: '#ff0065',  text: '#ffffff',           pill: 'rgba(200,0,60,0.80)',   border: 'rgba(255,0,101,0.30)'   }
+    if (secsLeft <= 30) return { bar: '#000079',  text: '#ffffff',           pill: 'rgba(0,0,90,0.75)',     border: 'rgba(0,0,121,0.30)'     }
+    return                     { bar: '#00b0ff',  text: '#ffffff',           pill: 'rgba(0,90,160,0.70)',   border: 'rgba(0,176,255,0.30)'   }
   }
   // navy (default) and anything else
-  if (secsLeft <= 10) return   { bar: '#ff0065',  text: '#ff0065',           pill: 'rgba(255,0,101,0.20)'   }
-  if (secsLeft <= 30) return   { bar: '#ffc709',  text: '#ffc709',           pill: 'rgba(255,199,9,0.20)'   }
-  return                       { bar: '#00b0ff',  text: '#00b0ff',           pill: 'rgba(0,176,255,0.16)'   }
+  if (secsLeft <= 10) return   { bar: '#ff0065',  text: '#ffffff',           pill: 'rgba(200,0,60,0.70)',   border: 'rgba(255,0,101,0.35)'   }
+  if (secsLeft <= 30) return   { bar: '#ffc709',  text: '#3a2a00',           pill: 'rgba(200,155,0,0.65)',  border: 'rgba(255,199,9,0.35)'   }
+  return                       { bar: '#00b0ff',  text: '#ffffff',           pill: 'rgba(0,100,180,0.60)',  border: 'rgba(0,176,255,0.30)'   }
 }
 
 /**
@@ -2197,8 +2303,8 @@ function TimerCount({
 
   return (
     <>
-      {/* Depleting bar along the very bottom of the slide */}
-      <div className="absolute inset-x-0 bottom-0 z-[22] h-1.5 bg-white/10">
+      {/* Depleting bar along the very top of the slide */}
+      <div className="absolute inset-x-0 top-0 z-[22] h-1.5 bg-black/20">
         <motion.div
           className="h-full"
           style={{ backgroundColor: colors.bar }}
@@ -2207,13 +2313,13 @@ function TimerCount({
         />
       </div>
 
-      {/* Floating countdown pill — above the HUD */}
+      {/* Floating countdown pill — top-right, below top bar */}
       <div
         className={cn(
-          'absolute bottom-20 right-6 z-[22] flex items-center gap-1.5 rounded-full px-3.5 py-2 backdrop-blur-sm',
+          'absolute top-4 right-6 z-[22] flex items-center gap-1.5 rounded-full px-3.5 py-2 backdrop-blur-md shadow-lg',
           secsLeft <= 10 ? 'animate-pulse' : '',
         )}
-        style={{ backgroundColor: colors.pill, color: colors.text }}
+        style={{ backgroundColor: colors.pill, color: colors.text, border: `1px solid ${colors.border}` }}
       >
         <Clock className="size-3.5 shrink-0" />
         <span className="font-mono text-sm font-bold tabular-nums">{secsLeft}</span>

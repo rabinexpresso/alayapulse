@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { getSessionByCode } from '@/lib/session'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowRight, AlertCircle } from 'lucide-react'
+import { AlertCircle } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
 import { cn } from '@/lib/utils'
 
@@ -228,15 +228,12 @@ export default function Join() {
             {status === 'loading' ? (
               <LoadingDots />
             ) : (
-              <>
-                Join session
-                <ArrowRight className="size-4" />
-              </>
+              'Join session'
             )}
           </motion.button>
 
           {/* Hint */}
-          <p className="mt-6 text-center text-xs font-light text-midnight-sky-400">
+          <p className="mt-6 text-center text-xs text-midnight-sky-600">
             No account needed · Your responses can be anonymous
           </p>
         </motion.div>

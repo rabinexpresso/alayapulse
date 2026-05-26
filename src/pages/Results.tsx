@@ -1,478 +1,953 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Users, TrendingUp } from 'lucide-react'
+import {
+  Download, Clock, Users, BarChart2, Cloud as CloudIcon,
+  TrendingUp, ChevronDown, ChevronUp, Star, AlertCircle, FileSpreadsheet,
+} from 'lucide-react'
+import { AlayaMark } from '@/components/AlayaMark'
 import { cn } from '@/lib/utils'
+import {
+  loadResults, getStorageBackend, onAuthStateChanged, auth,
+  browserListDecks, cloudListDecks,
+  type Deck, type DeckResults, type ResultQuestion, type ResultResponse,
+  type StorageBackend,
+} from '@/lib/deckStorage'
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Results page — presenter's big screen view (dark navy, full-screen).
-   Shows live incoming votes as dramatic animated visuals.
-   Demo mode simulates votes trickling in every ~1.5 s.
+   Results page — saved-poll analysis for one deck.
+   URL: /results/:deckId
+   Loads from browser or cloud based on the storage backend preference.
    ───────────────────────────────────────────────────────────────────────── */
 
-type ResultType = 'mcq' | 'wordcloud' | 'openended' | 'rating'
-
-// ── Demo data ─────────────────────────────────────────────────────────────
-
-const MCQ_OPTIONS = [
-  { label: 'A', text: 'Giving honest feedback',    votes: 19 },
-  { label: 'B', text: 'Managing team conflict',    votes: 12 },
-  { label: 'C', text: 'Building trust quickly',    votes: 10 },
-  { label: 'D', text: 'Motivating others',         votes:  6 },
-]
-
-const CLOUD_WORDS = [
-  { text: 'collaborative', count: 18 }, { text: 'innovative',  count: 12 },
-  { text: 'challenging',   count: 14 }, { text: 'growth',      count: 10 },
-  { text: 'busy',          count: 15 }, { text: 'focused',     count:  9 },
-  { text: 'exciting',      count:  7 }, { text: 'trust',       count: 13 },
-  { text: 'creative',      count:  8 }, { text: 'driven',      count:  6 },
-  { text: 'energetic',     count:  9 }, { text: 'change',      count:  5 },
-  { text: 'dynamic',       count: 11 }, { text: 'supportive',  count:  7 },
-]
-
-const OPEN_ANSWERS = [
-  { name: 'Sarah M.',   text: 'More time for strategic thinking instead of back-to-back meetings.' },
-  { name: 'Anonymous', text: 'A clear framework for giving feedback that doesn\'t feel personal.' },
-  { name: 'James T.',   text: 'Better tools for async communication across time zones.' },
-  { name: 'Anonymous', text: 'Regular 1:1s with clear agendas so nothing falls through the cracks.' },
-  { name: 'Priya K.',   text: 'Psychological safety to try new ideas without fear of failure.' },
-  { name: 'Anonymous', text: 'Clearer decision-making processes — who decides what and when.' },
-]
-
-const RATING_PARAMS = [
-  { name: 'Giving feedback',  average: 4.2, counts: [2, 4, 8, 16, 13] },
-  { name: 'Decision making',  average: 3.8, counts: [3, 6, 12, 14,  8] },
-  { name: 'Coaching others',  average: 4.6, counts: [1, 2,  5, 12, 23] },
-]
-
-// ── Hooks ─────────────────────────────────────────────────────────────────
-
-/** Smoothly counts from 0 to target over `duration` ms (ease-out cubic). */
-function useCountUp(target: number, duration = 900, delay = 0) {
-  const [count, setCount] = useState(0)
-  useEffect(() => {
-    let raf: number
-    const startTime = performance.now() + delay
-    function step(now: number) {
-      if (now < startTime) { raf = requestAnimationFrame(step); return }
-      const elapsed = now - startTime
-      const progress = Math.min(elapsed / duration, 1)
-      const eased = 1 - Math.pow(1 - progress, 3)
-      setCount(Math.round(eased * target))
-      if (progress < 1) raf = requestAnimationFrame(step)
-    }
-    raf = requestAnimationFrame(step)
-    return () => cancelAnimationFrame(raf)
-  }, [target, duration, delay])
-  return count
-}
-
-/** Simulates votes trickling in for MCQ demo. Returns live vote array. */
-function useLiveMCQ(initial: typeof MCQ_OPTIONS) {
-  const [votes, setVotes] = useState(initial.map(o => ({ ...o })))
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  useEffect(() => {
-    // Reset on mount
-    setVotes(initial.map(o => ({ ...o })))
-    let added = 0
-
-    intervalRef.current = setInterval(() => {
-      if (added >= 18) { clearInterval(intervalRef.current!); return }
-      const idx = Math.floor(Math.random() * initial.length)
-      setVotes(prev => {
-        const n = [...prev]
-        n[idx] = { ...n[idx], votes: n[idx].votes + 1 }
-        return n
-      })
-      added++
-    }, 1200)
-
-    return () => clearInterval(intervalRef.current!)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const total = votes.reduce((s, o) => s + o.votes, 0)
-  return { votes, total, maxVotes: Math.max(...votes.map(o => o.votes)) }
-}
-
-// ── Page ──────────────────────────────────────────────────────────────────
-
 export default function Results() {
-  const [activeType, setActiveType] = useState<ResultType>('mcq')
+  const { deckId } = useParams<{ deckId: string }>()
+  const navigate   = useNavigate()
 
-  const TABS: { type: ResultType; label: string }[] = [
-    { type: 'mcq',       label: 'MCQ'         },
-    { type: 'wordcloud', label: 'Word Cloud'   },
-    { type: 'openended', label: 'Open-ended'   },
-    { type: 'rating',    label: 'Rating'       },
-  ]
+  const backend = getStorageBackend()
+  const [results, setResults]   = useState<DeckResults | null | undefined>(undefined)
+  const [deck,    setDeck]      = useState<Deck | null>(null)
+  const [isDownloading, setDownloading]      = useState(false)
+  const [isDownloadingCsv, setDownloadingCsv] = useState(false)
 
-  return (
-    <main className="relative flex min-h-screen flex-col overflow-hidden bg-midnight-sky-900 text-white">
-      {/* Subtle gradient glow — bottom left pink, top right blue */}
-      <div aria-hidden className="pointer-events-none absolute inset-0">
-        <div className="absolute -bottom-32 -left-32 size-[500px] rounded-full bg-hot-pink/10 blur-[100px]" />
-        <div className="absolute -right-32 -top-32 size-[400px] rounded-full bg-sky-blue/10 blur-[100px]" />
-      </div>
+  /* Wait for auth before loading cloud data — Firebase restores auth
+     asynchronously on page load. */
+  useEffect(() => {
+    if (!deckId) { setResults(null); return }
+    let cancelled = false
+    async function load(activeBackend: StorageBackend) {
+      try {
+        const [r, decks] = await Promise.all([
+          loadResults(activeBackend, deckId!),
+          activeBackend === 'browser' ? browserListDecks() : cloudListDecks(),
+        ])
+        if (cancelled) return
+        setResults(r)
+        setDeck(decks.find(d => d.id === deckId) ?? null)
+      } catch (e) {
+        console.error('Failed to load results:', e)
+        if (!cancelled) setResults(null)
+      }
+    }
 
-      {/* Header bar */}
-      <header className="relative z-10 flex items-center justify-between border-b border-white/10 px-8 py-4">
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-semibold tracking-tight text-white">
-            alaya <span className="text-hot-pink">pulse</span>
-          </span>
-          <span className="rounded-full border border-white/20 px-2.5 py-0.5 text-xs font-mono text-white/60">
-            ABC123
-          </span>
-        </div>
+    if (backend === 'cloud') {
+      if (auth.currentUser) {
+        load('cloud')
+      } else {
+        const unsub = onAuthStateChanged(auth, u => {
+          if (u) { unsub(); load('cloud') }
+        })
+        const timer = setTimeout(() => { unsub(); if (!cancelled) load('cloud') }, 4000)
+        return () => { cancelled = true; unsub(); clearTimeout(timer) }
+      }
+    } else {
+      load(backend ?? 'browser')
+    }
+    return () => { cancelled = true }
+  }, [deckId, backend])
 
-        {/* Demo type tabs */}
-        <div className="flex gap-1.5">
-          {TABS.map(t => (
-            <button
-              key={t.type}
-              onClick={() => setActiveType(t.type)}
-              className={cn(
-                'rounded-full px-3 py-1.5 text-xs font-medium transition-all',
-                activeType === t.type
-                  ? 'bg-white/15 text-white'
-                  : 'text-white/50 hover:text-white/80',
-              )}
-            >
-              {t.label}
-            </button>
+  /* ── Loading state ───────────────────────────────────────────────── */
+  if (results === undefined) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center bg-white">
+        <AlayaMark className="mb-8" />
+        <div className="flex items-center gap-1.5">
+          {[0, 1, 2].map(i => (
+            <motion.span
+              key={i}
+              className="inline-block size-1.5 rounded-full bg-hot-pink"
+              animate={{ opacity: [0.3, 1, 0.3], y: [0, -3, 0] }}
+              transition={{ duration: 0.8, repeat: Infinity, delay: i * 0.15 }}
+            />
           ))}
         </div>
+      </main>
+    )
+  }
 
-        <div className="flex items-center gap-1.5 text-xs text-white/50">
-          <TrendingUp className="size-3.5" />
-          <span>Question 2 of 5</span>
+  /* ── Empty state ─────────────────────────────────────────────────── */
+  if (!results || results.questions.length === 0) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center bg-white px-6 text-center">
+        <AlayaMark className="mb-8" />
+        <div className="mb-6 flex size-16 items-center justify-center rounded-2xl bg-midnight-sky-50">
+          <BarChart2 className="size-7 text-midnight-sky-300" />
+        </div>
+        <h2 className="text-2xl font-semibold text-midnight-sky-900">No results yet</h2>
+        <p className="mt-2 max-w-md text-sm font-light text-midnight-sky-500">
+          {deck
+            ? `"${deck.title}" hasn't been presented yet. Start a live session to collect responses, then come back here.`
+            : 'This deck has no saved poll results. Run a session first to see audience responses here.'}
+        </p>
+        <button
+          onClick={() => navigate(-1)}
+          className="mt-8 rounded-xl border border-hot-pink/35 bg-hot-pink/8 px-5 py-2.5 text-sm font-medium text-hot-pink transition hover:border-hot-pink/60 hover:bg-hot-pink/15"
+        >
+          Go back
+        </button>
+      </main>
+    )
+  }
+
+  /* ── Real results ────────────────────────────────────────────────── */
+  const deckTitle    = deck?.title ?? 'Untitled session'
+  const totalResponses = results.questions.reduce((s, q) => s + q.responseCount, 0)
+  // Overall participation: average per-question participation across all questions
+  const avgParticipation = results.audienceCount > 0
+    ? Math.round(
+        (results.questions.reduce(
+          (s, q) => s + Math.min(100, (q.responseCount / Math.max(1, results.audienceCount)) * 100), 0
+        ) / Math.max(1, results.questions.length))
+      )
+    : 0
+
+  async function handleDownload() {
+    if (!results || !deck) return
+    setDownloading(true)
+    try {
+      // Lazy-load jsPDF only when needed — keeps initial bundle small
+      const [{ jsPDF }, autoTableMod] = await Promise.all([
+        import('jspdf'),
+        import('jspdf-autotable'),
+      ])
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const autoTable: any = (autoTableMod as any).default ?? (autoTableMod as any).autoTable ?? autoTableMod
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+      buildResultsPdf(doc, autoTable, deck.title, results, totalResponses, avgParticipation)
+      const safeTitle = deck.title.replace(/[^a-z0-9\-_ ]/gi, '').trim() || 'results'
+      const date = new Date(results.conductedAt).toISOString().slice(0, 10)
+      doc.save(`${safeTitle} - ${date} results.pdf`)
+    } catch (e) {
+      console.error('PDF generation failed:', e)
+      alert('Could not generate PDF. Try again or take a screenshot of this page.')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  function handleDownloadCSV() {
+    if (!results || !deck) return
+    setDownloadingCsv(true)
+    try {
+      const csvRow = (...cells: string[]) =>
+        cells.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')
+
+      const lines: string[] = []
+
+      // ── Metadata header ──────────────────────────────────────────────
+      lines.push(csvRow('Alaya Pulse Check — Results Export'))
+      lines.push(csvRow('Deck', deck.title))
+      lines.push(csvRow('Session code', results.sessionCode))
+      lines.push(csvRow('Date', formatTimestamp(results.conductedAt)))
+      lines.push(csvRow('Peak audience', String(results.audienceCount)))
+      lines.push(csvRow('Total responses', String(totalResponses)))
+      lines.push(csvRow('Avg participation', `${avgParticipation}%`))
+      lines.push('') // blank separator
+
+      // ── Column headers ───────────────────────────────────────────────
+      lines.push(csvRow('Question #', 'Question', 'Type', 'Respondent', 'Response', 'Time'))
+
+      // ── One row per individual response ─────────────────────────────
+      results.questions.forEach((q, qIdx) => {
+        const typeLabel = TYPE_LABELS[q.type] ?? q.type
+        if (q.responses.length === 0) {
+          lines.push(csvRow(
+            String(qIdx + 1),
+            q.question || '(Untitled question)',
+            typeLabel,
+            '—', '(no responses)', '',
+          ))
+        } else {
+          q.responses.forEach(r => {
+            lines.push(csvRow(
+              String(qIdx + 1),
+              q.question || '(Untitled question)',
+              typeLabel,
+              r.name,
+              formatResponseAsText(r, q),
+              formatTime(r.time),
+            ))
+          })
+        }
+      })
+
+      const blob = new Blob([lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' })
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      const safeTitle = deck.title.replace(/[^a-z0-9\-_ ]/gi, '').trim() || 'results'
+      const date = new Date(results.conductedAt).toISOString().slice(0, 10)
+      a.href     = url
+      a.download = `${safeTitle} - ${date} results.csv`
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(url), 10_000)
+    } catch (e) {
+      console.error('CSV generation failed:', e)
+      alert('Could not generate CSV. Try again.')
+    } finally {
+      setDownloadingCsv(false)
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-midnight-sky-50/40">
+      {/* Top bar — dark navy brand header */}
+      <header className="sticky top-0 z-20 border-b border-white/10 bg-midnight-sky-900/95 backdrop-blur-md">
+        <div className="mx-auto flex max-w-6xl items-center gap-3 px-6 py-3">
+          <button
+            onClick={() => navigate(-1)}
+            className="rounded-lg border border-hot-pink/35 bg-hot-pink/10 px-3 py-1.5 text-sm font-medium text-hot-pink transition hover:border-hot-pink/60 hover:bg-hot-pink/20"
+          >
+            Back
+          </button>
+          <div className="h-5 w-px bg-white/15" />
+          <AlayaMark className="text-white" />
+          <div className="flex-1" />
+          <button
+            onClick={handleDownloadCSV}
+            disabled={isDownloadingCsv}
+            className="flex items-center gap-1.5 rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20 disabled:opacity-70"
+          >
+            <FileSpreadsheet className="size-3.5" />
+            {isDownloadingCsv ? 'Exporting…' : 'Download CSV'}
+          </button>
+          <button
+            onClick={handleDownload}
+            disabled={isDownloading}
+            className="flex items-center gap-1.5 rounded-xl bg-hot-pink px-4 py-2 text-sm font-semibold text-white shadow-[0_0_20px_-4px] shadow-hot-pink/40 transition hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/60 disabled:opacity-70"
+          >
+            <Download className="size-3.5" />
+            {isDownloading ? 'Generating…' : 'Download PDF'}
+          </button>
         </div>
       </header>
 
-      {/* Results content */}
-      <div className="relative z-10 flex flex-1 flex-col px-8 py-8 md:px-14 md:py-10">
-        <AnimatePresence mode="wait">
+      {/* Headline section */}
+      <section className="mx-auto max-w-6xl px-6 pb-8 pt-10">
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+        >
+          <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-hot-pink">
+            <span className="flex size-2 animate-pulse rounded-full bg-hot-pink" />
+            Live poll results
+          </div>
+          <h1 className="text-4xl font-bold tracking-tight text-midnight-sky-900 sm:text-5xl">
+            {deckTitle}
+          </h1>
+          <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-midnight-sky-500">
+            <span className="flex items-center gap-1.5">
+              <Clock className="size-3.5" />
+              {formatTimestamp(results.conductedAt)}
+            </span>
+            <span className="flex items-center gap-1.5">
+              <CloudIcon className="size-3.5" />
+              Session <span className="font-mono font-semibold text-midnight-sky-700">{results.sessionCode}</span>
+            </span>
+          </div>
+        </motion.div>
+
+        {/* Stat cards */}
+        <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <StatCard
+            icon={<Users className="size-4" />}
+            label="Peak audience"
+            value={String(results.audienceCount)}
+            tint="sky"
+          />
+          <StatCard
+            icon={<BarChart2 className="size-4" />}
+            label="Total responses"
+            value={String(totalResponses)}
+            tint="green"
+          />
+          <StatCard
+            icon={<TrendingUp className="size-4" />}
+            label="Avg participation"
+            value={`${avgParticipation}%`}
+            tint="pink"
+            sub="responses ÷ audience"
+          />
+        </div>
+
+        {/* Trim warning */}
+        {results.trimmed && results.trimNote && (
           <motion.div
-            key={activeType}
-            initial={{ opacity: 0, y: 16 }}
+            initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -16 }}
-            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-            className="flex flex-1 flex-col"
+            className="mt-6 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm"
           >
-            {activeType === 'mcq'       && <MCQResults />}
-            {activeType === 'wordcloud' && <WordCloudResults />}
-            {activeType === 'openended' && <OpenEndedResults />}
-            {activeType === 'rating'    && <RatingResults />}
+            <AlertCircle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+            <div>
+              <p className="font-semibold text-amber-900">Some data was trimmed</p>
+              <p className="mt-0.5 text-xs leading-snug text-amber-800">{results.trimNote}</p>
+            </div>
           </motion.div>
-        </AnimatePresence>
-      </div>
+        )}
+      </section>
+
+      {/* Per-question results */}
+      <section className="mx-auto max-w-6xl px-6 pb-20">
+        <div className="space-y-4">
+          {results.questions.map((q, idx) => (
+            <QuestionResult
+              key={q.slideId}
+              index={idx}
+              question={q}
+              audienceCount={results.audienceCount}
+            />
+          ))}
+        </div>
+      </section>
     </main>
   )
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   1. MCQ Results — animated horizontal bars
+   Stat card — small KPI tile
    ───────────────────────────────────────────────────────────────────────── */
 
-function MCQResults() {
-  const { votes, total } = useLiveMCQ(MCQ_OPTIONS)
-  const maxVotes = Math.max(...votes.map(o => o.votes))
-  const displayTotal = useCountUp(total, 800)
-
-  return (
-    <div className="flex flex-1 flex-col">
-      {/* Question */}
-      <h2 className="mb-2 text-2xl font-semibold text-white md:text-3xl lg:text-4xl">
-        What is your biggest leadership challenge right now?
-      </h2>
-
-      {/* Response counter */}
-      <div className="mb-8 flex items-center gap-1.5 text-sm font-medium text-white/50">
-        <Users className="size-4" />
-        <motion.span
-          key={displayTotal}
-          animate={{ scale: [1, 1.15, 1] }}
-          transition={{ duration: 0.25 }}
-          className="text-white/80"
-        >
-          {displayTotal}
-        </motion.span>
-        <span>responses</span>
-      </div>
-
-      {/* Bars */}
-      <div className="flex flex-1 flex-col justify-center gap-5">
-        {votes.map((opt, i) => {
-          const pct = total > 0 ? Math.round((opt.votes / total) * 100) : 0
-          const isWinner = opt.votes === maxVotes && opt.votes > 0
-          const barColor = isWinner ? 'bg-hot-pink' : 'bg-white/25'
-          const textColor = isWinner ? 'text-hot-pink' : 'text-white/80'
-
-          return (
-            <motion.div
-              key={opt.label}
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.5, delay: i * 0.1, ease: [0.16, 1, 0.3, 1] }}
-              className="flex items-center gap-4"
-            >
-              {/* Letter badge */}
-              <span className={cn(
-                'flex size-9 shrink-0 items-center justify-center rounded-xl text-sm font-bold transition-colors duration-500 md:size-11 md:text-base',
-                isWinner ? 'bg-hot-pink text-white' : 'bg-white/10 text-white/60',
-              )}>
-                {opt.label}
-              </span>
-
-              {/* Option text */}
-              <span className={cn(
-                'w-52 shrink-0 text-sm font-medium leading-tight transition-colors duration-500 md:w-64 md:text-base lg:text-lg',
-                isWinner ? 'text-white' : 'text-white/70',
-              )}>
-                {opt.text}
-              </span>
-
-              {/* Bar track */}
-              <div className="relative h-10 flex-1 overflow-hidden rounded-xl bg-white/8 md:h-12">
-                <motion.div
-                  className={cn('absolute inset-y-0 left-0 rounded-xl transition-colors duration-500', barColor)}
-                  initial={{ width: '0%' }}
-                  animate={{ width: `${pct}%` }}
-                  transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-                />
-                {/* Winner shimmer */}
-                {isWinner && (
-                  <motion.div
-                    className="absolute inset-y-0 left-0 w-full rounded-xl bg-gradient-to-r from-transparent via-white/20 to-transparent"
-                    animate={{ x: ['-100%', '200%'] }}
-                    transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut', repeatDelay: 1 }}
-                  />
-                )}
-              </div>
-
-              {/* Percentage */}
-              <span className={cn('w-14 text-right text-lg font-bold tabular-nums md:text-2xl', textColor)}>
-                <PercentCounter target={pct} />%
-              </span>
-
-              {/* Vote count */}
-              <span className="w-12 text-right text-sm text-white/40 tabular-nums md:text-base">
-                ({opt.votes})
-              </span>
-            </motion.div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-function PercentCounter({ target }: { target: number }) {
-  const count = useCountUp(target, 700)
-  return <>{count}</>
-}
-
-/* ─────────────────────────────────────────────────────────────────────────
-   2. Word Cloud Results — full-screen dramatic cloud on dark bg
-   ───────────────────────────────────────────────────────────────────────── */
-
-const CLOUD_COLORS_DARK = [
-  'text-white',        'text-sky-blue',    'text-fresh-green',
-  'text-white/80',     'text-golden-sun',  'text-sky-blue/80',
-  'text-white/70',     'text-fresh-green/80',
-]
-const ROTATIONS_BIG = [-8, -4, 0, 4, 8, -6, 6, -3, 3, 0, -5, 5, -7, 7]
-
-function cloudSizeClass(count: number) {
-  if (count >= 17) return 'text-6xl font-bold md:text-8xl'
-  if (count >= 13) return 'text-4xl font-bold md:text-6xl'
-  if (count >= 10) return 'text-3xl font-semibold md:text-5xl'
-  if (count >= 7)  return 'text-2xl font-semibold md:text-4xl'
-  if (count >= 5)  return 'text-xl  font-medium  md:text-3xl'
-  return                  'text-lg  font-medium  md:text-xl'
-}
-
-function WordCloudResults() {
-  const topWord = CLOUD_WORDS.reduce((a, b) => a.count > b.count ? a : b).text
-
-  return (
-    <div className="flex flex-1 flex-col">
-      <h2 className="mb-8 text-2xl font-semibold text-white md:text-3xl">
-        In one word, how would you describe your team's current culture?
-      </h2>
-
-      <div className="flex flex-1 flex-wrap items-center justify-center gap-x-8 gap-y-4 py-4">
-        {CLOUD_WORDS.map((w, i) => (
-          <motion.span
-            key={w.text}
-            initial={{ opacity: 0, scale: 0.2 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{
-              type: 'spring', stiffness: 320, damping: 22,
-              delay: i * 0.06,
-            }}
-            style={{ rotate: ROTATIONS_BIG[i % ROTATIONS_BIG.length] }}
-            className={cn(
-              cloudSizeClass(w.count),
-              w.text === topWord
-                ? 'text-hot-pink drop-shadow-[0_0_20px_rgba(255,0,101,0.6)]'
-                : CLOUD_COLORS_DARK[i % CLOUD_COLORS_DARK.length],
-              'select-none leading-none',
-            )}
-          >
-            {w.text}
-          </motion.span>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-/* ─────────────────────────────────────────────────────────────────────────
-   3. Open-ended Results — live scrolling answer cards
-   ───────────────────────────────────────────────────────────────────────── */
-
-function OpenEndedResults() {
-  const [visible, setVisible] = useState<typeof OPEN_ANSWERS>([])
-  const indexRef = useRef(0)
-
-  useEffect(() => {
-    // Reveal answers one by one, then loop
-    setVisible([])
-    indexRef.current = 0
-
-    const reveal = () => {
-      setVisible(OPEN_ANSWERS.slice(0, indexRef.current + 1))
-      indexRef.current++
-      if (indexRef.current < OPEN_ANSWERS.length) {
-        setTimeout(reveal, 1400)
-      }
-    }
-    const t = setTimeout(reveal, 300)
-    return () => clearTimeout(t)
-  }, [])
-
-  return (
-    <div className="flex flex-1 flex-col">
-      <h2 className="mb-6 text-2xl font-semibold text-white md:text-3xl">
-        What one change would make the biggest difference to your team in the next 90 days?
-      </h2>
-
-      <div className="flex items-center gap-2 mb-6 text-sm text-white/50">
-        <Users className="size-4" />
-        <span>{visible.length} responses so far</span>
-      </div>
-
-      <div className="grid flex-1 auto-rows-min gap-3 md:grid-cols-2 lg:grid-cols-3">
-        <AnimatePresence>
-          {visible.map((ans, i) => (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, y: 20, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-              className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm"
-            >
-              <p className="text-base font-light leading-relaxed text-white/90 md:text-lg">
-                "{ans.text}"
-              </p>
-              <p className="mt-3 text-xs font-medium text-white/40">
-                — {ans.name}
-              </p>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
-    </div>
-  )
-}
-
-/* ─────────────────────────────────────────────────────────────────────────
-   4. Rating Results — animated averages with star fill
-   ───────────────────────────────────────────────────────────────────────── */
-
-const STAR_COLORS = ['bg-white/20', 'bg-sky-blue/60', 'bg-fresh-green/70', 'bg-golden-sun/80', 'bg-hot-pink']
-
-function RatingResults() {
-  const totalVoters = RATING_PARAMS[0].counts.reduce((s, c) => s + c, 0)
-
-  return (
-    <div className="flex flex-1 flex-col">
-      <h2 className="mb-8 text-2xl font-semibold text-white md:text-3xl">
-        Rate your confidence in these leadership areas:
-      </h2>
-
-      <div className="flex flex-1 flex-col justify-center gap-6 lg:gap-8">
-        {RATING_PARAMS.map((param, idx) => (
-          <RatingRow key={param.name} param={param} delay={idx * 0.15} totalVoters={totalVoters} />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function RatingRow({
-  param,
-  delay,
-  totalVoters,
+function StatCard({
+  icon, label, value, sub, tint,
 }: {
-  param: typeof RATING_PARAMS[number]
-  delay: number
-  totalVoters: number
+  icon: React.ReactNode
+  label: string
+  value: string
+  sub?: string
+  tint: 'pink' | 'sky' | 'green'
 }) {
-  const displayAvg = useCountUp(Math.round(param.average * 10), 900, delay * 1000)
-  const realAvg = displayAvg / 10
+  const tintBg = {
+    pink:  'bg-hot-pink/10 text-hot-pink',
+    sky:   'bg-sky-blue/10 text-sky-blue',
+    green: 'bg-fresh-green/10 text-fresh-green',
+  }[tint]
 
   return (
     <motion.div
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.5, delay, ease: [0.16, 1, 0.3, 1] }}
-      className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/5 p-5 md:p-6"
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+      className="rounded-2xl border border-midnight-sky-100 bg-white p-5 shadow-[0_2px_12px_-4px_rgba(0,0,121,0.06)]"
     >
-      {/* Row header */}
-      <div className="flex items-center justify-between">
-        <span className="text-lg font-semibold text-white md:text-xl">{param.name}</span>
-        <div className="flex items-baseline gap-1">
-          <span className="text-4xl font-bold tabular-nums text-hot-pink md:text-5xl">
-            {realAvg.toFixed(1)}
-          </span>
-          <span className="text-lg text-white/40">/5</span>
-        </div>
+      <div className="flex items-center gap-2">
+        <span className={cn('flex size-7 items-center justify-center rounded-lg', tintBg)}>
+          {icon}
+        </span>
+        <span className="text-xs font-medium uppercase tracking-wider text-midnight-sky-500">{label}</span>
       </div>
-
-      {/* Star fill bar */}
-      <div className="relative h-3 overflow-hidden rounded-full bg-white/10">
-        <motion.div
-          className="absolute inset-y-0 left-0 rounded-full bg-hot-pink"
-          initial={{ width: '0%' }}
-          animate={{ width: `${(param.average / 5) * 100}%` }}
-          transition={{ duration: 0.9, delay, ease: [0.16, 1, 0.3, 1] }}
-        />
-      </div>
-
-      {/* Star distribution bars */}
-      <div className="flex items-end gap-1.5 pt-1">
-        {param.counts.map((count, i) => {
-          const pct = (count / totalVoters) * 100
-          return (
-            <div key={i} className="flex flex-1 flex-col items-center gap-1">
-              <motion.div
-                className={cn('w-full rounded-t-md', STAR_COLORS[i])}
-                initial={{ height: 0 }}
-                animate={{ height: `${Math.max(pct * 1.2, 4)}px` }}
-                transition={{ duration: 0.7, delay: delay + i * 0.06, ease: [0.16, 1, 0.3, 1] }}
-              />
-              <span className="text-[10px] font-medium text-white/40">{i + 1}★</span>
-            </div>
-          )
-        })}
-        <div className="ml-2 flex flex-col justify-end pb-4 text-xs text-white/40">
-          <span>{totalVoters} votes</span>
-        </div>
-      </div>
+      <p className="mt-3 text-3xl font-bold tabular-nums text-midnight-sky-900">{value}</p>
+      {sub && <p className="mt-1 text-[11px] font-light text-midnight-sky-400">{sub}</p>}
     </motion.div>
   )
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Per-question result block
+   ───────────────────────────────────────────────────────────────────────── */
+
+const TYPE_LABELS: Record<string, string> = {
+  mcq:       'Multiple Choice',
+  wordcloud: 'Word Cloud',
+  openended: 'Open-ended',
+  rating:    'Rating',
+}
+const TYPE_COLORS: Record<string, { bg: string; text: string }> = {
+  mcq:       { bg: 'bg-sky-blue/10',    text: 'text-sky-blue'    },
+  wordcloud: { bg: 'bg-fresh-green/10', text: 'text-fresh-green' },
+  openended: { bg: 'bg-golden-sun/10',  text: 'text-golden-sun'  },
+  rating:    { bg: 'bg-hot-pink/10',    text: 'text-hot-pink'    },
+}
+
+function QuestionResult({ index, question, audienceCount }: {
+  index: number
+  question: ResultQuestion
+  audienceCount: number
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const meta = TYPE_COLORS[question.type] ?? TYPE_COLORS.mcq
+  const participation = audienceCount > 0
+    ? Math.min(100, Math.round((question.responseCount / audienceCount) * 100))
+    : 0
+  // For visualization we only need responses
+  const responses = question.responses
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, delay: index * 0.05, ease: [0.16, 1, 0.3, 1] }}
+      className="overflow-hidden rounded-2xl border border-midnight-sky-100 bg-white shadow-[0_2px_12px_-4px_rgba(0,0,121,0.06)]"
+    >
+      {/* Question header */}
+      <div className="border-b border-midnight-sky-100 px-6 py-5">
+        <div className="mb-2 flex items-center gap-2">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-midnight-sky-400">
+            Q{index + 1}
+          </span>
+          <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider', meta.bg, meta.text)}>
+            {TYPE_LABELS[question.type] ?? question.type}
+          </span>
+        </div>
+        <h3 className="text-xl font-semibold text-midnight-sky-900">{question.question || '(Untitled question)'}</h3>
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-midnight-sky-500">
+          <span className="flex items-center gap-1.5">
+            <BarChart2 className="size-3" />
+            <span className="font-semibold text-midnight-sky-700">{question.responseCount}</span>
+            <span>responses</span>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <TrendingUp className="size-3" />
+            <span className="font-semibold text-midnight-sky-700">{participation}%</span>
+            <span>participation</span>
+          </span>
+        </div>
+      </div>
+
+      {/* Visualization */}
+      <div className="px-6 py-5">
+        {question.type === 'mcq'       && <MCQVisual q={question} />}
+        {question.type === 'wordcloud' && <WordCloudVisual q={question} />}
+        {question.type === 'openended' && <OpenEndedVisual q={question} />}
+        {question.type === 'rating'    && <RatingVisual q={question} />}
+      </div>
+
+      {/* Expandable per-respondent list */}
+      {responses.length > 0 && (
+        <div className="border-t border-midnight-sky-100">
+          <button
+            onClick={() => setExpanded(v => !v)}
+            className="flex w-full items-center justify-between px-6 py-3 text-sm font-medium text-midnight-sky-600 transition hover:bg-midnight-sky-50"
+          >
+            <span>
+              {expanded ? 'Hide' : 'Show'} {responses.length} {responses.length === 1 ? 'response' : 'responses'}
+            </span>
+            {expanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+          </button>
+          <AnimatePresence initial={false}>
+            {expanded && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+                className="overflow-hidden"
+              >
+                <RespondentList q={question} />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
+    </motion.div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Visualizations
+   ───────────────────────────────────────────────────────────────────────── */
+
+function MCQVisual({ q }: { q: ResultQuestion }) {
+  // Tally votes per option
+  const votes = Array(q.options.length).fill(0)
+  q.responses.forEach(r => {
+    const i = parseInt(r.value, 10)
+    if (!isNaN(i) && i >= 0 && i < q.options.length) votes[i]++
+  })
+  const total = votes.reduce((s, v) => s + v, 0) || q.responseCount
+  const maxV  = Math.max(...votes, 1)
+
+  return (
+    <div className="space-y-3">
+      {q.options.map((opt, i) => {
+        const v   = votes[i]
+        const pct = total > 0 ? Math.round((v / total) * 100) : 0
+        const isWinner = v > 0 && v === maxV
+        return (
+          <div key={i} className="flex items-center gap-3">
+            <span className={cn(
+              'flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold',
+              isWinner ? 'bg-hot-pink text-white' : 'bg-midnight-sky-100 text-midnight-sky-600',
+            )}>
+              {String.fromCharCode(65 + i)}
+            </span>
+            <span className={cn(
+              'w-32 shrink-0 truncate text-sm font-medium sm:w-48',
+              isWinner ? 'text-midnight-sky-900' : 'text-midnight-sky-700',
+            )}>
+              {opt || `Option ${String.fromCharCode(65 + i)}`}
+            </span>
+            <div className="relative h-7 min-w-0 flex-1 overflow-hidden rounded-lg bg-midnight-sky-100">
+              <motion.div
+                className={cn('absolute inset-y-0 left-0 rounded-lg', isWinner ? 'bg-hot-pink' : 'bg-midnight-sky-300')}
+                initial={{ width: '0%' }}
+                animate={{ width: `${pct}%` }}
+                transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
+              />
+            </div>
+            <span className={cn('w-12 shrink-0 text-right text-base font-bold tabular-nums', isWinner ? 'text-hot-pink' : 'text-midnight-sky-500')}>
+              {pct}%
+            </span>
+            <span className="w-10 shrink-0 text-right text-xs tabular-nums text-midnight-sky-400">
+              ({v})
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function WordCloudVisual({ q }: { q: ResultQuestion }) {
+  // Frequency tally
+  const freq = new Map<string, number>()
+  q.responses.forEach(r => {
+    const w = r.value.trim().toLowerCase()
+    if (w) freq.set(w, (freq.get(w) ?? 0) + 1)
+  })
+  const sorted = Array.from(freq.entries()).map(([text, count]) => ({ text, count })).sort((a, b) => b.count - a.count)
+  if (sorted.length === 0) {
+    return <p className="text-sm font-light text-midnight-sky-400">No responses yet.</p>
+  }
+  const top = sorted[0].text
+
+  function sizeClass(count: number) {
+    if (count >= 17) return 'text-4xl font-bold'
+    if (count >= 13) return 'text-3xl font-bold'
+    if (count >= 10) return 'text-2xl font-semibold'
+    if (count >= 7)  return 'text-xl font-semibold'
+    if (count >= 5)  return 'text-lg font-medium'
+    return                  'text-base font-medium'
+  }
+
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-3 py-4">
+      {sorted.map(w => (
+        <span
+          key={w.text}
+          className={cn(
+            sizeClass(w.count),
+            w.text === top ? 'text-hot-pink' : 'text-midnight-sky-700',
+          )}
+          title={`${w.count} response${w.count === 1 ? '' : 's'}`}
+        >
+          {w.text}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function OpenEndedVisual({ q }: { q: ResultQuestion }) {
+  if (q.responses.length === 0) {
+    return <p className="text-sm font-light text-midnight-sky-400">No responses yet.</p>
+  }
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {q.responses.slice(0, 6).map((r, i) => (
+        <div key={i} className="rounded-xl border border-midnight-sky-100 bg-midnight-sky-50/30 p-4">
+          <p className="text-sm font-light leading-relaxed text-midnight-sky-700">"{r.value}"</p>
+          <p className="mt-2 text-[11px] font-medium text-midnight-sky-400">— {r.name}</p>
+        </div>
+      ))}
+      {q.responses.length > 6 && (
+        <p className="col-span-full text-center text-xs font-light text-midnight-sky-400">
+          + {q.responses.length - 6} more — expand below to see all
+        </p>
+      )}
+    </div>
+  )
+}
+
+function RatingVisual({ q }: { q: ResultQuestion }) {
+  const ratingMax = q.ratingMax === 10 ? 10 : 5
+  const buckets   = ratingMax + 1   // 0..N inclusive
+  // For rating: parse each response (JSON array of numbers, one per parameter).
+  // Scale is 0..ratingMax inclusive (audience can vote 0).
+  const sums  = Array(q.options.length).fill(0)
+  const cnts  = Array(q.options.length).fill(0)
+  // Per-parameter distribution: dist[paramIdx][bucket] = vote count for that value
+  const dist  = Array.from({ length: q.options.length }, () => Array(buckets).fill(0))
+  q.responses.forEach(r => {
+    try {
+      const arr = JSON.parse(r.value) as number[]
+      arr.forEach((v, i) => {
+        if (i < q.options.length && typeof v === 'number' && v >= 0 && v <= ratingMax) {
+          sums[i] += v
+          cnts[i]++
+          dist[i][v]++
+        }
+      })
+    } catch { /* skip */ }
+  })
+  const avgs = sums.map((s, i) => cnts[i] > 0 ? s / cnts[i] : 0)
+
+  function bucketColor(bucketIdx: number, total: number): string {
+    if (total <= 1) return '#ff0065'
+    const t = bucketIdx / (total - 1)
+    if (t === 1)   return '#ff0065'
+    if (t >= 0.75) return 'rgba(255,0,101,0.55)'
+    if (t >= 0.5)  return 'rgba(255,199,9,0.65)'
+    if (t >= 0.25) return 'rgba(255,199,9,0.38)'
+    return 'rgba(0,0,121,0.22)'
+  }
+
+  // Per-parameter labels with slide-wide fallback for legacy snapshots
+  const lefts  = q.leftLabels  ?? q.options.map(() => q.leftLabel  ?? '')
+  const rights = q.rightLabels ?? q.options.map(() => q.rightLabel ?? '')
+
+  return (
+    <div className="space-y-3">
+      {q.options.map((label, i) => {
+        const avg = avgs[i]
+        const pct = (avg / ratingMax) * 100
+        const paramDist = dist[i]
+        const maxBucket = Math.max(...paramDist, 1)
+        const left  = lefts[i]  ?? ''
+        const right = rights[i] ?? ''
+        return (
+          <div key={i} className="rounded-xl border border-midnight-sky-100 bg-midnight-sky-50/40 p-4">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <span className="text-sm font-semibold text-midnight-sky-800">{label || `Parameter ${i + 1}`}</span>
+              <div className="flex items-baseline gap-0.5">
+                <span className="text-2xl font-extrabold tabular-nums text-hot-pink">{avg.toFixed(1)}</span>
+                <span className="text-base font-semibold text-midnight-sky-500">/{ratingMax}</span>
+              </div>
+            </div>
+
+            {/* Average progress bar */}
+            <div className="relative h-2 overflow-hidden rounded-full bg-midnight-sky-100">
+              <motion.div
+                className="absolute inset-y-0 left-0 rounded-full bg-hot-pink"
+                initial={{ width: '0%' }}
+                animate={{ width: `${pct}%` }}
+                transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
+              />
+            </div>
+
+            {/* Per-bucket distribution — how many people chose each score */}
+            <div className="mt-3 flex items-end gap-1" style={{ height: 56 }}>
+              {paramDist.map((count, b) => {
+                const barH = count > 0 ? Math.max((count / maxBucket) * 32, 3) : 0
+                return (
+                  <div key={b} className="flex flex-1 flex-col items-center gap-0.5">
+                    <span className={cn(
+                      'text-[10px] font-bold tabular-nums',
+                      count > 0 ? 'text-midnight-sky-700' : 'text-transparent',
+                    )}>
+                      {count > 0 ? `${count}×` : ''}
+                    </span>
+                    <div className="flex w-full items-end" style={{ height: 32 }}>
+                      <motion.div
+                        className="w-full rounded-t-sm"
+                        style={{ backgroundColor: bucketColor(b, buckets) }}
+                        initial={{ height: 0 }}
+                        animate={{ height: barH }}
+                        transition={{ duration: 0.6, delay: b * 0.03 }}
+                      />
+                    </div>
+                    <span className={cn(
+                      'text-[9px] font-medium tabular-nums',
+                      count > 0 ? 'text-midnight-sky-600' : 'text-midnight-sky-300',
+                    )}>{b}</span>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Scale end labels (left/right anchor text) or default score labels */}
+            <div className="mt-1 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-midnight-sky-400">
+              <span className="truncate pr-2">{left || '0 (low)'}</span>
+              <span className="truncate pl-2 text-right">{right || `${ratingMax} (high)`}</span>
+            </div>
+
+            <p className="mt-2 text-[11px] font-light text-midnight-sky-400">
+              Based on {cnts[i]} {cnts[i] === 1 ? 'response' : 'responses'} · numbers above bars = votes at that score
+            </p>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Per-respondent list — shown inside the expandable section per question
+   ───────────────────────────────────────────────────────────────────────── */
+
+function RespondentList({ q }: { q: ResultQuestion }) {
+  return (
+    <div className="max-h-96 overflow-y-auto bg-midnight-sky-50/30 px-6 py-3">
+      <table className="w-full text-sm">
+        <thead className="sticky top-0 bg-midnight-sky-50/95 backdrop-blur-sm">
+          <tr className="text-[10px] font-semibold uppercase tracking-wider text-midnight-sky-400">
+            <th className="py-2 text-left">Name</th>
+            <th className="py-2 text-left">Response</th>
+            <th className="py-2 text-right">Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          {q.responses.map((r, i) => (
+            <tr key={i} className="border-t border-midnight-sky-100/60">
+              <td className="py-2 pr-3 align-top">
+                <span className={cn('font-medium', r.name === 'Anonymous' ? 'text-midnight-sky-400 italic' : 'text-midnight-sky-700')}>
+                  {r.name}
+                </span>
+              </td>
+              <td className="py-2 pr-3 align-top text-midnight-sky-700">
+                {formatResponseValue(r, q)}
+              </td>
+              <td className="py-2 text-right align-top text-xs tabular-nums text-midnight-sky-400">
+                {formatTime(r.time)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function formatResponseValue(r: ResultResponse, q: ResultQuestion): React.ReactNode {
+  if (q.type === 'mcq') {
+    const idx = parseInt(r.value, 10)
+    const optText = q.options[idx] || `Option ${String.fromCharCode(65 + idx)}`
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <span className="flex size-5 items-center justify-center rounded-md bg-hot-pink/10 text-[10px] font-bold text-hot-pink">
+          {String.fromCharCode(65 + idx)}
+        </span>
+        {optText}
+      </span>
+    )
+  }
+  if (q.type === 'rating') {
+    const ratingMax = q.ratingMax === 10 ? 10 : 5
+    try {
+      const arr = JSON.parse(r.value) as number[]
+      return (
+        <div className="flex flex-wrap gap-x-3 gap-y-1">
+          {arr.map((v, i) => (
+            <span key={i} className="inline-flex items-baseline gap-1 text-xs">
+              <span className="text-midnight-sky-500">{q.options[i] || `P${i + 1}`}:</span>
+              <span className="font-bold text-hot-pink">{v}</span>
+              <span className="text-midnight-sky-400">/{ratingMax}</span>
+              <Star className="size-3 fill-hot-pink/40 text-hot-pink/60" />
+            </span>
+          ))}
+        </div>
+      )
+    } catch {
+      return <span className="text-midnight-sky-400 italic">invalid</span>
+    }
+  }
+  // wordcloud / openended
+  return <span className="break-words">{r.value}</span>
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Date helpers
+   ───────────────────────────────────────────────────────────────────────── */
+
+function formatTimestamp(ts: number): string {
+  const d = new Date(ts)
+  return d.toLocaleString(undefined, {
+    weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+  })
+}
+
+function formatTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   PDF generation
+   ───────────────────────────────────────────────────────────────────────── */
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckResults, totalResponses: number, avgParticipation: number) {
+  const pageW = doc.internal.pageSize.getWidth()
+  const margin = 40
+
+  // Cover
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(22)
+  doc.text(deckTitle, margin, 70)
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(11)
+  doc.setTextColor(120)
+  doc.text(`Live poll results — session ${r.sessionCode}`, margin, 92)
+  doc.text(formatTimestamp(r.conductedAt), margin, 108)
+
+  // Summary stats
+  doc.setFontSize(10)
+  doc.setTextColor(60)
+  const summary = [
+    ['Peak audience',    String(r.audienceCount)],
+    ['Total responses',  String(totalResponses)],
+    ['Avg participation', `${avgParticipation}%`],
+  ]
+  autoTable(doc, {
+    startY: 130,
+    head:   [['Metric', 'Value']],
+    body:   summary,
+    theme:  'grid',
+    headStyles: { fillColor: [0, 0, 121], textColor: 255, fontStyle: 'bold' },
+    styles: { fontSize: 10, cellPadding: 6 },
+    margin: { left: margin, right: margin },
+  })
+  if (r.trimmed && r.trimNote) {
+    let y = (doc as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 200
+    y += 12
+    doc.setFont('helvetica', 'italic')
+    doc.setTextColor(150, 100, 0)
+    doc.setFontSize(9)
+    doc.text('Note: ' + r.trimNote, margin, y, { maxWidth: pageW - margin * 2 })
+  }
+
+  // Per-question sections
+  r.questions.forEach((q, idx) => {
+    doc.addPage()
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(13)
+    doc.setTextColor(0, 0, 121)
+    doc.text(`Q${idx + 1}. ${q.question || '(Untitled question)'}`, margin, 60, { maxWidth: pageW - margin * 2 })
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+    doc.setTextColor(120)
+    doc.text(
+      `${TYPE_LABELS[q.type] ?? q.type}   ·   ${q.responseCount} responses`,
+      margin, 80,
+    )
+    let cursorY = 100
+
+    if (q.type === 'mcq') {
+      const votes = Array(q.options.length).fill(0)
+      q.responses.forEach(r => {
+        const i = parseInt(r.value, 10)
+        if (!isNaN(i) && i >= 0 && i < q.options.length) votes[i]++
+      })
+      const total = votes.reduce((s, v) => s + v, 0) || q.responseCount
+      const body = q.options.map((opt, i) => {
+        const pct = total > 0 ? Math.round((votes[i] / total) * 100) : 0
+        return [String.fromCharCode(65 + i), opt || '-', String(votes[i]), `${pct}%`]
+      })
+      autoTable(doc, {
+        startY: cursorY,
+        head:   [['', 'Option', 'Votes', '%']],
+        body,
+        theme:  'striped',
+        headStyles: { fillColor: [0, 0, 121] },
+        styles: { fontSize: 10, cellPadding: 6 },
+        margin: { left: margin, right: margin },
+      })
+      cursorY = (doc as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? cursorY + 50
+    } else if (q.type === 'rating') {
+      const ratingMax = q.ratingMax === 10 ? 10 : 5
+      const sums = Array(q.options.length).fill(0)
+      const cnts = Array(q.options.length).fill(0)
+      q.responses.forEach(r => {
+        try {
+          const arr = JSON.parse(r.value) as number[]
+          arr.forEach((v, i) => {
+            if (i < q.options.length && typeof v === 'number' && v >= 0 && v <= ratingMax) {
+              sums[i] += v; cnts[i]++
+            }
+          })
+        } catch { /* skip */ }
+      })
+      const body = q.options.map((opt, i) => [
+        opt || `Parameter ${i + 1}`,
+        cnts[i] > 0 ? (sums[i] / cnts[i]).toFixed(1) : '-',
+        `/${ratingMax}`,
+        String(cnts[i]),
+      ])
+      autoTable(doc, {
+        startY: cursorY,
+        head:   [['Parameter', 'Average', 'Scale', 'Ratings']],
+        body,
+        theme:  'striped',
+        headStyles: { fillColor: [0, 0, 121] },
+        styles: { fontSize: 10, cellPadding: 6 },
+        margin: { left: margin, right: margin },
+      })
+      cursorY = (doc as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? cursorY + 50
+    } else if (q.type === 'wordcloud') {
+      const freq = new Map<string, number>()
+      q.responses.forEach(r => {
+        const w = r.value.trim().toLowerCase()
+        if (w) freq.set(w, (freq.get(w) ?? 0) + 1)
+      })
+      const body = Array.from(freq.entries())
+        .map(([word, count]) => [word, String(count)])
+        .sort((a, b) => parseInt(b[1], 10) - parseInt(a[1], 10))
+      if (body.length > 0) {
+        autoTable(doc, {
+          startY: cursorY,
+          head:   [['Word', 'Mentions']],
+          body,
+          theme:  'striped',
+          headStyles: { fillColor: [0, 0, 121] },
+          styles: { fontSize: 10, cellPadding: 6 },
+          margin: { left: margin, right: margin },
+        })
+        cursorY = (doc as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? cursorY + 50
+      }
+    }
+
+    // Individual responses table (if any)
+    if (q.responses.length > 0) {
+      const body = q.responses.map(r => [
+        r.name,
+        formatResponseAsText(r, q),
+        formatTime(r.time),
+      ])
+      autoTable(doc, {
+        startY: cursorY + 20,
+        head:   [['Respondent', 'Response', 'Time']],
+        body,
+        theme:  'grid',
+        headStyles: { fillColor: [60, 60, 80] },
+        styles: { fontSize: 9, cellPadding: 5 },
+        columnStyles: { 1: { cellWidth: 'auto' } },
+        margin: { left: margin, right: margin },
+      })
+    }
+  })
+}
+
+function formatResponseAsText(r: ResultResponse, q: ResultQuestion): string {
+  if (q.type === 'mcq') {
+    const idx = parseInt(r.value, 10)
+    const opt = q.options[idx] || `Option ${String.fromCharCode(65 + idx)}`
+    return `${String.fromCharCode(65 + idx)}. ${opt}`
+  }
+  if (q.type === 'rating') {
+    const ratingMax = q.ratingMax === 10 ? 10 : 5
+    try {
+      const arr = JSON.parse(r.value) as number[]
+      return arr.map((v, i) => `${q.options[i] || `P${i + 1}`}: ${v}/${ratingMax}`).join('  |  ')
+    } catch { return r.value }
+  }
+  return r.value
 }

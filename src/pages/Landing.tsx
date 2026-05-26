@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
-import { ArrowRight, BarChart2, QrCode, FileImage, Zap } from 'lucide-react'
-import { AlayaMark, DnaMonogram } from '@/components/AlayaMark'
+import { BarChart2, QrCode, FileImage, Zap } from 'lucide-react'
+import { AlayaMark } from '@/components/AlayaMark'
 
 /* ─────────────────────────────────────────────────────────────────────────
    Landing page
@@ -49,15 +49,15 @@ function Nav() {
         <div className="flex items-center gap-3">
           <Link
             to="/join"
-            className="hidden text-sm font-light text-white/70 transition hover:text-white sm:inline"
+            className="hidden rounded-full bg-sky-blue px-4 py-2 text-sm font-semibold text-white shadow-[0_0_14px_-4px] shadow-sky-blue/50 transition-all hover:scale-[1.02] hover:shadow-[0_0_20px_-2px] hover:shadow-sky-blue/70 sm:inline-flex"
           >
-            Join a session
+            Join Session
           </Link>
           <Link
-            to="/create"
-            className="rounded-full bg-white/10 px-4 py-2 text-sm font-medium text-white backdrop-blur-md transition hover:bg-white/20"
+            to="/decks"
+            className="rounded-full bg-fresh-green px-4 py-2 text-sm font-semibold text-white shadow-[0_0_14px_-4px] shadow-fresh-green/50 transition-all hover:scale-[1.02] hover:shadow-[0_0_20px_-2px] hover:shadow-fresh-green/70"
           >
-            Create session
+            Create Session
           </Link>
         </div>
       </div>
@@ -92,9 +92,8 @@ function Hero() {
         transition={{ duration: 0.7, delay: 0.8, ease: [0.16, 1, 0.3, 1] }}
         className="mt-12 flex flex-col items-center gap-4 sm:flex-row sm:gap-5"
       >
-        <PrimaryCta to="/create">
-          Start a session — free
-          <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+        <PrimaryCta to="/decks">
+          Start Live Poll
         </PrimaryCta>
         <a
           href="#how"
@@ -194,7 +193,7 @@ const STEPS = [
   {
     number: '01',
     title:  'Build your session',
-    body:   'Import your deck as a PDF and drop in question slides — multiple choice, word clouds, open-ended, or star ratings.',
+    body:   'Import PDFs, HTML presentations, or videos — then mix in question slides for live interaction. Or build from scratch with custom canvas slides.',
     color:  'text-sky-blue',
     bg:     'bg-sky-blue/10',
     border: 'border-sky-blue/20',
@@ -278,15 +277,15 @@ const FEATURES = [
   },
   {
     icon:  <FileImage className="size-5" />,
-    title: 'Pixel-perfect slide import',
-    body:  'Export your deck from PowerPoint, Keynote, or Google Slides as a PDF. Slides look exactly as designed.',
+    title: 'Any slide, any format',
+    body:  'PDF, HTML presentations, videos, images — or build custom slides from scratch. Import once, present anywhere.',
     color: 'text-fresh-green',
     bg:    'bg-fresh-green/10',
   },
   {
     icon:  <Zap className="size-5" />,
-    title: '4 question types',
-    body:  'Multiple choice, word cloud, open-ended responses, and star ratings — everything you need for a great session.',
+    title: '4 ways to engage',
+    body:  'Multiple choice, word cloud, open-ended responses, and star ratings — mix them between any slides for live interaction.',
     color: 'text-golden-sun',
     bg:    'bg-golden-sun/10',
   },
@@ -338,9 +337,8 @@ function Features() {
         className="mt-16 flex flex-col items-center gap-4 text-center"
       >
         <p className="text-lg font-light text-white/60">Ready to run your next session?</p>
-        <PrimaryCta to="/create">
-          Create a session now
-          <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+        <PrimaryCta to="/decks">
+          Create a Live Poll now
         </PrimaryCta>
       </motion.div>
     </section>
@@ -400,13 +398,10 @@ function FooterStrip() {
   return (
     <div className="relative z-10 border-t border-white/5">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5 text-xs font-light text-white/40 sm:px-10">
-        <span className="inline-flex items-center gap-2">
-          <DnaMonogram className="h-4" animate={false} />
-          Built by Alaya · for teams that lead
-        </span>
+        <span>Built by Alaya · for teams that lead</span>
         <div className="hidden items-center gap-5 sm:flex">
           <Link to="/join" className="transition hover:text-white/70">Join a session</Link>
-          <Link to="/create" className="transition hover:text-white/70">Create a session</Link>
+          <Link to="/decks" className="transition hover:text-white/70">Create a session</Link>
         </div>
       </div>
     </div>

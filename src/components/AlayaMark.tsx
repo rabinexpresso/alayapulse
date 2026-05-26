@@ -69,13 +69,54 @@ export function AlayaWordmark({ className }: { className?: string }) {
 }
 
 /** Combined monogram + wordmark — used in nav.
- *  Monogram intentionally omitted until the official brand SVG file is provided.
- *  To restore it: add <DnaMonogram className="h-7" animate={false} /> before <AlayaWordmark />.
+ *  Wraps the wordmark in a Framer Motion div that pulses a coloured
+ *  drop-shadow in a heartbeat rhythm (lub-dub), cycling through the
+ *  three Alaya brand colours: hot-pink → sky-blue → fresh-green.
  */
 export function AlayaMark({ className }: { className?: string }) {
   return (
-    <div className={cn('inline-flex items-center gap-2.5', className)}>
+    <motion.div
+      className={cn('inline-flex items-center gap-2.5', className)}
+      animate={{
+        filter: [
+          /* ── Hot-pink lub-dub ─────────────────────────────────────── */
+          'drop-shadow(0 0 0px rgba(255,0,101,0))',
+          // lub — tight inner glow + wide outer halo
+          'drop-shadow(0 0 6px rgba(255,0,101,1)) drop-shadow(0 0 18px rgba(255,0,101,0.55))',
+          // dip
+          'drop-shadow(0 0 2px rgba(255,0,101,0.35))',
+          // dub — stronger than lub
+          'drop-shadow(0 0 10px rgba(255,0,101,1)) drop-shadow(0 0 28px rgba(255,0,101,0.65))',
+          'drop-shadow(0 0 0px rgba(255,0,101,0))',
+          /* ── Sky-blue lub-dub ─────────────────────────────────────── */
+          'drop-shadow(0 0 0px rgba(0,176,255,0))',
+          'drop-shadow(0 0 6px rgba(0,176,255,1)) drop-shadow(0 0 18px rgba(0,176,255,0.55))',
+          'drop-shadow(0 0 2px rgba(0,176,255,0.35))',
+          'drop-shadow(0 0 10px rgba(0,176,255,1)) drop-shadow(0 0 28px rgba(0,176,255,0.65))',
+          'drop-shadow(0 0 0px rgba(0,176,255,0))',
+          /* ── Fresh-green lub-dub ──────────────────────────────────── */
+          'drop-shadow(0 0 0px rgba(66,219,102,0))',
+          'drop-shadow(0 0 6px rgba(66,219,102,1)) drop-shadow(0 0 18px rgba(66,219,102,0.55))',
+          'drop-shadow(0 0 2px rgba(66,219,102,0.35))',
+          'drop-shadow(0 0 10px rgba(66,219,102,1)) drop-shadow(0 0 28px rgba(66,219,102,0.65))',
+          'drop-shadow(0 0 0px rgba(66,219,102,0))',
+          /* ── Silent rest until loop ───────────────────────────────── */
+          'drop-shadow(0 0 0px rgba(255,0,101,0))',
+        ],
+      }}
+      transition={{
+        duration: 6,
+        repeat: Infinity,
+        ease: 'linear',
+        times: [
+          0,    0.06, 0.10, 0.15, 0.22,   // pink  (0 – 22 %)
+          0.33, 0.39, 0.43, 0.48, 0.55,   // blue  (33 – 55 %)
+          0.66, 0.72, 0.76, 0.81, 0.88,   // green (66 – 88 %)
+          1.00,                            // silent hold → loop
+        ],
+      }}
+    >
       <AlayaWordmark />
-    </div>
+    </motion.div>
   )
 }

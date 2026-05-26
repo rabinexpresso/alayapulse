@@ -1,17 +1,34 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, Trash2, Monitor, Cloud, LogOut, Clock, Layers, ArrowRightLeft } from 'lucide-react'
+import { Plus, Trash2, Monitor, Cloud, LogOut, Clock, Layers, ArrowRightLeft, FileText, Download, Upload, Copy, Search, X as XIcon } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
 import { cn } from '@/lib/utils'
 import {
   getStorageBackend, setStorageBackend, clearStorageBackend,
-  browserListDecks, browserDeleteDeck,
-  cloudListDecks, cloudDeleteDeck,
+  browserListDecks, browserSaveDeck, browserDeleteDeck,
+  cloudListDecks, cloudSaveDeck, cloudDeleteDeck,
   signInWithGoogle, signOutUser,
   onAuthStateChanged, auth,
-  type StorageBackend, type Deck, type User,
+  loadResults,
+  getRememberMe, setRememberMe, getCachedUser, saveCachedUser, clearCachedUser,
+  type StorageBackend, type Deck, type User, type CachedUser,
 } from '@/lib/deckStorage'
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Deck JSON export helper (mirrors Create.tsx)
+   ───────────────────────────────────────────────────────────────────────── */
+
+function downloadDeckJSON(title: string, slides: unknown[]) {
+  const payload = JSON.stringify({ version: 1, title, exportedAt: new Date().toISOString(), slides }, null, 2)
+  const blob    = new Blob([payload], { type: 'application/json' })
+  const url     = URL.createObjectURL(blob)
+  const a       = document.createElement('a')
+  a.href        = url
+  a.download    = `${title.replace(/[^a-z0-9]/gi, '_') || 'deck'}.apulse.json`
+  a.click()
+  URL.revokeObjectURL(url)
+}
 
 /* ─────────────────────────────────────────────────────────────────────────
    My Decks page — saved presentations library
@@ -27,6 +44,17 @@ export default function Decks() {
   const [signingIn,     setSigningIn]     = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [deleting,      setDeleting]      = useState(false)
+  // Incrementing this forces StorageChoiceScreen to fully remount (re-reads
+  // localStorage) when "Remove from device" is clicked from the sign-in screen.
+  const [storageKey,    setStorageKey]    = useState(0)
+  const [searchQuery,   setSearchQuery]   = useState('')
+  const importRef = useRef<HTMLInputElement>(null)
+
+  const filteredDecks = useMemo(() =>
+    searchQuery.trim()
+      ? decks.filter(d => d.title.toLowerCase().includes(searchQuery.toLowerCase()))
+      : decks,
+  [decks, searchQuery])
 
   // Track Firebase auth state
   useEffect(() => {
@@ -58,17 +86,36 @@ export default function Decks() {
     setBackend('browser')
   }
 
-  async function handleChooseCloud() {
+  // Attempt counter — if the user clicks "Sign in with Google" again while
+  // an earlier attempt is still pending (e.g. they closed the Google
+  // account picker without choosing), the latest attempt supersedes the
+  // older one. Only the latest attempt clears the loading state.
+  const signInAttemptRef = useRef(0)
+
+  /**
+   * @param rememberMe  true  → save user info for quick re-sign-in (select_account prompt)
+   *                    false → require full password each time (login prompt)
+   */
+  async function handleChooseCloud(rememberMe: boolean) {
+    const attempt = ++signInAttemptRef.current
     setSigningIn(true)
     try {
-      const u = await signInWithGoogle()
+      // forceLogin = !rememberMe so "don't remember" always demands a password
+      const u = await signInWithGoogle(!rememberMe)
+      if (signInAttemptRef.current !== attempt) return
       setStorageBackend('cloud')
       setBackend('cloud')
       setUser(u)
+      // Persist (or clear) the remember-me preference and cached profile
+      setRememberMe(rememberMe)
+      if (rememberMe) saveCachedUser(u)
+      else            clearCachedUser(), setRememberMe(false)
     } catch {
-      // user cancelled — no-op
+      // user cancelled or the popup closed — no-op
     } finally {
-      setSigningIn(false)
+      if (signInAttemptRef.current === attempt) {
+        setSigningIn(false)
+      }
     }
   }
 
@@ -80,12 +127,54 @@ export default function Decks() {
     setBackend(null)
     setDecks([])
     setUser(null)
+    // Note: deliberately NOT clearing cached user here so personal-device
+    // users get quick re-sign-in. Shared-device users should use
+    // handleRemoveAccount instead.
+  }
+
+  /** Shared-device sign-out: wipes the cached Google profile + remember
+   *  preference AND redirects to Google's logout page so the account is
+   *  removed from the browser-level "Choose an account" popup too. */
+  async function handleRemoveAccount() {
+    await signOutUser()
+    clearCachedUser()
+    clearStorageBackend()
+    // Update React state as a fallback in case the redirect is ever blocked.
+    setBackend(null)
+    setDecks([])
+    setUser(null)
+    setStorageKey(k => k + 1)
+    // Open Google's logout page in a new tab — this signs the user out of Google
+    // in this browser, removing their account from the "Choose an account" popup.
+    // We open a new tab rather than redirecting the current page so the user
+    // stays on Alaya Pulse's clean sign-in screen.
+    window.open('https://accounts.google.com/Logout', '_blank', 'noopener,noreferrer')
   }
 
   function handleSwitchStorage() {
     clearStorageBackend()
     setBackend(null)
     setDecks([])
+  }
+
+  /* ── Duplicate ────────────────────────────────────────────────────────── */
+
+  async function handleDuplicateDeck(deck: Deck) {
+    const newId = Math.random().toString(36).slice(2, 10)
+    const copy: Deck = {
+      ...deck,
+      id:        newId,
+      title:     `${deck.title} (copy)`,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    try {
+      if (backend === 'browser') await browserSaveDeck(copy)
+      else await cloudSaveDeck(copy)
+      setDecks(prev => [copy, ...prev])
+    } catch {
+      alert('Could not duplicate deck — please try again.')
+    }
   }
 
   /* ── Delete ───────────────────────────────────────────────────────────── */
@@ -104,9 +193,36 @@ export default function Decks() {
 
   /* ── Open deck in editor ──────────────────────────────────────────────── */
 
-  function handleOpen(deck: Deck) {
-    navigate('/create', { state: { deck } })
+  async function handleOpen(deck: Deck) {
+    // Also load any saved live-poll results so the Results button is
+    // enabled when the user opens a deck that has previous results.
+    let lastResults
+    if (backend) {
+      try { lastResults = await loadResults(backend, deck.id) } catch { /* ignore */ }
+    }
+    navigate('/create', { state: { deck, lastResults } })
   }
+
+  /* ── Import deck from .apulse.json file ───────────────────────────────── */
+
+  const handleImportDeck = useCallback((file: File) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result as string)
+        if (!Array.isArray(data.slides)) throw new Error('invalid')
+        // Regenerate IDs to avoid collisions with existing slides
+        const uid = () => Math.random().toString(36).slice(2, 10)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const slides = (data.slides as any[]).map(s => ({ ...s, id: uid() }))
+        const title  = typeof data.title === 'string' ? data.title : 'Imported deck'
+        navigate('/create', { state: { slides, deckTitle: title } })
+      } catch {
+        alert('Could not import deck — the file may be invalid or corrupted.')
+      }
+    }
+    reader.readAsText(file)
+  }, [navigate])
 
   /* ── Render ───────────────────────────────────────────────────────────── */
 
@@ -114,9 +230,11 @@ export default function Decks() {
   if (!backend) {
     return (
       <StorageChoiceScreen
+        key={storageKey}
         signingIn={signingIn}
         onBrowser={handleChooseBrowser}
         onCloud={handleChooseCloud}
+        onRemoveAccount={handleRemoveAccount}
       />
     )
   }
@@ -125,110 +243,168 @@ export default function Decks() {
   if (backend === 'cloud' && !user && !loading) {
     return (
       <StorageChoiceScreen
+        key={storageKey}
         signingIn={signingIn}
         onBrowser={handleChooseBrowser}
         onCloud={handleChooseCloud}
+        onRemoveAccount={handleRemoveAccount}
         reauth
       />
     )
   }
 
   return (
-    <main className="min-h-screen" style={{ background: 'oklch(0.972 0.006 258)' }}>
+    <main className="min-h-screen bg-midnight-sky-50/60">
 
-      {/* ── Header ──────────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-10 border-b border-midnight-sky-100/60 bg-white/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
-          <Link to="/"><AlayaMark /></Link>
+      {/* ── Dark navy header + title hero ─────────────────────────────── */}
+      <div className="bg-midnight-sky-900">
+        {/* Nav bar */}
+        <header className="sticky top-0 z-10 border-b border-white/10 bg-midnight-sky-900/95 backdrop-blur-md">
+          <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
+            <Link to="/"><AlayaMark className="text-white" /></Link>
 
-          <div className="flex items-center gap-2">
-            {/* Storage badge */}
-            {backend === 'browser' ? (
-              <span className="flex items-center gap-1.5 rounded-full border border-midnight-sky-100 bg-white px-3 py-1 text-xs font-medium text-midnight-sky-500">
-                <Monitor className="size-3" />
-                This browser
-              </span>
-            ) : user ? (
-              <div className="flex items-center gap-2.5 rounded-full border border-midnight-sky-100 bg-white pl-1 pr-3 py-1">
-                {user.photoURL ? (
-                  <img
-                    src={user.photoURL}
-                    alt={user.displayName ?? ''}
-                    className="size-6 rounded-full"
-                  />
-                ) : (
-                  <div className="flex size-6 items-center justify-center rounded-full bg-hot-pink/10 text-[10px] font-bold text-hot-pink">
-                    {user.displayName?.[0] ?? '?'}
-                  </div>
-                )}
-                <span className="text-xs font-medium text-midnight-sky-700">
-                  {user.displayName?.split(' ')[0]}
+            <div className="flex items-center gap-2">
+              {/* Storage badge */}
+              {backend === 'browser' ? (
+                <span className="flex items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-medium text-white/70">
+                  <Monitor className="size-3" />
+                  This browser
                 </span>
-              </div>
-            ) : null}
+              ) : user ? (
+                <div className="flex items-center gap-2.5 rounded-full border border-white/15 bg-white/10 pl-1 pr-3 py-1">
+                  {user.photoURL ? (
+                    <img src={user.photoURL} alt={user.displayName ?? ''} className="size-6 rounded-full" />
+                  ) : (
+                    <div className="flex size-6 items-center justify-center rounded-full bg-hot-pink/20 text-[10px] font-bold text-hot-pink">
+                      {user.displayName?.[0] ?? '?'}
+                    </div>
+                  )}
+                  <span className="text-xs font-medium text-white/80">
+                    {user.displayName?.split(' ')[0]}
+                  </span>
+                </div>
+              ) : null}
 
-            {/* Change storage option (browser) */}
-            {backend === 'browser' && (
-              <button
-                onClick={handleSwitchStorage}
-                className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs text-midnight-sky-400 transition hover:bg-midnight-sky-50 hover:text-midnight-sky-700"
-              >
-                <ArrowRightLeft className="size-3" />
-                Change
-              </button>
-            )}
+              {backend === 'browser' && (
+                <button
+                  onClick={handleSwitchStorage}
+                  className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs text-white/40 transition hover:bg-white/10 hover:text-white/70"
+                >
+                  <ArrowRightLeft className="size-3" />
+                  Change
+                </button>
+              )}
 
-            {/* Sign out (cloud only) */}
-            {backend === 'cloud' && user && (
-              <button
-                onClick={handleSignOut}
-                className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs text-midnight-sky-400 transition hover:bg-midnight-sky-50 hover:text-midnight-sky-700"
+              {backend === 'cloud' && user && (
+                <div className="flex items-center gap-0.5">
+                  <button
+                    onClick={handleSignOut}
+                    className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs text-white/65 transition hover:bg-white/10 hover:text-white"
+                  >
+                    <LogOut className="size-3" />
+                    Sign out
+                  </button>
+                  <button
+                    onClick={handleRemoveAccount}
+                    title="Sign out and remove this Google account from the device — use this on shared laptops"
+                    className="rounded-full px-2.5 py-1.5 text-[10px] text-white/45 transition hover:bg-red-500/10 hover:text-red-400"
+                  >
+                    Remove
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </header>
+
+        {/* Title hero */}
+        <div className="mx-auto max-w-6xl px-6 pb-5 pt-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight text-white">My Decks</h1>
+              <p className="mt-1 text-sm font-light text-white/50">
+                {loading ? 'Loading…' : decks.length > 0
+                  ? `${filteredDecks.length} of ${decks.length} ${decks.length === 1 ? 'deck' : 'decks'}`
+                  : 'No decks yet'}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {/* Import deck from .apulse.json */}
+              <input
+                ref={importRef}
+                type="file"
+                accept=".json,.apulse"
+                className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) handleImportDeck(f); e.target.value = '' }}
+              />
+              <motion.button
+                onClick={() => importRef.current?.click()}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.97 }}
+                title="Import a deck shared by a colleague (.apulse.json)"
+                className="flex items-center gap-2 rounded-2xl border border-white/20 bg-white/8 px-4 py-2.5 text-sm font-semibold text-white/70 transition hover:bg-white/15 hover:text-white"
               >
-                <LogOut className="size-3" />
-                Sign out
-              </button>
-            )}
+                <Upload className="size-4" />
+                Import deck
+              </motion.button>
+
+              <motion.button
+                onClick={() => navigate('/create')}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.97 }}
+                className="flex items-center gap-2 rounded-2xl bg-hot-pink px-5 py-2.5 text-sm font-semibold text-white shadow-[0_4px_24px_-4px] shadow-hot-pink/60 transition-shadow hover:shadow-[0_4px_32px_-2px] hover:shadow-hot-pink/80"
+              >
+                <Plus className="size-4" />
+                New deck
+              </motion.button>
+            </div>
           </div>
         </div>
-      </header>
+      </div>
 
       {/* ── Page body ───────────────────────────────────────────────────── */}
-      <div className="mx-auto max-w-6xl px-6 pb-16 pt-10">
+      <div className="mx-auto max-w-6xl px-6 pb-16 pt-8">
 
-        {/* Title row */}
-        <div className="mb-10 flex items-end justify-between">
-          <div>
-            <h1 className="text-[2rem] font-bold tracking-tight text-midnight-sky-900">My Decks</h1>
-            <p className="mt-1 text-sm text-midnight-sky-400">
-              {loading ? 'Loading…' : decks.length > 0
-                ? `${decks.length} saved ${decks.length === 1 ? 'deck' : 'decks'}`
-                : 'Your saved presentations'}
-            </p>
+        {/* Search bar — only shown when there are decks to search */}
+        {decks.length > 0 && (
+          <div className="relative mb-7 max-w-sm">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-midnight-sky-400" />
+            <input
+              type="text"
+              placeholder="Search decks…"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full rounded-xl border border-midnight-sky-200 bg-white py-2.5 pl-9 pr-9 text-sm text-midnight-sky-800 placeholder:text-midnight-sky-400 focus:border-hot-pink focus:outline-none focus:ring-2 focus:ring-hot-pink/20"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-midnight-sky-400 hover:text-midnight-sky-700"
+              >
+                <XIcon className="size-3.5" />
+              </button>
+            )}
           </div>
-
-          <motion.button
-            onClick={() => navigate('/create')}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.97 }}
-            className="flex items-center gap-2 rounded-2xl bg-hot-pink px-5 py-2.5 text-sm font-semibold text-white shadow-[0_4px_24px_-4px] shadow-hot-pink/50 transition-shadow hover:shadow-[0_4px_32px_-2px] hover:shadow-hot-pink/60"
-          >
-            <Plus className="size-4" />
-            New deck
-          </motion.button>
-        </div>
+        )}
 
         {/* Deck grid / empty / loading */}
         {loading ? (
           <LoadingGrid />
         ) : decks.length === 0 ? (
           <EmptyState onNew={() => navigate('/create')} />
+        ) : filteredDecks.length === 0 ? (
+          <div className="flex flex-col items-center py-20 text-center">
+            <Search className="mb-3 size-8 text-midnight-sky-300" />
+            <p className="text-sm font-medium text-midnight-sky-500">No decks match "{searchQuery}"</p>
+            <button onClick={() => setSearchQuery('')} className="mt-2 text-xs text-hot-pink hover:underline">Clear search</button>
+          </div>
         ) : (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
           >
-            {decks.map((deck, i) => (
+            {filteredDecks.map((deck, i) => (
               <motion.div
                 key={deck.id}
                 initial={{ opacity: 0, y: 20 }}
@@ -239,6 +415,8 @@ export default function Decks() {
                   deck={deck}
                   onOpen={() => handleOpen(deck)}
                   onDelete={() => setConfirmDelete(deck.id)}
+                  onExport={() => downloadDeckJSON(deck.title, deck.slides as unknown[])}
+                  onDuplicate={() => handleDuplicateDeck(deck)}
                 />
               </motion.div>
             ))}
@@ -265,13 +443,25 @@ export default function Decks() {
    ───────────────────────────────────────────────────────────────────────── */
 
 function StorageChoiceScreen({
-  onBrowser, onCloud, signingIn, reauth = false,
+  onBrowser, onCloud, onRemoveAccount, signingIn, reauth = false,
 }: {
-  onBrowser:  () => void
-  onCloud:    () => void
-  signingIn:  boolean
-  reauth?:    boolean
+  onBrowser:         () => void
+  onCloud:           (rememberMe: boolean) => void
+  onRemoveAccount?:  () => void
+  signingIn:         boolean
+  reauth?:           boolean
 }) {
+  // "Keep me signed in" checkbox — defaults to whatever the user last chose,
+  // or false (secure default) if they've never signed in before.
+  const [rememberMe, setRememberMeLocal] = useState<boolean>(() => getRememberMe() ?? false)
+  // Cached user profile — shown in the "Welcome back" state
+  const [cachedUser] = useState<CachedUser | null>(() => getCachedUser())
+  // Whether the user clicked "Sign in differently" to override the cached profile
+  const [overrideCached, setOverrideCached] = useState(false)
+
+  const showWelcomeBack = !!(cachedUser && getRememberMe() === true && !overrideCached && !reauth)
+  const firstName = cachedUser?.displayName?.split(' ')[0] ?? 'you'
+
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-white px-6">
       <motion.div
@@ -306,43 +496,159 @@ function StorageChoiceScreen({
             <div>
               <h3 className="text-lg font-semibold text-midnight-sky-900">Save to this browser</h3>
               <p className="mt-1 text-sm font-light leading-relaxed text-midnight-sky-500">
-                No login needed. Decks are saved instantly on this device only.
+                No login. Decks live on this device, this browser only.
               </p>
             </div>
-            <div className="mt-auto rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">
-              Clearing browser data will delete your decks
-            </div>
+            <ul className="mt-1 space-y-2 text-xs">
+              <li className="flex items-start gap-2 leading-snug text-midnight-sky-800">
+                <span className="mt-px font-bold text-fresh-green">✓</span>
+                <span>No file size limits — works for huge HTML/PDF decks</span>
+              </li>
+              <li className="flex items-start gap-2 leading-snug text-midnight-sky-800">
+                <span className="mt-px font-bold text-fresh-green">✓</span>
+                <span>Works offline, no upload wait</span>
+              </li>
+              <li className="flex items-start gap-2 leading-snug text-midnight-sky-800">
+                <span className="mt-px font-bold text-hot-pink/80">✗</span>
+                <span>Decks not available on other devices</span>
+              </li>
+              <li className="flex items-start gap-2 leading-snug text-midnight-sky-800">
+                <span className="mt-px font-bold text-hot-pink/80">✗</span>
+                <span>Lost if you clear browser data</span>
+              </li>
+            </ul>
           </motion.button>
 
-          {/* Google option */}
-          <motion.button
-            onClick={onCloud}
-            disabled={signingIn}
-            whileHover={{ y: -2 }}
-            whileTap={{ scale: 0.98 }}
-            className="group flex flex-col gap-4 rounded-3xl border-2 border-hot-pink/30 bg-hot-pink/[0.03] p-7 text-left transition-all hover:border-hot-pink/60 hover:shadow-lg disabled:opacity-70"
-          >
-            <div className="flex size-12 items-center justify-center rounded-2xl bg-hot-pink/10 transition group-hover:bg-hot-pink/15">
-              {signingIn ? (
-                <ChoiceLoadingDots />
-              ) : (
-                <Cloud className="size-6 text-hot-pink" />
-              )}
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold text-midnight-sky-900">Sign in with Google</h3>
-              <p className="mt-1 text-sm font-light leading-relaxed text-midnight-sky-500">
-                Decks are saved to your Google account. Access from any device, any time.
-              </p>
-            </div>
-            <div className="mt-auto rounded-xl bg-green-50 px-3 py-2 text-xs text-green-700">
-              Safe even if you clear your browser or change devices
-            </div>
-          </motion.button>
+          {/* Google / Cloud option */}
+          <div className="flex flex-col gap-4 rounded-3xl border-2 border-hot-pink/30 bg-hot-pink/[0.03] p-7">
+
+            {showWelcomeBack ? (
+              /* ── Welcome back state ─────────────────────────────────────── */
+              <div className="flex flex-1 flex-col">
+                {/* User avatar + name */}
+                <div className="mb-5 flex items-center gap-3">
+                  {cachedUser!.photoURL ? (
+                    <img
+                      src={cachedUser!.photoURL}
+                      alt={cachedUser!.displayName ?? ''}
+                      className="size-12 rounded-full shadow-sm ring-2 ring-hot-pink/20"
+                    />
+                  ) : (
+                    <div className="flex size-12 items-center justify-center rounded-full bg-hot-pink/15 text-lg font-bold text-hot-pink">
+                      {cachedUser!.displayName?.[0] ?? '?'}
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-base font-semibold text-midnight-sky-900">
+                      Welcome back, {firstName}!
+                    </p>
+                    <p className="text-xs text-midnight-sky-400">{cachedUser!.email}</p>
+                  </div>
+                </div>
+
+                {/* One-tap sign in */}
+                <motion.button
+                  onClick={() => onCloud(true)}
+                  whileTap={{ scale: 0.97 }}
+                  disabled={signingIn}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-hot-pink py-3 text-sm font-semibold text-white shadow-[0_4px_20px_-4px] shadow-hot-pink/50 transition hover:shadow-[0_4px_28px_-2px] hover:shadow-hot-pink/70 disabled:opacity-60"
+                >
+                  {signingIn ? <ChoiceLoadingDots /> : <>
+                    <Cloud className="size-4" />
+                    Sign in as {firstName}
+                  </>}
+                </motion.button>
+
+                {/* Alternate actions */}
+                <div className="mt-4 flex items-center justify-between text-[11px]">
+                  <button
+                    onClick={() => setOverrideCached(true)}
+                    className="text-midnight-sky-400 underline-offset-2 hover:text-midnight-sky-700 hover:underline"
+                  >
+                    Sign in as someone else
+                  </button>
+                  <button
+                    onClick={onRemoveAccount}
+                    className="text-red-400 underline-offset-2 hover:text-red-600 hover:underline"
+                    title="Remove this Google account from the device — use on shared laptops"
+                  >
+                    Remove from device
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* ── Fresh sign-in state ────────────────────────────────────── */
+              <div className="flex flex-1 flex-col">
+                <div className="mb-4 flex size-12 items-center justify-center rounded-2xl bg-hot-pink/10">
+                  {signingIn ? <ChoiceLoadingDots /> : <Cloud className="size-6 text-hot-pink" />}
+                </div>
+                <div className="mb-4">
+                  <h3 className="text-lg font-semibold text-midnight-sky-900">Sign in with Google</h3>
+                  <p className="mt-1 text-sm font-light leading-relaxed text-midnight-sky-500">
+                    Decks saved to your Google account. Same decks on every device.
+                  </p>
+                </div>
+                <ul className="mb-5 space-y-2 text-xs">
+                  <li className="flex items-start gap-2 leading-snug text-midnight-sky-800">
+                    <span className="mt-px font-bold text-fresh-green">✓</span>
+                    <span>Access decks from any device or browser</span>
+                  </li>
+                  <li className="flex items-start gap-2 leading-snug text-midnight-sky-800">
+                    <span className="mt-px font-bold text-fresh-green">✓</span>
+                    <span>Survives browser data clearing</span>
+                  </li>
+                  <li className="flex items-start gap-2 leading-snug text-midnight-sky-800">
+                    <span className="mt-px font-bold text-hot-pink/80">✗</span>
+                    <span>HTML files capped at ~1 MB each</span>
+                  </li>
+                  <li className="flex items-start gap-2 leading-snug text-midnight-sky-800">
+                    <span className="mt-px font-bold text-hot-pink/80">✗</span>
+                    <span>Needs internet to save / load</span>
+                  </li>
+                </ul>
+
+                {/* Remember me checkbox */}
+                <label className="mb-4 flex cursor-pointer items-start gap-2.5">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={e => setRememberMeLocal(e.target.checked)}
+                    className="mt-0.5 size-4 cursor-pointer accent-hot-pink"
+                  />
+                  <span className="text-xs leading-snug text-midnight-sky-600">
+                    Keep me signed in on this device
+                    <span className="block font-light text-midnight-sky-400">
+                      Uncheck on shared or work laptops
+                    </span>
+                  </span>
+                </label>
+
+                {/* Sign in button */}
+                <motion.button
+                  onClick={() => onCloud(rememberMe)}
+                  whileTap={{ scale: 0.97 }}
+                  disabled={signingIn}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-hot-pink py-3 text-sm font-semibold text-white shadow-[0_4px_20px_-4px] shadow-hot-pink/50 transition hover:shadow-[0_4px_28px_-2px] hover:shadow-hot-pink/70 disabled:opacity-60"
+                >
+                  {signingIn ? <ChoiceLoadingDots /> : rememberMe ? (
+                    <>
+                      <Cloud className="size-4" />
+                      Sign in with Google
+                    </>
+                  ) : (
+                    <span className="flex flex-col items-center leading-tight">
+                      <span>Sign in</span>
+                      <span className="text-[11px] font-normal opacity-80">(Require password each time)</span>
+                    </span>
+                  )}
+                </motion.button>
+              </div>
+            )}
+          </div>
         </div>
 
         <p className="mt-8 text-center text-xs text-midnight-sky-400">
-          Both options are free. PDF slide images are only saved in the browser option.
+          Both options are free. You can switch any time.
         </p>
       </motion.div>
     </main>
@@ -363,16 +669,179 @@ const TYPE_COLORS: Record<string, string> = {
   rating: 'bg-hot-pink/10 text-hot-pink',
 }
 
-function DeckCard({ deck, onOpen, onDelete }: {
-  deck:     Deck
-  onOpen:   () => void
-  onDelete: () => void
+/* ── Slide theme palette (mirrors Create.tsx CONTENT_COLORS / QSLIDE_COLORS) */
+const DECK_THEME: Record<string, { bg: string; text: string }> = {
+  navy:   { bg: '#000079', text: '#ffffff' },
+  pink:   { bg: '#ff0065', text: '#ffffff' },
+  sky:    { bg: '#00b0ff', text: '#000079' },
+  green:  { bg: '#42db66', text: '#000079' },
+  golden: { bg: '#ffc709', text: '#000079' },
+  white:  { bg: '#f4f4f9', text: '#000079' },
+}
+function deckTheme(t?: string) { return DECK_THEME[t ?? 'navy'] ?? DECK_THEME.navy }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   DeckThumbnail — renders a preview of the first slide of a deck.
+   Adapts based on slide type so users can recognise their decks at a
+   glance instead of seeing identical navy placeholders.
+   ───────────────────────────────────────────────────────────────────────── */
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function DeckThumbnail({ slides }: { slides: any[] }) {
+  if (slides.length === 0) {
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-midnight-sky-900">
+        <Layers className="size-8 text-white/20" />
+      </div>
+    )
+  }
+
+  const first = slides[0]
+
+  if (first.type === 'pdf' && first.imgUrl) {
+    return <img src={first.imgUrl} alt="" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]" />
+  }
+  if (first.type === 'image' && first.imgUrl) {
+    return <img src={first.imgUrl} alt="" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]" />
+  }
+  if (first.type === 'html' && first.html) {
+    return <HtmlDeckPreview html={first.html} slideIndex={first.slideIndex ?? 0} fileName={first.fileName} />
+  }
+  if (first.type === 'content') {
+    const c = deckTheme(first.theme)
+    return (
+      <div className="flex h-full w-full items-center justify-center px-5 py-4" style={{ backgroundColor: c.bg }}>
+        <p className="line-clamp-3 text-center text-sm font-bold leading-snug" style={{ color: c.text }}>
+          {first.title || first.body || 'Untitled'}
+        </p>
+      </div>
+    )
+  }
+  if (first.type === 'canvas') {
+    const bg = first.bg ?? { type: 'color', value: '#000079' }
+    const style: React.CSSProperties = bg.type === 'color'
+      ? { backgroundColor: bg.value }
+      : { backgroundImage: bg.value }
+    return (
+      <div className="flex h-full w-full items-center justify-center" style={style}>
+        <Layers className="size-6 text-white/30" />
+      </div>
+    )
+  }
+  // Question slide (mcq / wordcloud / openended / rating)
+  const c = deckTheme(first.theme)
+  return (
+    <div className="flex h-full w-full items-center justify-center px-5 py-4" style={{ backgroundColor: c.bg }}>
+      <p className="line-clamp-3 text-center text-xs font-semibold leading-snug" style={{ color: c.text }}>
+        {first.question || 'Question slide'}
+      </p>
+    </div>
+  )
+}
+
+/* HTML deck preview — mini iframe of the actual HTML, scaled to fit. */
+function HtmlDeckPreview({ html, slideIndex, fileName }: {
+  html: string; slideIndex: number; fileName: string
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [shouldLoad, setShouldLoad] = useState(false)
+  const [scale, setScale] = useState(0.16)
+  const IFRAME_W = 1280
+  const IFRAME_H = 720
+
+  useEffect(() => {
+    if (!containerRef.current || shouldLoad) return
+    const el = containerRef.current
+    const obs = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) { setShouldLoad(true); obs.disconnect(); break }
+      }
+    }, { rootMargin: '200px' })
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [shouldLoad])
+
+  useEffect(() => {
+    if (!containerRef.current) return
+    const el = containerRef.current
+    const recompute = () => {
+      const w = el.offsetWidth
+      if (w > 0) setScale(w / IFRAME_W)
+    }
+    recompute()
+    const ro = new ResizeObserver(recompute)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  const srcDoc = useMemo(() => buildDeckPreviewHtml(html, slideIndex), [html, slideIndex])
+
+  return (
+    <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-white">
+      {shouldLoad ? (
+        <iframe
+          srcDoc={srcDoc}
+          sandbox="allow-scripts allow-popups allow-modals"
+          title={fileName}
+          className="border-0"
+          style={{
+            width:           `${IFRAME_W}px`,
+            height:          `${IFRAME_H}px`,
+            transform:       `scale(${scale})`,
+            transformOrigin: 'top left',
+            pointerEvents:   'none',
+          }}
+        />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center bg-midnight-sky-50">
+          <FileText className="size-6 text-midnight-sky-300" />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function buildDeckPreviewHtml(html: string, slideIndex: number): string {
+  if (slideIndex <= 0) return html
+  const script = `
+<script>
+(function() {
+  var target = ${slideIndex};
+  function fireKey() {
+    try {
+      var ev = new KeyboardEvent('keydown', { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39, which: 39, bubbles: true, cancelable: true });
+      document.dispatchEvent(ev);
+    } catch (e) {}
+  }
+  function init() {
+    try {
+      var s = document.createElement('style');
+      s.textContent = '*,*::before,*::after { transition: none !important; animation-duration: 0s !important; animation-delay: 0s !important; }';
+      (document.head || document.documentElement).appendChild(s);
+    } catch (e) {}
+    try { if (window.Reveal && Reveal.slide) { Reveal.slide(target); return; } } catch (e) {}
+    try { if (window.impress) { window.impress().goto(target); return; } } catch (e) {}
+    try { window.location.hash = '#/' + target; } catch (e) {}
+    for (var i = 0; i < target; i++) setTimeout(fireKey, i * 10);
+  }
+  if (document.readyState === 'complete') setTimeout(init, 30);
+  else window.addEventListener('load', function() { setTimeout(init, 30); });
+})();
+</script>`
+  if (html.includes('</body>')) return html.replace('</body>', script + '\n</body>')
+  return html + script
+}
+
+function DeckCard({ deck, onOpen, onDelete, onExport, onDuplicate }: {
+  deck:        Deck
+  onOpen:      () => void
+  onDelete:    () => void
+  onExport:    () => void
+  onDuplicate: () => void
 }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const slides     = deck.slides as any[]
-  const pdfSlides  = slides.filter(s => s.type === 'pdf')
   const qSlides    = slides.filter(s => s.type !== 'pdf')
-  const firstPdf   = pdfSlides[0]
   const qTypes     = [...new Set(qSlides.map(s => s.type as string))]
   const slideCount = slides.length
 
@@ -380,32 +849,14 @@ function DeckCard({ deck, onOpen, onDelete }: {
     <motion.div
       whileHover={{ y: -4 }}
       transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-      className="group flex flex-col overflow-hidden rounded-2xl bg-white shadow-[0_2px_12px_-2px_rgba(0,0,121,0.08)] hover:shadow-[0_12px_40px_-8px_rgba(0,0,121,0.18)]"
-      style={{ transition: 'box-shadow 0.2s ease' }}
+      className="group flex flex-col overflow-hidden rounded-2xl bg-white ring-1 ring-midnight-sky-100/80 shadow-[0_2px_12px_-2px_rgba(0,0,121,0.06)] transition-shadow duration-200 hover:shadow-[0_16px_48px_-8px_rgba(0,0,121,0.16)] hover:ring-midnight-sky-200"
     >
-      {/* Thumbnail */}
+      {/* Thumbnail — preview of the first slide */}
       <button
         onClick={onOpen}
         className="relative aspect-video w-full overflow-hidden bg-midnight-sky-900"
       >
-        {firstPdf?.imgUrl ? (
-          <img
-            src={firstPdf.imgUrl}
-            alt="Deck preview"
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
-          />
-        ) : (
-          <div className="flex h-full w-full flex-col items-center justify-center gap-3 p-4">
-            <Layers className="size-8 text-white/20" />
-            <div className="flex flex-wrap justify-center gap-1">
-              {qTypes.slice(0, 3).map(t => (
-                <span key={t} className={cn('rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide', TYPE_COLORS[t] ?? 'bg-white/10 text-white/50')}>
-                  {TYPE_LABELS[t] ?? t}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
+        <DeckThumbnail slides={slides} />
 
         {/* Hover overlay */}
         <div className="absolute inset-0 flex items-center justify-center bg-midnight-sky-900/0 transition-all duration-300 group-hover:bg-midnight-sky-900/40">
@@ -418,6 +869,24 @@ function DeckCard({ deck, onOpen, onDelete }: {
         <span className="absolute left-2.5 top-2.5 rounded-lg bg-black/40 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur-sm">
           {slideCount} {slideCount === 1 ? 'slide' : 'slides'}
         </span>
+
+        {/* Duplicate button — appears on hover */}
+        <button
+          onClick={e => { e.stopPropagation(); onDuplicate() }}
+          title="Duplicate deck"
+          className="absolute right-[4.5rem] top-2.5 flex size-6 items-center justify-center rounded-lg bg-black/40 text-white/60 opacity-0 backdrop-blur-sm transition-all duration-200 hover:bg-sky-500/70 hover:text-white group-hover:opacity-100"
+        >
+          <Copy className="size-3" />
+        </button>
+
+        {/* Export button — appears on hover */}
+        <button
+          onClick={e => { e.stopPropagation(); onExport() }}
+          title="Export deck for sharing"
+          className="absolute right-10 top-2.5 flex size-6 items-center justify-center rounded-lg bg-black/40 text-white/60 opacity-0 backdrop-blur-sm transition-all duration-200 hover:bg-midnight-sky-700/80 hover:text-white group-hover:opacity-100"
+        >
+          <Download className="size-3" />
+        </button>
 
         {/* Delete button — top right, only on hover */}
         <button
@@ -449,16 +918,13 @@ function DeckCard({ deck, onOpen, onDelete }: {
 
         {/* Footer */}
         <div className="mt-3 flex items-center justify-between border-t border-midnight-sky-50 pt-3">
-          <span className="flex items-center gap-1 text-[11px] text-midnight-sky-300">
+          <span className="flex items-center gap-1 text-[11px] text-midnight-sky-500">
             <Clock className="size-3" />
             {timeAgo(deck.updatedAt)}
           </span>
-          <button
-            onClick={onOpen}
-            className="rounded-lg px-2.5 py-1 text-xs font-semibold text-midnight-sky-500 transition hover:bg-midnight-sky-50 hover:text-midnight-sky-900"
-          >
+          <span className="text-[11px] font-medium text-midnight-sky-500 transition-colors group-hover:text-midnight-sky-800">
             Open
-          </button>
+          </span>
         </div>
       </div>
     </motion.div>

@@ -1,0 +1,28 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Sessions — anyone can read/write (audience joins, presenter controls)
+    match /sessions/{code} {
+      allow read, write: if true;
+
+      // Responses — anyone can submit and read (presenter sees live results)
+      match /responses/{responseId} {
+        allow read, write: if true;
+      }
+
+      // Viewers — presence tracking for audience member count
+      match /viewers/{viewerId} {
+        allow read, write: if true;
+      }
+    }
+
+    // User decks — only the owner can read/write their own decks.
+    // The {document=**} wildcard covers nested sub-docs (e.g. the
+    // results/latest doc that holds saved poll results) so they
+    // inherit the same owner-only access without needing a separate rule.
+    match /users/{userId}/decks/{deckId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}
