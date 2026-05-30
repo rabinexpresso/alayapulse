@@ -350,7 +350,11 @@ export async function updateSessionSlides(code: string, rawSlides: any[]): Promi
       ...(Array.isArray(s.rightLabels) && s.rightLabels.length > 0 ? { rightLabels: (s.rightLabels as unknown[]).map(v => String(v ?? '')) } : {}),
       ...(s.leftLabel  ? { leftLabel:  String(s.leftLabel)  } : {}),
       ...(s.rightLabel ? { rightLabel: String(s.rightLabel) } : {}),
-      ...(s.theme   ? { theme: s.theme as string }                       : {}),
+      ...(s.theme      ? { theme:      String(s.theme)      } : {}),
+      ...(s.imgUrl     ? { imgUrl:     String(s.imgUrl)     } : {}),
+      ...(s.imgLayout  ? { imgLayout:  String(s.imgLayout)  } : {}),
+      // Word Cloud: preserve presenter-configured submission limit
+      ...(typeof s.wcMaxSubmissions === 'number' ? { wcMaxSubmissions: s.wcMaxSubmissions } : {}),
     }
   })
   await updateDoc(doc(db, 'sessions', code.toUpperCase()), { slides })

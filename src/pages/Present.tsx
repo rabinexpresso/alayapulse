@@ -1876,12 +1876,15 @@ interface PlacedWord {
   fontSize: number; fontWeight: string; color: string; isTop: boolean
 }
 
-/** Measure a word's pixel bounding box using an offscreen canvas. */
+/** Measure a word's pixel bounding box using an offscreen canvas.
+ *  Extra horizontal padding (0.5 × font size) compensates for the gap between
+ *  canvas font metrics and the actual browser-rendered Inter font, preventing
+ *  visual overlap even when the canvas falls back to a system font. */
 function measureWord(text: string, size: number, weight: string): { w: number; h: number } {
   const canvas = document.createElement('canvas')
   const ctx    = canvas.getContext('2d')!
   ctx.font     = `${weight} ${size}px Inter, system-ui, sans-serif`
-  return { w: ctx.measureText(text).width + size * 0.25, h: size * 1.3 }
+  return { w: ctx.measureText(text).width + size * 0.5, h: size * 1.45 }
 }
 
 /**

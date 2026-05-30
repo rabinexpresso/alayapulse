@@ -692,11 +692,35 @@ function MCQQuestion({
    2. Word Cloud — type a word and submit
    ───────────────────────────────────────────────────────────────────────── */
 
-/* Basic profanity guard — blocks obvious words from appearing in the cloud */
+/* Profanity guard — blocks inappropriate words from appearing in the cloud.
+   Checked per word (split on whitespace) so phrases are also caught. */
 const BLOCKED_WORDS = new Set([
-  'fuck','fucking','fucked','fucker','shit','shitting','bitch','bitches',
-  'ass','asshole','bastard','dick','cock','cunt','pussy','whore','slut',
-  'piss','prick','wanker','arsehole',
+  // F-word family
+  'fuck','fucking','fucked','fucker','fucks','motherfuck','motherfucker','motherfucking',
+  // S-word family
+  'shit','shitting','shits','bullshit',
+  // B-word
+  'bitch','bitches','bitching',
+  // Body parts used offensively
+  'ass','asshole','arsehole','arse',
+  'dick','dickhead','dicks',
+  'cock','cocks','cocksucker',
+  'cunt','cunts',
+  'penis','penises','vagina','vulva',
+  'pussy','pussies',
+  'boob','boobs','tit','tits','titties',
+  'balls','ballsack','nutsack','testicle',
+  'nipple','nipples',
+  // Sex-related
+  'sex','sexy','sexist','rape','raping','rapist','molest','molestation',
+  'porn','porno','pornography','masturbate','masturbation','jerk','jizz','cum','cumshot',
+  'whore','slut','hoe','hooker','prostitute',
+  'dildo','condom','vibrator',
+  // Slurs (racism, homophobia, etc.) — abbreviated to avoid listing them fully
+  'nigger','nigga','faggot','fag','dyke','chink','spic','kike','retard','retarded',
+  // Other common profanity
+  'bastard','piss','prick','wanker','wank','tosser','twat','pedo','pedophile',
+  'crap','damn','hell',  // lighter words kept as a soft block for professional context
 ])
 function containsProfanity(text: string): boolean {
   return text.toLowerCase().split(/\s+/).some(w => BLOCKED_WORDS.has(w.replace(/[^a-z]/g, '')))
