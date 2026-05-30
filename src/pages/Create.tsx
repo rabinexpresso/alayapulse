@@ -223,17 +223,18 @@ function makeQuestion(type: QType): QuestionSlide {
 
 /* ── Content slide helpers ─────────────────────────────────────────────── */
 
-type CThemeKey = 'navy' | 'pink' | 'sky' | 'green' | 'golden' | 'white'
+type CThemeKey = 'navy' | 'pink' | 'sky' | 'green' | 'golden' | 'white' | 'transparent'
 const CONTENT_COLORS: Record<CThemeKey, {
   bg: string; text: string; textDim: string; accent: string; quoteMark: string;
   cardBg: string; cardBorder: string; isDark: boolean
 }> = {
-  navy:   { bg: '#000079', text: '#ffffff', textDim: 'rgba(255,255,255,0.58)', accent: '#ff0065', quoteMark: 'rgba(255,0,101,0.18)', cardBg: 'rgba(255,255,255,0.10)', cardBorder: 'rgba(255,255,255,0.18)', isDark: true  },
-  pink:   { bg: '#ff0065', text: '#ffffff', textDim: 'rgba(255,255,255,0.72)', accent: '#ffffff', quoteMark: 'rgba(255,255,255,0.18)', cardBg: 'rgba(255,255,255,0.15)', cardBorder: 'rgba(255,255,255,0.25)', isDark: true  },
-  sky:    { bg: '#00b0ff', text: '#000079', textDim: 'rgba(0,0,121,0.62)',     accent: '#000079', quoteMark: 'rgba(0,0,121,0.14)',     cardBg: 'rgba(0,0,121,0.10)',     cardBorder: 'rgba(0,0,121,0.18)',     isDark: false },
-  green:  { bg: '#42db66', text: '#000079', textDim: 'rgba(0,0,121,0.62)',     accent: '#000079', quoteMark: 'rgba(0,0,121,0.14)',     cardBg: 'rgba(0,0,121,0.10)',     cardBorder: 'rgba(0,0,121,0.18)',     isDark: false },
-  golden: { bg: '#ffc709', text: '#000079', textDim: 'rgba(0,0,121,0.62)',     accent: '#000079', quoteMark: 'rgba(0,0,121,0.14)',     cardBg: 'rgba(0,0,121,0.10)',     cardBorder: 'rgba(0,0,121,0.18)',     isDark: false },
-  white:  { bg: '#f4f4f9', text: '#000079', textDim: 'rgba(0,0,121,0.52)',     accent: '#ff0065', quoteMark: 'rgba(255,0,101,0.1)',    cardBg: 'rgba(0,0,121,0.06)',     cardBorder: 'rgba(0,0,121,0.14)',     isDark: false },
+  navy:        { bg: '#000079',   text: '#ffffff', textDim: 'rgba(255,255,255,0.58)', accent: '#ff0065', quoteMark: 'rgba(255,0,101,0.18)', cardBg: 'rgba(255,255,255,0.10)', cardBorder: 'rgba(255,255,255,0.18)', isDark: true  },
+  pink:        { bg: '#ff0065',   text: '#ffffff', textDim: 'rgba(255,255,255,0.72)', accent: '#ffffff', quoteMark: 'rgba(255,255,255,0.18)', cardBg: 'rgba(255,255,255,0.15)', cardBorder: 'rgba(255,255,255,0.25)', isDark: true  },
+  sky:         { bg: '#00b0ff',   text: '#000079', textDim: 'rgba(0,0,121,0.62)',     accent: '#000079', quoteMark: 'rgba(0,0,121,0.14)',     cardBg: 'rgba(0,0,121,0.10)',     cardBorder: 'rgba(0,0,121,0.18)',     isDark: false },
+  green:       { bg: '#42db66',   text: '#000079', textDim: 'rgba(0,0,121,0.62)',     accent: '#000079', quoteMark: 'rgba(0,0,121,0.14)',     cardBg: 'rgba(0,0,121,0.10)',     cardBorder: 'rgba(0,0,121,0.18)',     isDark: false },
+  golden:      { bg: '#ffc709',   text: '#000079', textDim: 'rgba(0,0,121,0.62)',     accent: '#000079', quoteMark: 'rgba(0,0,121,0.14)',     cardBg: 'rgba(0,0,121,0.10)',     cardBorder: 'rgba(0,0,121,0.18)',     isDark: false },
+  white:       { bg: '#f4f4f9',   text: '#000079', textDim: 'rgba(0,0,121,0.52)',     accent: '#ff0065', quoteMark: 'rgba(255,0,101,0.1)',    cardBg: 'rgba(0,0,121,0.06)',     cardBorder: 'rgba(0,0,121,0.14)',     isDark: false },
+  transparent: { bg: 'transparent', text: '#000079', textDim: 'rgba(0,0,121,0.62)',   accent: '#ff0065', quoteMark: 'rgba(255,0,101,0.1)',    cardBg: 'rgba(0,0,121,0.06)',     cardBorder: 'rgba(0,0,121,0.14)',     isDark: false },
 }
 function contentColors(themeId: string) { return CONTENT_COLORS[themeId as CThemeKey] ?? CONTENT_COLORS.navy }
 
@@ -244,12 +245,13 @@ const CONTENT_TEMPLATES: { template: ContentTemplate; label: string; icon: React
 ]
 
 const CONTENT_THEMES: { id: string; label: string; swatch: string }[] = [
-  { id: 'navy',   label: 'Navy',   swatch: '#000079' },
-  { id: 'pink',   label: 'Pink',   swatch: '#ff0065' },
-  { id: 'sky',    label: 'Sky',    swatch: '#00b0ff' },
-  { id: 'green',  label: 'Green',  swatch: '#42db66' },
-  { id: 'golden', label: 'Golden', swatch: '#ffc709' },
-  { id: 'white',  label: 'White',  swatch: '#f4f4f9' },
+  { id: 'navy',        label: 'Navy',        swatch: '#000079' },
+  { id: 'pink',        label: 'Pink',        swatch: '#ff0065' },
+  { id: 'sky',         label: 'Sky',         swatch: '#00b0ff' },
+  { id: 'green',       label: 'Green',       swatch: '#42db66' },
+  { id: 'golden',      label: 'Golden',      swatch: '#ffc709' },
+  { id: 'white',       label: 'White',       swatch: '#f4f4f9' },
+  { id: 'transparent', label: 'Transparent', swatch: 'transparent' },
 ]
 
 function makeContent(template: ContentTemplate): ContentSlide {
@@ -1496,7 +1498,7 @@ function SlideThumbnail({
           ) : slide.type === 'content' ? (
             <div
               className="flex h-full w-full items-center justify-center p-2"
-              style={{ backgroundColor: contentColors((slide as ContentSlide).theme).bg }}
+              style={{ backgroundColor: (() => { const bg = contentColors((slide as ContentSlide).theme).bg; return bg === 'transparent' ? '#f4f4f9' : bg })() }}
             >
               <p
                 className="text-center text-[9px] font-medium leading-snug line-clamp-2"
@@ -1529,7 +1531,7 @@ function SlideThumbnail({
           ) : (
             <div
               className="flex h-full w-full items-center justify-center p-2"
-              style={{ backgroundColor: contentColors((slide as QuestionSlide).theme ?? 'navy').bg }}
+              style={{ backgroundColor: (() => { const bg = contentColors((slide as QuestionSlide).theme ?? 'navy').bg; return bg === 'transparent' ? '#f4f4f9' : bg })() }}
             >
               <p
                 className="text-center text-[9px] font-medium leading-snug line-clamp-2"
@@ -2245,7 +2247,10 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false }: {
                         ? 'ring-2 ring-midnight-sky-700 scale-110'
                         : 'hover:scale-105 opacity-75 hover:opacity-100',
                     )}
-                    style={{ backgroundColor: t.swatch }}
+                    style={t.id === 'transparent'
+                      ? { backgroundImage: 'repeating-linear-gradient(45deg, #e0e0e0 0px, #e0e0e0 4px, white 4px, white 8px)', border: '1px solid #ccc' }
+                      : { backgroundColor: t.swatch }
+                    }
                   />
                 ))}
                 <span className="ml-1 text-xs font-light text-midnight-sky-400">
@@ -2597,19 +2602,32 @@ function SlidePreviewCard({ slide }: { slide: QuestionSlide }) {
     </div>
   )
 
+  const isTransparent = (slide.theme ?? 'navy') === 'transparent'
+
   return (
     <div
       className="relative w-full overflow-hidden rounded-2xl shadow-[0_8px_32px_-8px_rgba(0,0,0,0.35)]"
-      style={{ aspectRatio: '16/9', backgroundColor: c.bg }}
+      style={{
+        aspectRatio: '16/9',
+        backgroundColor: c.bg,
+        // Show a subtle checkerboard when transparent so the user can see "no background"
+        ...(isTransparent ? { backgroundImage: 'repeating-linear-gradient(45deg, #f0f0f0 0px, #f0f0f0 6px, white 6px, white 12px)' } : {}),
+      }}
     >
       {/* Background image layout */}
       {hasBg && slide.imgUrl && (
         <>
-          <img src={slide.imgUrl} alt="" aria-hidden
-            className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-25" />
+          {/* Blurred ambient fill — skip for transparent theme */}
+          {!isTransparent && (
+            <img src={slide.imgUrl} alt="" aria-hidden
+              className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-25" />
+          )}
           <img src={slide.imgUrl} alt=""
             className="absolute inset-0 h-full w-full object-contain" />
-          <div className="absolute inset-0" style={{ backgroundColor: `${c.bg}cc` }} />
+          {/* Colour overlay — skip for transparent theme so image shows unshaded */}
+          {!isTransparent && (
+            <div className="absolute inset-0" style={{ backgroundColor: `${c.bg}cc` }} />
+          )}
         </>
       )}
 
@@ -2657,7 +2675,10 @@ function ContentSlidePreview({ slide }: { slide: ContentSlide }) {
   return (
     <div
       className="relative aspect-video w-full overflow-hidden rounded-xl"
-      style={{ backgroundColor: c.bg }}
+      style={{
+        backgroundColor: c.bg,
+        ...(slide.theme === 'transparent' ? { backgroundImage: 'repeating-linear-gradient(45deg, #f0f0f0 0px, #f0f0f0 6px, white 6px, white 12px)' } : {}),
+      }}
     >
       {/* Ambient glow for navy */}
       {slide.theme === 'navy' && (
@@ -2897,7 +2918,10 @@ function ContentEditor({ slide, onUpdate }: {
                         ? 'ring-2 ring-midnight-sky-700 scale-110'
                         : 'hover:scale-105 opacity-75 hover:opacity-100',
                     )}
-                    style={{ backgroundColor: t.swatch, border: t.id === 'white' ? '1px solid rgba(0,0,0,0.12)' : undefined }}
+                    style={t.id === 'transparent'
+                      ? { backgroundImage: 'repeating-linear-gradient(45deg, #e0e0e0 0px, #e0e0e0 4px, white 4px, white 8px)', border: '1px solid #ccc' }
+                      : { backgroundColor: t.swatch, border: t.id === 'white' ? '1px solid rgba(0,0,0,0.12)' : undefined }
+                    }
                   />
                 ))}
               </div>
