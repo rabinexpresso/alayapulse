@@ -1994,26 +1994,19 @@ function SlideEditor({ slide, onUpdate, onSplitHtml }: {
     )
   }
 
-  // Question slides — two-column: editor form on left, audience preview on right
+  // Question slides — editor form above, 16:9 slide preview below
   return (
-    <div className="scrollbar-panel flex flex-1 overflow-auto" style={{ background: 'oklch(0.972 0.006 258)' }}>
-      {/* Left: editor form fills available width */}
-      <div className="min-w-0 flex-1 px-8 py-8">
+    <div className="scrollbar-panel flex flex-1 flex-col overflow-auto" style={{ background: 'oklch(0.972 0.006 258)' }}>
+      {/* Editor form */}
+      <div className="px-8 py-8">
         <QuestionEditor slide={slide as QuestionSlide} onUpdate={patch => onUpdate(slide.id, patch)} hidePreview />
       </div>
-      {/* Right: audience preview — sticky so it stays in view while scrolling the form */}
-      <div className="w-[360px] shrink-0 border-l border-midnight-sky-100 px-6 py-8">
-        <div className="sticky top-8">
-          <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-midnight-sky-500">
-            Audience view
-          </p>
-          <div
-            className="overflow-hidden rounded-2xl p-5 shadow-[0_8px_32px_-8px_rgba(0,0,121,0.25)] transition-colors duration-300"
-            style={{ backgroundColor: contentColors((slide as QuestionSlide).theme ?? 'navy').bg }}
-          >
-            <SlidePreviewCard slide={slide as QuestionSlide} />
-          </div>
-        </div>
+      {/* Slide preview — full width, 16:9, looks like the actual presenter screen */}
+      <div className="px-8 pb-10">
+        <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-midnight-sky-500">
+          Slide preview
+        </p>
+        <SlidePreviewCard slide={slide as QuestionSlide} />
       </div>
     </div>
   )
@@ -2484,129 +2477,121 @@ function RatingEditor({ slide, onUpdate }: {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Slide Preview Card — mini audience-view preview inside the editor
+   Slide Preview Card — 16:9 slideshow-faithful preview inside the editor.
+   Matches the actual presenter screen layout and colours exactly.
    ───────────────────────────────────────────────────────────────────────── */
 
 function SlidePreviewCard({ slide }: { slide: QuestionSlide }) {
   const c      = contentColors(slide.theme ?? 'navy')
-  const empty  = !slide.question
-  const layout = slide.imgLayout ?? 'top'
+  const qtype  = QTYPES.find(q => q.type === slide.type)
+  const layout = slide.imgLayout ?? 'reference'
+  const hasRef = !!(slide.imgUrl && layout !== 'background')
+  const hasBg  = !!(slide.imgUrl && layout === 'background')
 
-  function renderQuestionText() {
-    return (
-      <p className="mb-3 text-sm font-semibold leading-snug" style={{ color: c.text }}>
-        {empty
-          ? <span className="font-light" style={{ color: c.textDim }}>Your question appears here…</span>
-          : slide.question}
-      </p>
-    )
-  }
-
-  function renderInputArea() {
-    if (slide.type === 'mcq') {
-      const opts = slide.options.some(o => o) ? slide.options : ['Option A', 'Option B', 'Option C', 'Option D']
-      return (
-        <div className="space-y-1.5">
-          {opts.map((opt, i) => (
-            <div key={i} className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm" style={{ backgroundColor: c.cardBg }}>
-              <span className="flex size-5 shrink-0 items-center justify-center rounded-md text-[10px] font-bold" style={{ backgroundColor: c.text, color: c.bg }}>
-                {String.fromCharCode(65 + i)}
-              </span>
-              <span style={{ color: opt ? c.text : c.textDim }}>{opt || `Option ${String.fromCharCode(65 + i)}`}</span>
-            </div>
-          ))}
+  // MCQ options — styled like the actual presenter slide option cards
+  const mcqOptions = slide.type === 'mcq' ? (
+    <div className="mt-3 flex flex-col gap-1.5">
+      {(slide.options.length > 0 ? slide.options : ['Option A', 'Option B', 'Option C']).map((opt, i) => (
+        <div key={i} className="flex min-w-0 items-start gap-2 rounded-xl px-3 py-2"
+          style={{ border: `1px solid ${c.cardBorder}`, backgroundColor: c.cardBg }}
+        >
+          <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md text-[9px] font-bold"
+            style={{ backgroundColor: c.text, color: c.bg }}>
+            {String.fromCharCode(65 + i)}
+          </span>
+          <span className="min-w-0 break-words text-xs font-medium leading-snug"
+            style={{ color: opt ? c.text : c.textDim }}>
+            {opt || `Option ${String.fromCharCode(65 + i)}`}
+          </span>
         </div>
-      )
-    }
-    if (slide.type === 'wordcloud') {
-      return (
-        <div className="flex items-center gap-2 rounded-xl px-3.5 py-2.5" style={{ backgroundColor: c.cardBg }}>
-          <span className="flex-1 text-sm" style={{ color: c.textDim }}>Type one word…</span>
-          <span className="rounded-lg bg-hot-pink px-3 py-1.5 text-xs font-semibold text-white">Send</span>
-        </div>
-      )
-    }
-    if (slide.type === 'openended') {
-      return (
-        <>
-          <div className="min-h-[48px] rounded-xl px-3.5 py-3 text-sm" style={{ backgroundColor: c.cardBg, color: c.textDim }}>
-            Share your thoughts…
-          </div>
-          <div className="mt-2.5 flex justify-end">
-            <span className="rounded-xl px-4 py-1.5 text-xs font-semibold" style={{ backgroundColor: c.text, color: c.bg }}>Submit</span>
-          </div>
-        </>
-      )
-    }
-    if (slide.type === 'rating') {
-      const params    = slide.options.some(p => p) ? slide.options : ['Parameter 1', 'Parameter 2', 'Parameter 3']
-      const ratingMax = slide.ratingMax === 10 ? 10 : 5
-      const scale     = Array.from({ length: ratingMax + 1 }, (_, i) => i)
-      const hasLabels = !!(slide.leftLabel || slide.rightLabel)
-      return (
-        <>
-          {hasLabels && (
-            <div className="mb-2 flex justify-between text-[9px] font-semibold uppercase tracking-wider" style={{ color: c.textDim }}>
-              <span>{slide.leftLabel}</span>
-              <span>{slide.rightLabel}</span>
-            </div>
-          )}
-          <div className="space-y-1.5">
-            {params.slice(0, 3).map((p, i) => (
-              <div key={i} className="rounded-xl px-3 py-2" style={{ backgroundColor: c.cardBg }}>
-                <p className="mb-1 text-[10px] font-medium" style={{ color: c.textDim }}>{p || `Parameter ${i + 1}`}</p>
-                <div className="grid gap-0.5" style={{ gridTemplateColumns: `repeat(${scale.length}, minmax(0, 1fr))` }}>
-                  {scale.map(v => (
-                    <div key={v} className="flex items-center justify-center rounded py-1 text-[8px] font-bold tabular-nums"
-                      style={{ border: `1px solid ${c.cardBorder}`, color: c.textDim }}>
-                      {v}
-                    </div>
-                  ))}
-                </div>
-              </div>
+      ))}
+    </div>
+  ) : slide.type === 'wordcloud' ? (
+    <div className="mt-3 flex flex-wrap gap-1.5">
+      {['culture', 'growth', 'trust', 'innovation', 'team'].map(w => (
+        <span key={w} className="rounded-full px-2 py-0.5 text-[9px] font-medium"
+          style={{ backgroundColor: c.cardBg, color: c.text }}>{w}</span>
+      ))}
+    </div>
+  ) : slide.type === 'openended' ? (
+    <div className="mt-3 rounded-xl px-3 py-2.5 text-xs"
+      style={{ backgroundColor: c.cardBg, color: c.textDim }}>
+      Type your answer here…
+    </div>
+  ) : slide.type === 'rating' ? (
+    <div className="mt-3 flex flex-col gap-1.5">
+      {(slide.options.length > 0 ? slide.options.slice(0, 3) : ['Parameter 1', 'Parameter 2']).map((p, i) => (
+        <div key={i} className="rounded-xl px-3 py-2" style={{ backgroundColor: c.cardBg }}>
+          <p className="mb-1 text-[9px] font-medium" style={{ color: c.textDim }}>{p || `Parameter ${i + 1}`}</p>
+          <div className="flex gap-0.5">
+            {Array.from({ length: slide.ratingMax === 10 ? 11 : 6 }, (_, v) => (
+              <div key={v} className="flex-1 rounded py-0.5 text-center text-[7px] font-bold"
+                style={{ border: `1px solid ${c.cardBorder}`, color: c.textDim }}>{v}</div>
             ))}
           </div>
-        </>
-      )
-    }
-    return null
-  }
-
-  /* Background layout — image fills the whole card behind the content */
-  if (layout === 'background' && slide.imgUrl) {
-    return (
-      <div className="relative overflow-hidden rounded-xl">
-        <img src={slide.imgUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
-        <div className="absolute inset-0 rounded-xl" style={{ backgroundColor: `${c.bg}d0` }} />
-        <div className="relative z-10 p-1">
-          {renderQuestionText()}
-          {renderInputArea()}
         </div>
-      </div>
-    )
-  }
+      ))}
+    </div>
+  ) : null
 
-  /* Reference layout (portrait default) — image on right, content on left */
-  if ((layout === 'reference' || layout === 'right' || layout === 'top') && slide.imgUrl) {
-    return (
-      <div className="flex gap-3">
-        <div className="min-w-0 flex-1">
-          {renderQuestionText()}
-          {renderInputArea()}
-        </div>
-        <div className="relative w-[40%] shrink-0 self-stretch overflow-hidden rounded-xl" style={{ minHeight: 80 }}>
-          <img src={slide.imgUrl} alt="" className="absolute inset-0 h-full w-full scale-110 object-cover blur-lg opacity-25" />
-          <img src={slide.imgUrl} alt="" className="absolute inset-0 h-full w-full object-contain p-1" />
-        </div>
-      </div>
-    )
-  }
+  const questionPanel = (
+    <div className="flex flex-col overflow-hidden px-6 py-5">
+      {/* Type badge */}
+      <span className="mb-2.5 w-fit rounded-full px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-wider"
+        style={{ backgroundColor: c.text, color: c.bg }}>
+        {qtype?.label ?? slide.type}
+      </span>
+      {/* Question text */}
+      <p className="text-sm font-semibold leading-snug" style={{ color: c.text }}>
+        {slide.question || <span style={{ opacity: 0.4 }}>Your question appears here…</span>}
+      </p>
+      {mcqOptions}
+    </div>
+  )
 
-  /* No image — question text + input area only */
   return (
-    <div>
-      {renderQuestionText()}
-      {renderInputArea()}
+    <div
+      className="relative w-full overflow-hidden rounded-2xl shadow-[0_8px_32px_-8px_rgba(0,0,0,0.35)]"
+      style={{ aspectRatio: '16/9', backgroundColor: c.bg }}
+    >
+      {/* Background image layout */}
+      {hasBg && slide.imgUrl && (
+        <>
+          <img src={slide.imgUrl} alt="" aria-hidden
+            className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-25" />
+          <img src={slide.imgUrl} alt=""
+            className="absolute inset-0 h-full w-full object-contain" />
+          <div className="absolute inset-0" style={{ backgroundColor: `${c.bg}cc` }} />
+        </>
+      )}
+
+      {/* Slide content */}
+      <div className="relative flex h-full">
+        {hasRef && slide.imgUrl ? (
+          <>
+            {/* Left: question + options */}
+            <div className="flex w-[48%] flex-col overflow-hidden">
+              {questionPanel}
+            </div>
+            {/* Right: reference image — object-contain, no cropping */}
+            <div className="relative flex-1 overflow-hidden">
+              <img src={slide.imgUrl} alt="Reference"
+                className="absolute inset-0 h-full w-full object-contain px-3 py-2" />
+            </div>
+          </>
+        ) : (
+          <div className="flex flex-1 flex-col overflow-hidden">
+            {questionPanel}
+          </div>
+        )}
+      </div>
+
+      {/* Subtle branding watermark — same as presenter screen */}
+      <div className="absolute bottom-2 right-3 select-none">
+        <span className="text-[8px] font-bold tracking-tight" style={{ color: c.text, opacity: 0.3 }}>
+          alaya <span style={{ color: c.accent }}>pulse</span>
+        </span>
+      </div>
     </div>
   )
 }
