@@ -591,7 +591,7 @@ function MCQQuestion({
             animate={isSelected ? { scale: [1, 1.02, 1] } : { scale: 1 }}
             transition={{ duration: 0.25, ease: [0.34, 1.56, 0.64, 1] }}
             className={cn(
-              'relative flex w-full items-center gap-3 overflow-hidden rounded-2xl border-2 px-4 py-4 text-left transition-all duration-200',
+              'relative flex w-full items-start gap-3 overflow-hidden rounded-2xl border-2 px-4 py-4 text-left transition-all duration-200',
               isSelected
                 ? 'border-hot-pink bg-[#ff0065]/[0.06]'
                 : 'border-midnight-sky-200 bg-white hover:border-midnight-sky-300 hover:bg-midnight-sky-50/50',
@@ -609,14 +609,14 @@ function MCQQuestion({
             </AnimatePresence>
 
             <span className={cn(
-              'flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-semibold transition-all duration-200',
+              'mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-semibold transition-all duration-200',
               isSelected ? 'bg-hot-pink text-white' : 'bg-midnight-sky-100 text-midnight-sky-600',
             )}>
               {OPTION_LABELS[i]}
             </span>
 
             <span className={cn(
-              'flex-1 text-sm font-medium leading-snug transition-colors duration-200 sm:text-base',
+              'min-w-0 flex-1 break-words text-sm font-medium leading-snug transition-colors duration-200 sm:text-base',
               isSelected ? 'text-hot-pink' : 'text-midnight-sky-800',
             )}>
               {opt}
