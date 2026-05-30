@@ -1400,11 +1400,15 @@ function QuestionSlideView({
     </div>
   )
 
-  /* ── BACKGROUND layout — full-bleed image with theme overlay ─────── */
+  /* ── BACKGROUND layout — full image visible + theme overlay ─────── */
   if (hasBgImg) {
     return (
       <div className="absolute inset-0 flex flex-col overflow-hidden pb-24" style={{ backgroundColor: c.bg }}>
-        <img src={slide.imgUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
+        {/* Blurred fill so letterbox areas match the image tone */}
+        <img src={slide.imgUrl} alt="" aria-hidden className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-30" />
+        {/* Full image — object-contain so nothing is cropped */}
+        <img src={slide.imgUrl} alt="" className="absolute inset-0 h-full w-full object-contain" />
+        {/* Theme colour overlay for text readability */}
         <div className="absolute inset-0" style={{ backgroundColor: `${c.bg}cc` }} />
         <div className="relative z-10 flex flex-1 flex-col overflow-hidden px-14 pt-12">
           <motion.span initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
