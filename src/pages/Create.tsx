@@ -2023,14 +2023,12 @@ function SlideEditor({ slide, onUpdate, onSplitHtml }: {
       <div className="px-8 py-8">
         <QuestionEditor slide={slide as QuestionSlide} onUpdate={patch => onUpdate(slide.id, patch)} hidePreview />
       </div>
-      {/* Slide preview — compact thumbnail, 16:9, accurate layout */}
+      {/* Slide preview — full width, 16:9, looks like the actual presenter screen */}
       <div className="px-8 pb-10">
-        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-midnight-sky-500">
+        <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-midnight-sky-500">
           Slide preview
         </p>
-        <div className="w-[320px]">
-          <SlidePreviewCard slide={slide as QuestionSlide} />
-        </div>
+        <SlidePreviewCard slide={slide as QuestionSlide} />
       </div>
     </div>
   )
