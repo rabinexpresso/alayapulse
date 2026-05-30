@@ -546,13 +546,10 @@ export default function Present() {
                 <QRCodeSVG value={joinUrl} size={32} bgColor="#ffffff" fgColor="#000079" level="M" />
               </button>
 
-              {/* Brand + join URL */}
-              <div className="flex flex-col gap-0.5 leading-none">
+              {/* Brand — logo only */}
+              <div className="flex flex-col leading-none">
                 <span className="text-[10px] font-bold tracking-tight text-white">
                   alaya <span className="text-hot-pink">pulse</span>
-                </span>
-                <span className="text-[9px] font-medium text-white/38">
-                  {window.location.host}/join
                 </span>
               </div>
 
@@ -560,6 +557,11 @@ export default function Present() {
 
               {/* Session code */}
               <span className="font-mono text-lg font-bold tracking-[0.18em] text-white">{code}</span>
+
+              <div className="h-5 w-px shrink-0 bg-white/15" />
+
+              {/* Join URL — large + white so late joiners can see it without asking */}
+              <span className="text-sm font-semibold text-white">{window.location.host}/join</span>
 
               <div className="flex-1" />
 
@@ -1438,10 +1440,11 @@ function QuestionSlideView({
       : 44  // sensible fallback while aspect ratio is loading
 
     return (
-      // Outer: simple horizontal flex — no flex-col so image spans full height to HUD
-      <div className="absolute inset-0 flex overflow-hidden pb-24" style={{ backgroundColor: c.bg }}>
-        {/* Left: question content + BottomBar embedded at bottom */}
-        <div className="flex flex-1 flex-col overflow-hidden px-12 pt-12 pb-4">
+      // Outer: no pb-24 so image panel reaches the bottom edge behind the HUD gradient.
+      // Left column carries pb-24 so the BottomBar stays above the HUD.
+      <div className="absolute inset-0 flex overflow-hidden" style={{ backgroundColor: c.bg }}>
+        {/* Left: question content + BottomBar — pb-24 keeps content above the HUD */}
+        <div className="flex flex-1 flex-col overflow-hidden px-12 pt-12 pb-24">
           <motion.span initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
             className="w-fit rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
@@ -1469,10 +1472,8 @@ function QuestionSlideView({
           className="relative shrink-0 overflow-hidden"
           style={{ width: `${imgPanelPct}%` }}
         >
-          {/* Blurred fill for letterbox areas */}
-          <img src={slide.imgUrl} alt="" aria-hidden
-            className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-20" />
-          {/* Sharp full image — never cropped, horizontal padding only so it fills top-to-bottom */}
+          {/* Sharp full image — object-contain so nothing is cropped.
+              Letterbox areas show the slide background colour (set on outer div). */}
           <img src={slide.imgUrl} alt="Reference image"
             className="absolute inset-0 h-full w-full object-contain px-3" />
         </motion.div>
