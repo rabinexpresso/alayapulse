@@ -2023,12 +2023,14 @@ function SlideEditor({ slide, onUpdate, onSplitHtml }: {
       <div className="px-8 py-8">
         <QuestionEditor slide={slide as QuestionSlide} onUpdate={patch => onUpdate(slide.id, patch)} hidePreview />
       </div>
-      {/* Slide preview — full width, 16:9, looks like the actual presenter screen */}
+      {/* Slide preview — compact thumbnail, 16:9, accurate layout */}
       <div className="px-8 pb-10">
-        <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-midnight-sky-500">
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-midnight-sky-500">
           Slide preview
         </p>
-        <SlidePreviewCard slide={slide as QuestionSlide} />
+        <div className="w-[320px]">
+          <SlidePreviewCard slide={slide as QuestionSlide} />
+        </div>
       </div>
     </div>
   )
@@ -2104,7 +2106,7 @@ function SlideImagePicker({ imgUrl, onChange }: {
     <>
       <button
         onClick={() => fileRef.current?.click()}
-        className="flex items-center gap-2 rounded-xl border border-dashed border-midnight-sky-200 px-4 py-2.5 text-sm text-midnight-sky-400 transition hover:border-hot-pink hover:text-hot-pink"
+        className="flex items-center gap-2 rounded-xl border border-dashed border-midnight-sky-300 px-4 py-2.5 text-sm text-midnight-sky-700 transition hover:border-hot-pink hover:text-hot-pink"
       >
         <Upload className="size-3.5" />
         Upload image
