@@ -2533,15 +2533,7 @@ function SlidePreviewCard({ slide }: { slide: QuestionSlide }) {
   const hasRef = !!(slide.imgUrl && layout !== 'background')
   const hasBg  = !!(slide.imgUrl && layout === 'background')
 
-  // Detect aspect ratio to mirror the presenter screen's portrait vs landscape split
-  const [imgAspect, setImgAspect] = useState<number | null>(null)
-  useEffect(() => {
-    if (!slide.imgUrl) { setImgAspect(null); return }
-    const img = new Image()
-    img.onload = () => setImgAspect(img.naturalWidth / img.naturalHeight)
-    img.src = slide.imgUrl
-  }, [slide.imgUrl])
-  const isLandscape = imgAspect !== null && imgAspect >= 1.35
+
 
   // MCQ options — styled like the actual presenter slide option cards
   const mcqOptions = slide.type === 'mcq' ? (
@@ -2630,11 +2622,12 @@ function SlidePreviewCard({ slide }: { slide: QuestionSlide }) {
               {questionPanel}
             </div>
             <div className="relative flex-1 overflow-hidden">
+              {/* Blurred fill for letterbox areas */}
+              <img src={slide.imgUrl} alt="" aria-hidden
+                className="absolute inset-0 h-full w-full scale-110 object-cover blur-xl opacity-30" />
+              {/* Sharp full image — never cropped */}
               <img src={slide.imgUrl} alt="Reference"
-                className={cn(
-                  'absolute inset-0 h-full w-full',
-                  isLandscape ? 'object-cover' : 'object-contain px-3 py-2',
-                )} />
+                className="absolute inset-0 h-full w-full object-contain px-3 py-2" />
             </div>
           </>
         ) : (

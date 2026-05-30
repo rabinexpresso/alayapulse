@@ -1313,7 +1313,6 @@ function QuestionSlideView({
     img.onload = () => setImgAspect(img.naturalWidth / img.naturalHeight)
     img.src = slide.imgUrl
   }, [slide.imgUrl])
-  const isLandscape = imgAspect !== null && imgAspect >= 1.35
 
   // ── JSX variables instead of inline component functions ──────────────
   // IMPORTANT: never define components inside another component — React
@@ -1481,11 +1480,12 @@ function QuestionSlideView({
           className="relative shrink-0 overflow-hidden"
           style={{ width: `${imgPanelPct}%` }}
         >
+          {/* Blurred fill for letterbox areas (portrait: sides, landscape: top+bottom) */}
+          <img src={slide.imgUrl} alt="" aria-hidden
+            className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-30" />
+          {/* Sharp full image — object-contain so nothing is ever cropped */}
           <img src={slide.imgUrl} alt="Reference image"
-            className={cn(
-              'absolute inset-0 h-full w-full',
-              isLandscape ? 'object-cover' : 'object-contain px-3',
-            )} />
+            className="absolute inset-0 h-full w-full object-contain px-3" />
         </motion.div>
       </div>
     )
