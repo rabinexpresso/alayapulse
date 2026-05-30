@@ -29,6 +29,14 @@ export default function Vote() {
       return stored ? new Set<string>(JSON.parse(stored) as string[]) : new Set<string>()
     } catch { return new Set<string>() }
   })
+  // Word-cloud multi-submit: track how many submissions each person has made per slide
+  const wcStorageKey = `alaya-wc-${sessionCode ?? ''}`
+  const [wcSubmissions, setWcSubmissions] = useState<Record<string, number>>(() => {
+    try {
+      const stored = sessionStorage.getItem(`alaya-wc-${sessionCode ?? ''}`)
+      return stored ? JSON.parse(stored) as Record<string, number> : {}
+    } catch { return {} }
+  })
   const [submitting,      setSubmitting]      = useState(false)
   const [submitError,     setSubmitError]     = useState<string | null>(null)
   const [showLeaveModal,  setShowLeaveModal]  = useState(false)
@@ -122,11 +130,30 @@ export default function Vote() {
         value,
         respondentName: attendeeName || 'Anonymous',
       })
-      setSubmittedSlides(prev => {
-        const next = new Set([...prev, slideData.id])
-        try { sessionStorage.setItem(storageKey, JSON.stringify([...next])) } catch {}
-        return next
-      })
+
+      if (slideData.type === 'wordcloud') {
+        // Word cloud: allow multiple submissions up to wcMaxSubmissions
+        const maxSubs  = (slideData as { wcMaxSubmissions?: number }).wcMaxSubmissions ?? 3
+        const newCount = (wcSubmissions[slideData.id] ?? 0) + 1
+        const updated  = { ...wcSubmissions, [slideData.id]: newCount }
+        setWcSubmissions(updated)
+        try { sessionStorage.setItem(wcStorageKey, JSON.stringify(updated)) } catch {}
+        // Only lock when the max is reached
+        if (newCount >= maxSubs) {
+          setSubmittedSlides(prev => {
+            const next = new Set([...prev, slideData.id])
+            try { sessionStorage.setItem(storageKey, JSON.stringify([...next])) } catch {}
+            return next
+          })
+        }
+      } else {
+        // All other types: lock after one submission
+        setSubmittedSlides(prev => {
+          const next = new Set([...prev, slideData.id])
+          try { sessionStorage.setItem(storageKey, JSON.stringify([...next])) } catch {}
+          return next
+        })
+      }
     } catch (err) {
       console.error('Submit failed:', err)
       setSubmitError('Could not send your response — please try again.')
@@ -325,6 +352,8 @@ export default function Vote() {
                 {slideData.type === 'wordcloud' && (
                   <WordCloudQuestion
                     submitting={submitting}
+                    submissionsUsed={wcSubmissions[slideId] ?? 0}
+                    maxSubmissions={(slideData as { wcMaxSubmissions?: number }).wcMaxSubmissions ?? 3}
                     onSubmit={word => handleSubmit(word)}
                   />
                 )}
@@ -663,58 +692,164 @@ function MCQQuestion({
    2. Word Cloud — type a word and submit
    ───────────────────────────────────────────────────────────────────────── */
 
+/* Basic profanity guard — blocks obvious words from appearing in the cloud */
+const BLOCKED_WORDS = new Set([
+  'fuck','fucking','fucked','fucker','shit','shitting','bitch','bitches',
+  'ass','asshole','bastard','dick','cock','cunt','pussy','whore','slut',
+  'piss','prick','wanker','arsehole',
+])
+function containsProfanity(text: string): boolean {
+  return text.toLowerCase().split(/\s+/).some(w => BLOCKED_WORDS.has(w.replace(/[^a-z]/g, '')))
+}
+
 function WordCloudQuestion({
-  submitting, onSubmit,
+  submitting, onSubmit, submissionsUsed, maxSubmissions,
 }: {
-  submitting: boolean
-  onSubmit:  (word: string) => void
+  submitting:       boolean
+  onSubmit:         (word: string) => void
+  submissionsUsed:  number
+  maxSubmissions:   number
 }) {
-  const [input, setInput] = useState('')
-  const MAX = 30
+  const [input,        setInput]        = useState('')
+  const [recentlySent, setRecentlySent] = useState<string | null>(null)
+  const [inputError,   setInputError]   = useState<string | null>(null)
+  const MAX_CHARS = 40
+  const MAX_WORDS = 3
+
+  const words      = input.trim() ? input.trim().split(/\s+/) : []
+  const wordCount  = words.length
+  const tooMany    = wordCount > MAX_WORDS
+  const isValid    = input.trim().length > 0 && !tooMany && !submitting
 
   const handleSubmit = () => {
     const trimmed = input.trim()
-    if (!trimmed || submitting) return
+    if (!trimmed || submitting || tooMany) return
+    if (containsProfanity(trimmed)) {
+      setInputError('Please keep it appropriate — try a different word.')
+      return
+    }
+    setInputError(null)
+    setRecentlySent(trimmed)
     onSubmit(trimmed.toLowerCase())
+    setInput('')  // Optimistic clear — error banner shows if the submit actually fails
+    setTimeout(() => setRecentlySent(null), 3000)
   }
+
+  const submissionsLeft = maxSubmissions - submissionsUsed
 
   return (
     <div className="flex flex-1 flex-col gap-4">
+
+      {/* Progress indicator */}
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-midnight-sky-700">
+          {submissionsUsed === 0
+            ? `You can add up to ${maxSubmissions} word${maxSubmissions !== 1 ? 's' : ''}`
+            : `${submissionsUsed} of ${maxSubmissions} word${maxSubmissions !== 1 ? 's' : ''} added`}
+        </p>
+        <div className="flex gap-1">
+          {Array.from({ length: maxSubmissions }, (_, i) => (
+            <span
+              key={i}
+              className={cn(
+                'h-2 w-5 rounded-full transition-all',
+                i < submissionsUsed ? 'bg-fresh-green' : 'bg-midnight-sky-200',
+              )}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Success toast */}
+      <AnimatePresence>
+        {recentlySent && (
+          <motion.div
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            className="flex items-center gap-2 rounded-xl bg-fresh-green/10 px-4 py-2.5 text-sm font-medium text-fresh-green"
+          >
+            <Check className="size-4 shrink-0" strokeWidth={2.5} />
+            <span>
+              &ldquo;{recentlySent}&rdquo; added to the cloud!
+              {submissionsLeft > 1 && <span className="ml-1 font-light text-fresh-green/70">
+                {submissionsLeft - 1} more to go
+              </span>}
+              {submissionsLeft === 1 && <span className="ml-1 font-light text-fresh-green/70">
+                1 more left
+              </span>}
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Input row */}
       <div className="flex gap-2">
         <input
           type="text"
           value={input}
-          onChange={e => setInput(e.target.value.slice(0, MAX))}
-          onKeyDown={e => e.key === 'Enter' && handleSubmit()}
-          placeholder="Type one word or short phrase…"
+          onChange={e => {
+            setInputError(null)
+            setInput(e.target.value.slice(0, MAX_CHARS))
+          }}
+          onKeyDown={e => e.key === 'Enter' && isValid && handleSubmit()}
+          placeholder="Type a word or short phrase…"
           disabled={submitting}
           className={cn(
-            'flex-1 rounded-2xl border-2 border-midnight-sky-200 bg-white px-4 py-3.5 text-base text-midnight-sky-900 placeholder:text-midnight-sky-400',
-            'outline-none transition-all focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/15',
+            'flex-1 rounded-2xl border-2 bg-white px-4 py-3.5 text-base text-midnight-sky-900 placeholder:text-midnight-sky-400',
+            'outline-none transition-all',
+            tooMany
+              ? 'border-hot-pink/50 focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/15'
+              : 'border-midnight-sky-200 focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/15',
             'disabled:opacity-50',
           )}
         />
         <motion.button
           onClick={handleSubmit}
           whileTap={{ scale: 0.92 }}
-          disabled={!input.trim() || submitting}
+          disabled={!isValid}
           className={cn(
             'flex size-[52px] shrink-0 items-center justify-center rounded-2xl transition-all',
-            input.trim() && !submitting
+            isValid
               ? 'bg-hot-pink text-white shadow-[0_0_20px_-4px] shadow-hot-pink/50'
-              : 'bg-midnight-sky-100 text-midnight-sky-400 cursor-not-allowed',
+              : 'cursor-not-allowed bg-midnight-sky-100 text-midnight-sky-400',
           )}
         >
           {submitting ? <LoadingDots /> : <Send className="size-4" />}
         </motion.button>
       </div>
-      <p className="mt-[-10px] text-right text-xs text-midnight-sky-400">{input.length}/{MAX}</p>
 
-      <div className="mt-4 rounded-2xl bg-midnight-sky-50 p-5 text-center">
-        <p className="text-sm font-light text-midnight-sky-500">
-          Your word will appear in the live cloud on the presenter's screen.
-        </p>
+      {/* Char count + word limit warning */}
+      <div className="mt-[-10px] flex items-center justify-between">
+        <AnimatePresence>
+          {tooMany ? (
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="text-xs font-medium text-hot-pink"
+            >
+              Max {MAX_WORDS} words per submission
+            </motion.p>
+          ) : inputError ? (
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="text-xs font-medium text-hot-pink"
+            >
+              {inputError}
+            </motion.p>
+          ) : (
+            <span />
+          )}
+        </AnimatePresence>
+        <p className="text-right text-xs text-midnight-sky-400">{input.length}/{MAX_CHARS}</p>
       </div>
+
+      <p className="rounded-2xl bg-midnight-sky-50 px-5 py-4 text-center text-sm font-light text-midnight-sky-500">
+        Your words appear live in the cloud on the presenter's screen.
+      </p>
     </div>
   )
 }

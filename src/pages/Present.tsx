@@ -1856,17 +1856,19 @@ function MCQPieChart({ options, votes }: { options: string[]; votes: number[] })
 // No word will ever blend into its slide background.
 const CLOUD_THEME_PALETTES: Record<string, string[]> = {
   // Dark navy (#000079): all bright vivid colors read well
-  navy:   ['#ff0065','#00b0ff','#42db66','#ffc709','#c084fc','#fb923c','#22d3ee','#f472b6','#4ade80','#facc15','#a78bfa','#34d399'],
+  navy:        ['#ff0065','#00b0ff','#42db66','#ffc709','#c084fc','#fb923c','#22d3ee','#f472b6','#4ade80','#facc15','#a78bfa','#34d399'],
   // Hot pink (#ff0065): avoid red/magenta; white, cyan, gold, green, navy, purple
-  pink:   ['#ffffff','#ffc709','#22d3ee','#000079','#4ade80','#818cf8','#a3e635','#06b6d4','#c084fc','#e0f2fe','#34d399','#60a5fa'],
+  pink:        ['#ffffff','#ffc709','#22d3ee','#000079','#4ade80','#818cf8','#a3e635','#06b6d4','#c084fc','#e0f2fe','#34d399','#60a5fa'],
   // Sky blue (#00b0ff): avoid light blue/cyan; navy, hot-pink, dark green, dark gold, dark purple
-  sky:    ['#000079','#ff0065','#166534','#92400e','#6b21a8','#9f1239','#1d4ed8','#7c2d12','#14532d','#581c87','#c2410c','#1e3a5f'],
+  sky:         ['#000079','#ff0065','#166534','#92400e','#6b21a8','#9f1239','#1d4ed8','#7c2d12','#14532d','#581c87','#c2410c','#1e3a5f'],
   // Fresh green (#42db66): avoid green/lime; navy, hot-pink, dark blue, dark gold, purple
-  green:  ['#000079','#ff0065','#1d4ed8','#92400e','#6b21a8','#9f1239','#0c4a6e','#7c2d12','#581c87','#164e63','#c2410c','#1e1b4b'],
+  green:       ['#000079','#ff0065','#1d4ed8','#92400e','#6b21a8','#9f1239','#0c4a6e','#7c2d12','#581c87','#164e63','#c2410c','#1e1b4b'],
   // Golden (#ffc709): avoid yellow/gold/orange; navy, hot-pink, blue, forest-green, purple
-  golden: ['#000079','#ff0065','#1d4ed8','#166534','#6b21a8','#9f1239','#0c4a6e','#14532d','#581c87','#164e63','#c2410c','#1e1b4b'],
+  golden:      ['#000079','#ff0065','#1d4ed8','#166534','#6b21a8','#9f1239','#0c4a6e','#14532d','#581c87','#164e63','#c2410c','#1e1b4b'],
   // White (#f4f4f9): avoid light colors; navy, hot-pink, dark blue, dark green, purple, dark red
-  white:  ['#000079','#ff0065','#0369a1','#166534','#6b21a8','#be185d','#1d4ed8','#9f1239','#92400e','#581c87','#134e4a','#7c2d12'],
+  white:       ['#000079','#ff0065','#0369a1','#166534','#6b21a8','#be185d','#1d4ed8','#9f1239','#92400e','#581c87','#134e4a','#7c2d12'],
+  // Transparent: image behind — bright vivid palette like navy works on most photo backgrounds
+  transparent: ['#ff0065','#00b0ff','#42db66','#ffc709','#c084fc','#fb923c','#22d3ee','#f472b6','#4ade80','#facc15','#a78bfa','#34d399'],
 }
 
 interface PlacedWord {
@@ -1896,23 +1898,32 @@ function layoutWordCloud(
 ): PlacedWord[] {
   if (!words.length || cw < 10 || ch < 10) return []
 
-  const maxC  = Math.max(...words.map(w => w.count))
-  const minF  = 13
-  const maxF  = Math.min(88, ch * 0.22)
+  const maxC    = Math.max(...words.map(w => w.count))
+  const n       = words.length
+  const minF    = 13
+  // Scale max font down as word count grows — prevents all-unique-word clouds from overlapping.
+  // With n=1 → full 88 px. n=4 → ~57 px. n=10 → ~40 px. n=20 → ~29 px.
+  const rawMaxF = Math.min(88, ch * 0.22)
+  const maxF    = Math.min(rawMaxF, Math.max(22, rawMaxF / Math.sqrt(n * 0.45 + 0.55)))
+
   const placed: Array<{ x1: number; y1: number; x2: number; y2: number }> = []
   const result: PlacedWord[]  = []
   const cx = cw / 2, cy = ch / 2
 
   words.forEach((word, idx) => {
-    const ratio  = maxC > 0 ? word.count / maxC : 0
-    const size   = Math.round(minF + ratio * (maxF - minF))
-    const weight = ratio >= 0.65 ? '800' : ratio >= 0.4 ? '700' : ratio >= 0.2 ? '600' : '500'
-    const { w, h } = measureWord(word.text, size, weight)
-    const color  = palette[idx % palette.length]
-    const isTop  = idx === 0
+    const freqRatio  = maxC > 0 ? word.count / maxC : 1
+    // Rank-based decay: even same-count words get progressively smaller so the top word
+    // is always visually dominant (1.0 → 0.5 across the word list).
+    const rankFactor = 1 - (idx / Math.max(1, n)) * 0.5
+    const ratio      = Math.max(0.25, freqRatio * rankFactor)
+    const size       = Math.round(minF + ratio * (maxF - minF))
+    const weight     = ratio >= 0.75 ? '800' : ratio >= 0.55 ? '700' : ratio >= 0.35 ? '600' : '500'
+    const { w, h }   = measureWord(word.text, size, weight)
+    const color      = palette[idx % palette.length]
+    const isTop      = idx === 0
 
     // Archimedean spiral — golden-angle offset per word distributes directions evenly
-    for (let step = 0; step < 800; step++) {
+    for (let step = 0; step < 1200; step++) {
       const t  = step * 0.26 + idx * 2.39996  // golden angle ≈ 137.5°
       const r  = 0.46 * step
       const x  = cx + r * Math.cos(t)
@@ -1922,7 +1933,7 @@ function layoutWordCloud(
 
       if (x1 < 6 || y1 < 6 || x2 > cw - 6 || y2 > ch - 6) continue
 
-      const gap = 5
+      const gap = 8
       if (placed.some(p =>
         x2 + gap > p.x1 && x1 - gap < p.x2 &&
         y2 + gap > p.y1 && y1 - gap < p.y2,

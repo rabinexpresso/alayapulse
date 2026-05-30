@@ -168,6 +168,8 @@ interface QuestionSlide {
   imgUrl?:    string
   /** How the image is positioned relative to the slide content. */
   imgLayout?: 'top' | 'right' | 'background' | 'reference'
+  /** Word Cloud only — max number of word submissions per person. Default 3. */
+  wcMaxSubmissions?: number
 }
 type ContentTemplate = 'heading' | 'bullets' | 'quote'
 interface ContentSlide {
@@ -2187,17 +2189,43 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false }: {
             {/* Type-specific fields */}
             {slide.type === 'mcq' && <MCQEditor slide={slide} onUpdate={onUpdate} />}
             {slide.type === 'rating' && <RatingEditor slide={slide} onUpdate={onUpdate} />}
-            {(slide.type === 'wordcloud' || slide.type === 'openended') && (
+            {slide.type === 'openended' && (
               <div className="mb-1 flex items-start gap-2.5 rounded-xl bg-midnight-sky-50 p-4">
-                <div className={cn(
-                  'mt-0.5 shrink-0 size-1.5 rounded-full',
-                  slide.type === 'wordcloud' ? 'bg-fresh-green' : 'bg-golden-sun',
-                )} />
+                <div className="mt-0.5 size-1.5 shrink-0 rounded-full bg-golden-sun" />
                 <p className="text-sm text-midnight-sky-500">
-                  {slide.type === 'wordcloud'
-                    ? 'Each audience member types one word. Results appear as a live word cloud on the big screen.'
-                    : 'Audience members type a short answer. Responses stream in live on the big screen.'}
+                  Audience members type a short answer. Responses stream in live on the big screen.
                 </p>
+              </div>
+            )}
+            {slide.type === 'wordcloud' && (
+              <div className="space-y-4">
+                <div className="flex items-start gap-2.5 rounded-xl bg-midnight-sky-50 p-4">
+                  <div className="mt-0.5 size-1.5 shrink-0 rounded-full bg-fresh-green" />
+                  <p className="text-sm text-midnight-sky-500">
+                    Each person can submit up to <strong>{slide.wcMaxSubmissions ?? 3}</strong> words or short phrases (max 3 words each). Results appear as a live word cloud.
+                  </p>
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-midnight-sky-700">
+                    Max submissions per person
+                  </label>
+                  <div className="flex gap-2">
+                    {[1, 2, 3, 5, 8, 10].map(n => (
+                      <button
+                        key={n}
+                        onClick={() => onUpdate({ wcMaxSubmissions: n })}
+                        className={cn(
+                          'rounded-lg px-3 py-1.5 text-sm font-semibold transition-all',
+                          (slide.wcMaxSubmissions ?? 3) === n
+                            ? 'bg-midnight-sky-900 text-white'
+                            : 'bg-midnight-sky-100 text-midnight-sky-600 hover:bg-midnight-sky-200',
+                        )}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 
