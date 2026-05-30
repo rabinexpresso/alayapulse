@@ -2035,6 +2035,32 @@ function SlideEditor({ slide, onUpdate, onSplitHtml }: {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
+   fileToImageDataUrl — converts any image or PDF (page 1) to a data URL.
+   Used by SlideImagePicker and the canvas "Add Image" handler so both
+   spots accept PDFs without duplicating the PDF.js rendering logic.
+   ───────────────────────────────────────────────────────────────────────── */
+
+async function fileToImageDataUrl(file: File): Promise<string> {
+  if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+    const buf  = await file.arrayBuffer()
+    const pdf  = await pdfjsLib.getDocument({ data: buf }).promise
+    const page = await pdf.getPage(1)
+    const vp   = page.getViewport({ scale: 2.0 })
+    const canvas  = document.createElement('canvas')
+    canvas.width  = vp.width
+    canvas.height = vp.height
+    await page.render({ canvas, canvasContext: canvas.getContext('2d')!, viewport: vp }).promise
+    return canvas.toDataURL('image/jpeg', 0.92)
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload  = () => resolve(reader.result as string)
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
    SlideImagePicker — reusable image upload widget for question + content slides
    ───────────────────────────────────────────────────────────────────────── */
 
@@ -2045,10 +2071,7 @@ function SlideImagePicker({ imgUrl, onChange }: {
   const fileRef = useRef<HTMLInputElement>(null)
 
   const handleFile = (file: File) => {
-    const reader = new FileReader()
-    reader.onload  = () => onChange(reader.result as string)
-    reader.onerror = () => {}
-    reader.readAsDataURL(file)
+    fileToImageDataUrl(file).then(onChange).catch(console.error)
   }
 
   if (imgUrl) {
@@ -2070,7 +2093,7 @@ function SlideImagePicker({ imgUrl, onChange }: {
           >
             Change image
           </button>
-          <input ref={fileRef} type="file" accept="image/*" className="hidden"
+          <input ref={fileRef} type="file" accept="image/*,.pdf" className="hidden"
             onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = '' }} />
         </div>
       </div>
@@ -3591,14 +3614,12 @@ function CanvasEditor({ slide, onUpdate }: {
         <input
           ref={imgFileRef}
           type="file"
-          accept="image/*"
+          accept="image/*,.pdf"
           className="hidden"
           onChange={e => {
             const f = e.target.files?.[0]
             if (!f) return
-            const reader = new FileReader()
-            reader.onload = () => addImage(reader.result as string)
-            reader.readAsDataURL(f)
+            fileToImageDataUrl(f).then(addImage).catch(console.error)
             e.target.value = ''
           }}
         />
