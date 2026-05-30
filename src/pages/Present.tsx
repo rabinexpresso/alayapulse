@@ -1322,14 +1322,14 @@ function QuestionSlideView({
   // JSX variables are plain React elements; React reconciles them in-place.
 
   const mcqOptions = slide.type === 'mcq' ? (
-    <div className="mt-6 flex flex-col gap-3">
+    <div className="mt-6 flex flex-col items-start gap-3">
       {slide.options.map((opt, i) => (
         <motion.div
           key={i}
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.12 + i * 0.07, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-          className="flex min-w-0 items-start gap-3 rounded-2xl px-4 py-3.5 text-left backdrop-blur-sm"
+          className="flex min-w-0 max-w-full items-start gap-3 rounded-2xl px-4 py-3.5 text-left backdrop-blur-sm"
           style={{ border: `1px solid ${c.cardBorder}`, backgroundColor: c.cardBg }}
         >
           <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold" style={{ backgroundColor: c.fg, color: c.bg }}>
