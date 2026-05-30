@@ -1480,10 +1480,8 @@ function QuestionSlideView({
           className="relative shrink-0 overflow-hidden"
           style={{ width: `${imgPanelPct}%` }}
         >
-          {/* Blurred fill for letterbox areas (portrait: sides, landscape: top+bottom) */}
-          <img src={slide.imgUrl} alt="" aria-hidden
-            className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-30" />
-          {/* Sharp full image — object-contain so nothing is ever cropped */}
+          {/* Full image — object-contain so nothing is ever cropped.
+              Letterbox areas show the slide background colour set on the outer div. */}
           <img src={slide.imgUrl} alt="Reference image"
             className="absolute inset-0 h-full w-full object-contain px-3" />
         </motion.div>

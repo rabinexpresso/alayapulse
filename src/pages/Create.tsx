@@ -2622,10 +2622,7 @@ function SlidePreviewCard({ slide }: { slide: QuestionSlide }) {
               {questionPanel}
             </div>
             <div className="relative flex-1 overflow-hidden">
-              {/* Blurred fill for letterbox areas */}
-              <img src={slide.imgUrl} alt="" aria-hidden
-                className="absolute inset-0 h-full w-full scale-110 object-cover blur-xl opacity-30" />
-              {/* Sharp full image — never cropped */}
+              {/* Full image — never cropped. Letterbox areas show slide background colour. */}
               <img src={slide.imgUrl} alt="Reference"
                 className="absolute inset-0 h-full w-full object-contain px-3 py-2" />
             </div>
