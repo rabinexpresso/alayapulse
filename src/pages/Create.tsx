@@ -1977,7 +1977,7 @@ function SlideEditor({ slide, onUpdate, onSplitHtml }: {
   if (slide.type === 'content') {
     return (
       <div className="scrollbar-panel flex flex-1 flex-col overflow-auto" style={{ background: 'oklch(0.972 0.006 258)' }}>
-        <div className="mx-auto w-full max-w-2xl px-8 py-8">
+        <div className="w-full max-w-4xl px-8 py-8">
           <ContentEditor slide={slide} onUpdate={patch => onUpdate(slide.id, patch)} />
         </div>
       </div>
@@ -1987,17 +1987,33 @@ function SlideEditor({ slide, onUpdate, onSplitHtml }: {
   if (slide.type === 'canvas') {
     return (
       <div className="scrollbar-panel flex flex-1 flex-col overflow-auto" style={{ background: 'oklch(0.972 0.006 258)' }}>
-        <div className="mx-auto w-full max-w-4xl px-6 py-6">
+        <div className="w-full px-6 py-6">
           <CanvasEditor slide={slide} onUpdate={patch => onUpdate(slide.id, patch)} />
         </div>
       </div>
     )
   }
 
+  // Question slides — two-column: editor form on left, audience preview on right
   return (
-    <div className="scrollbar-panel flex flex-1 flex-col overflow-auto" style={{ background: 'oklch(0.972 0.006 258)' }}>
-      <div className="mx-auto w-full max-w-2xl px-8 py-8">
-        <QuestionEditor slide={slide} onUpdate={patch => onUpdate(slide.id, patch)} />
+    <div className="scrollbar-panel flex flex-1 overflow-auto" style={{ background: 'oklch(0.972 0.006 258)' }}>
+      {/* Left: editor form fills available width */}
+      <div className="min-w-0 flex-1 px-8 py-8">
+        <QuestionEditor slide={slide as QuestionSlide} onUpdate={patch => onUpdate(slide.id, patch)} hidePreview />
+      </div>
+      {/* Right: audience preview — sticky so it stays in view while scrolling the form */}
+      <div className="w-[360px] shrink-0 border-l border-midnight-sky-100 px-6 py-8">
+        <div className="sticky top-8">
+          <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-midnight-sky-500">
+            Audience view
+          </p>
+          <div
+            className="overflow-hidden rounded-2xl p-5 shadow-[0_8px_32px_-8px_rgba(0,0,121,0.25)] transition-colors duration-300"
+            style={{ backgroundColor: contentColors((slide as QuestionSlide).theme ?? 'navy').bg }}
+          >
+            <SlidePreviewCard slide={slide as QuestionSlide} />
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -2065,9 +2081,10 @@ function SlideImagePicker({ imgUrl, onChange }: {
    Question Editor — form for all 4 types
    ───────────────────────────────────────────────────────────────────────── */
 
-function QuestionEditor({ slide, onUpdate }: {
+function QuestionEditor({ slide, onUpdate, hidePreview = false }: {
   slide: QuestionSlide
   onUpdate: (patch: Partial<QuestionSlide>) => void
+  hidePreview?: boolean
 }) {
   const qInfo = QTYPES.find(q => q.type === slide.type)!
 
@@ -2200,18 +2217,20 @@ function QuestionEditor({ slide, onUpdate }: {
           </div>
         </div>
 
-        {/* Audience preview — themed phone-style card */}
-        <div className="mt-4">
-          <p className="mb-2 px-1 text-[11px] font-semibold text-midnight-sky-600">
-            Audience view
-          </p>
-          <div
-            className="overflow-hidden rounded-2xl p-5 shadow-[0_8px_32px_-8px_rgba(0,0,121,0.25)] transition-colors duration-300"
-            style={{ backgroundColor: contentColors(slide.theme ?? 'navy').bg }}
-          >
-            <SlidePreviewCard slide={slide} />
+        {/* Audience preview — only shown when not in two-column layout */}
+        {!hidePreview && (
+          <div className="mt-4">
+            <p className="mb-2 px-1 text-[11px] font-semibold text-midnight-sky-600">
+              Audience view
+            </p>
+            <div
+              className="overflow-hidden rounded-2xl p-5 shadow-[0_8px_32px_-8px_rgba(0,0,121,0.25)] transition-colors duration-300"
+              style={{ backgroundColor: contentColors(slide.theme ?? 'navy').bg }}
+            >
+              <SlidePreviewCard slide={slide} />
+            </div>
           </div>
-        </div>
+        )}
 
       </motion.div>
     </div>
