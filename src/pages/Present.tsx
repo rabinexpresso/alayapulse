@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { PersistentHtmlIframe } from '@/components/PersistentHtmlIframe'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence, useMotionValue, useTransform, useSpring } from 'framer-motion'
 import {
   ChevronLeft, ChevronRight, X,
   BarChart2, ChevronDown, ChevronUp, Clock,
@@ -1521,6 +1521,86 @@ function QuestionSlideView({
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
+   GlassMorphPanel — interactive glass card for non-navy results panels.
+   Tilt follows mouse (±6°), spotlight glow tracks cursor, frosted glass base.
+   Defined here (outside ResultsSlideView) to avoid React unmount/remount flash.
+   ───────────────────────────────────────────────────────────────────────── */
+
+function GlassMorphPanel({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  // Raw mouse values (0–1 relative to panel center)
+  const rawX = useMotionValue(0)
+  const rawY = useMotionValue(0)
+
+  // Smooth spring for tilt (stiffness/damping tuned for snappy-but-smooth feel)
+  const springConfig = { stiffness: 200, damping: 28, mass: 0.6 }
+  const rotateY = useSpring(useTransform(rawX, [-1, 1], [6, -6]),  springConfig)
+  const rotateX = useSpring(useTransform(rawY, [-1, 1], [-6, 6]),  springConfig)
+
+  // Spotlight: percentage position within panel for CSS radial-gradient
+  const glowX = useMotionValue(50)
+  const glowY = useMotionValue(50)
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = ref.current?.getBoundingClientRect()
+    if (!rect) return
+    const nx = (e.clientX - rect.left)  / rect.width   // 0–1
+    const ny = (e.clientY - rect.top)   / rect.height  // 0–1
+    rawX.set(nx * 2 - 1)   // -1 to 1
+    rawY.set(ny * 2 - 1)   // -1 to 1
+    glowX.set(nx * 100)
+    glowY.set(ny * 100)
+  }
+
+  const handleMouseLeave = () => {
+    rawX.set(0)
+    rawY.set(0)
+    glowX.set(50)
+    glowY.set(50)
+  }
+
+  return (
+    <div style={{ perspective: 900 }} className={`flex-1 min-h-0 mt-6 ${className}`}>
+      <motion.div
+        ref={ref}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+        style={{ rotateX, rotateY, transformStyle: 'preserve-3d' }}
+        className="relative h-full w-full overflow-hidden rounded-2xl border border-white/10"
+        // Glassmorphism base: semi-transparent navy + backdrop blur
+        // The translucency lets the slide background colour bleed through softly
+        css-glass="true"
+      >
+        {/* Frosted glass background */}
+        <div className="absolute inset-0 rounded-2xl bg-midnight-sky-900/75 backdrop-blur-xl" />
+
+        {/* Spotlight glow — radial gradient that follows cursor */}
+        <motion.div
+          className="pointer-events-none absolute inset-0 rounded-2xl"
+          style={{
+            background: useTransform(
+              [glowX, glowY],
+              ([x, y]) =>
+                `radial-gradient(circle at ${x}% ${y}%, rgba(255,255,255,0.10) 0%, transparent 55%)`,
+            ),
+          }}
+        />
+
+        {/* Top-left specular highlight — static glint like light on glass */}
+        <div className="pointer-events-none absolute inset-0 rounded-2xl"
+          style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.07) 0%, transparent 50%)' }} />
+
+        {/* Content sits above all the glass layers */}
+        <div className="relative z-10 h-full overflow-y-auto overflow-x-hidden px-8 py-6">
+          {children}
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
    Results slide — live animated visualizations
    ───────────────────────────────────────────────────────────────────────── */
 
@@ -1542,18 +1622,34 @@ function ResultsSlideView({
   // theme-aware color palette, so no dark panel is needed.
   const needsDarkPanel = (slide.theme ?? 'navy') !== 'navy' && slide.type !== 'wordcloud'
 
-  const vizWrap = needsDarkPanel
-    ? 'mt-6 flex-1 overflow-y-auto overflow-x-hidden rounded-2xl bg-midnight-sky-900/95 px-8 py-6'
-    : slide.type === 'wordcloud'
-      ? 'mt-2 flex-1 min-h-0 overflow-hidden'   // tighter top gap, fill to HUD
-      : 'mt-6 flex-1 overflow-y-auto overflow-x-hidden'
+  const vizInner = (
+    <>
+      {slide.type === 'mcq'       && <MCQResults    options={slide.options} votes={mcqVotes} vizType={slide.vizType ?? 'bar'} />}
+      {slide.type === 'wordcloud' && <WordCloudResults words={cloudWords} slideTheme={slide.theme} />}
+      {slide.type === 'openended' && <OpenEndedResults answers={openAnswers} />}
+      {slide.type === 'rating'    && (() => {
+        const lefts  = slide.leftLabels  ?? slide.options.map(() => slide.leftLabel  ?? '')
+        const rights = slide.rightLabels ?? slide.options.map(() => slide.rightLabel ?? '')
+        return (
+          <RatingResults
+            params={slide.options}
+            avgs={ratingAvgs}
+            distributions={ratingDist}
+            ratingMax={ratingMax}
+            leftLabels={lefts}
+            rightLabels={rights}
+          />
+        )
+      })()}
+    </>
+  )
 
   return (
     <div
       className="absolute inset-0 flex flex-col overflow-hidden px-14 pt-10 pb-24"
       style={{ backgroundColor: c.bg }}
     >
-      {/* Badge + question — solid contrast colour for any background */}
+      {/* Badge + question */}
       <div className="flex items-center gap-3">
         <span
           className="shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider"
@@ -1569,27 +1665,14 @@ function ResultsSlideView({
         </h2>
       </div>
 
-      {/* Results fill remaining space */}
-      <div className={vizWrap}>
-        {slide.type === 'mcq'       && <MCQResults    options={slide.options} votes={mcqVotes} vizType={slide.vizType ?? 'bar'} />}
-        {slide.type === 'wordcloud' && <WordCloudResults words={cloudWords} slideTheme={slide.theme} />}
-        {slide.type === 'openended' && <OpenEndedResults answers={openAnswers} />}
-        {slide.type === 'rating'    && (() => {
-          // Per-parameter labels with slide-wide fallback for legacy data
-          const lefts  = slide.leftLabels  ?? slide.options.map(() => slide.leftLabel  ?? '')
-          const rights = slide.rightLabels ?? slide.options.map(() => slide.rightLabel ?? '')
-          return (
-            <RatingResults
-              params={slide.options}
-              avgs={ratingAvgs}
-              distributions={ratingDist}
-              ratingMax={ratingMax}
-              leftLabels ={lefts}
-              rightLabels={rights}
-            />
-          )
-        })()}
-      </div>
+      {/* Results — glass panel for non-navy themes, plain for navy/wordcloud */}
+      {needsDarkPanel ? (
+        <GlassMorphPanel>{vizInner}</GlassMorphPanel>
+      ) : slide.type === 'wordcloud' ? (
+        <div className="mt-2 flex-1 min-h-0 overflow-hidden">{vizInner}</div>
+      ) : (
+        <div className="mt-6 flex-1 overflow-y-auto overflow-x-hidden">{vizInner}</div>
+      )}
     </div>
   )
 }
