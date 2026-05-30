@@ -1413,24 +1413,26 @@ function QuestionSlideView({
         <img src={slide.imgUrl} alt="" className="absolute inset-0 h-full w-full object-contain" />
         {/* Theme colour overlay for text readability */}
         <div className="absolute inset-0" style={{ backgroundColor: `${c.bg}cc` }} />
+        {/* Scrollable content: badge + question + options */}
         <div className="relative z-10 flex flex-1 flex-col overflow-hidden px-14 pt-12">
-          <motion.span initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-            className="w-fit rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
-            style={{ backgroundColor: c.fg, color: c.bg }}
-          >
-            {meta.label}
-          </motion.span>
-          <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
-            className="mt-6 max-w-5xl text-4xl font-semibold leading-tight tracking-tight md:text-5xl lg:text-[3.2rem]"
-            style={{ color: c.fg }}
-          >
-            {slide.question}
-          </motion.h1>
-          {mcqOptions}
-          {ratingParams}
-          <div className="flex-1" />
+          <div className="flex-1 overflow-y-auto overflow-x-hidden pb-4">
+            <motion.span initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+              className="w-fit rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
+              style={{ backgroundColor: c.fg, color: c.bg }}
+            >
+              {meta.label}
+            </motion.span>
+            <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
+              className="mt-6 text-4xl font-semibold leading-tight tracking-tight md:text-5xl lg:text-[3.2rem]"
+              style={{ color: c.fg }}
+            >
+              {slide.question}
+            </motion.h1>
+            {mcqOptions}
+            {ratingParams}
+          </div>
         </div>
         <div className="relative z-10 px-14 pb-0">{bottomBar}</div>
       </div>
@@ -1453,23 +1455,25 @@ function QuestionSlideView({
       <div className="absolute inset-0 flex overflow-hidden" style={{ backgroundColor: c.bg }}>
         {/* Left: question content + BottomBar — pb-24 keeps content above the HUD */}
         <div className="flex flex-1 flex-col overflow-hidden px-12 pt-12 pb-24">
-          <motion.span initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-            className="w-fit rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
-            style={{ backgroundColor: c.fg, color: c.bg }}
-          >
-            {meta.label}
-          </motion.span>
-          <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
-            className="mt-5 text-3xl font-semibold leading-tight tracking-tight md:text-4xl lg:text-[2.6rem]"
-            style={{ color: c.fg }}
-          >
-            {slide.question}
-          </motion.h1>
-          {mcqOptions}
-          {ratingParams}
-          <div className="flex-1" />
+          {/* Scrollable: badge + question + options */}
+          <div className="flex-1 overflow-y-auto overflow-x-hidden pb-4">
+            <motion.span initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+              className="w-fit rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
+              style={{ backgroundColor: c.fg, color: c.bg }}
+            >
+              {meta.label}
+            </motion.span>
+            <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
+              className="mt-5 text-3xl font-semibold leading-tight tracking-tight md:text-4xl lg:text-[2.6rem]"
+              style={{ color: c.fg }}
+            >
+              {slide.question}
+            </motion.h1>
+            {mcqOptions}
+            {ratingParams}
+          </div>
           {bottomBar}
         </div>
         {/* Right: reference image — full height to HUD edge, width from aspect ratio */}
@@ -1492,23 +1496,25 @@ function QuestionSlideView({
   /* ── NO IMAGE — full-width layout ──────────────────────────────────── */
   return (
     <div className="absolute inset-0 flex flex-col overflow-hidden px-14 pt-12 pb-24" style={{ backgroundColor: c.bg }}>
-      <motion.span initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-        className="w-fit rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
-        style={{ backgroundColor: c.fg, color: c.bg }}
-      >
-        {meta.label}
-      </motion.span>
-      <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
-        className="mt-6 max-w-5xl text-4xl font-semibold leading-tight tracking-tight md:text-5xl lg:text-[3.2rem]"
-        style={{ color: c.fg }}
-      >
-        {slide.question}
-      </motion.h1>
-      {mcqOptions}
-      {ratingParams}
-      <div className="flex-1" />
+      {/* Scrollable: badge + question + options — grows to fill space, scrolls if needed */}
+      <div className="flex-1 overflow-y-auto overflow-x-hidden pb-4">
+        <motion.span initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+          className="w-fit rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
+          style={{ backgroundColor: c.fg, color: c.bg }}
+        >
+          {meta.label}
+        </motion.span>
+        <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
+          className="mt-6 text-4xl font-semibold leading-tight tracking-tight md:text-5xl lg:text-[3.2rem]"
+          style={{ color: c.fg }}
+        >
+          {slide.question}
+        </motion.h1>
+        {mcqOptions}
+        {ratingParams}
+      </div>
       {bottomBar}
     </div>
   )
