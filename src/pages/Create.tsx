@@ -2176,8 +2176,9 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false }: {
                 value={slide.question}
                 onChange={e => onUpdate({ question: e.target.value })}
                 placeholder={PLACEHOLDERS[slide.type]}
-                rows={3}
-                className="w-full resize-none rounded-xl border border-midnight-sky-150 bg-white px-4 py-3 text-base text-midnight-sky-900 placeholder:font-light placeholder:text-midnight-sky-400 outline-none transition-all focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/10"
+                rows={2}
+                style={{ fieldSizing: 'content' } as React.CSSProperties}
+                className="w-full resize-none overflow-hidden rounded-xl border border-midnight-sky-150 bg-white px-4 py-3 text-base text-midnight-sky-900 placeholder:font-light placeholder:text-midnight-sky-400 outline-none transition-all focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/10"
               />
             </div>
 
