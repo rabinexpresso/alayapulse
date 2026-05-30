@@ -1315,9 +1315,14 @@ function QuestionSlideView({
   }, [slide.imgUrl])
   const isLandscape = imgAspect !== null && imgAspect >= 1.35
 
-  /* Shared MCQ options block */
-  const MCQOptions = () => slide.type === 'mcq' ? (
-    // Always single column — options extend full width so long text never wraps into a narrow half-column
+  // ── JSX variables instead of inline component functions ──────────────
+  // IMPORTANT: never define components inside another component — React
+  // creates a new function reference each render and treats it as a
+  // different component type, causing full unmount+remount which replays
+  // Framer Motion enter animations → visible flash on every join/submit.
+  // JSX variables are plain React elements; React reconciles them in-place.
+
+  const mcqOptions = slide.type === 'mcq' ? (
     <div className="mt-6 flex flex-col gap-3">
       {slide.options.map((opt, i) => (
         <motion.div
@@ -1337,8 +1342,7 @@ function QuestionSlideView({
     </div>
   ) : null
 
-  /* Shared Rating block */
-  const RatingParams = () => slide.type === 'rating' ? (() => {
+  const ratingParams = slide.type === 'rating' ? (() => {
     const rmax   = slide.ratingMax === 10 ? 10 : 5
     const lefts  = slide.leftLabels  ?? slide.options.map(() => slide.leftLabel  ?? '')
     const rights = slide.rightLabels ?? slide.options.map(() => slide.rightLabel ?? '')
@@ -1374,8 +1378,7 @@ function QuestionSlideView({
     )
   })() : null
 
-  /* Shared bottom bar — response count + show results */
-  const BottomBar = () => (
+  const bottomBar = (
     <div className="flex flex-wrap items-center gap-3">
       <div className="flex items-center gap-2.5 rounded-full px-5 py-2.5 backdrop-blur-sm"
         style={{ border: `1px solid ${c.cardBorder}`, backgroundColor: c.cardBg }}
@@ -1426,11 +1429,11 @@ function QuestionSlideView({
           >
             {slide.question}
           </motion.h1>
-          <MCQOptions />
-          <RatingParams />
+          {mcqOptions}
+          {ratingParams}
           <div className="flex-1" />
         </div>
-        <div className="relative z-10 px-14 pb-0"><BottomBar /></div>
+        <div className="relative z-10 px-14 pb-0">{bottomBar}</div>
       </div>
     )
   }
@@ -1464,10 +1467,10 @@ function QuestionSlideView({
           >
             {slide.question}
           </motion.h1>
-          <MCQOptions />
-          <RatingParams />
+          {mcqOptions}
+          {ratingParams}
           <div className="flex-1" />
-          <BottomBar />
+          {bottomBar}
         </div>
         {/* Right: reference image — full height to HUD edge, width from aspect ratio */}
         <motion.div
@@ -1520,10 +1523,10 @@ function QuestionSlideView({
           >
             {slide.question}
           </motion.h1>
-          <MCQOptions />
-          <RatingParams />
+          {mcqOptions}
+          {ratingParams}
           <div className="flex-1" />
-          <BottomBar />
+          {bottomBar}
         </div>
       </div>
     )
@@ -1546,10 +1549,10 @@ function QuestionSlideView({
       >
         {slide.question}
       </motion.h1>
-      <MCQOptions />
-      <RatingParams />
+      {mcqOptions}
+      {ratingParams}
       <div className="flex-1" />
-      <BottomBar />
+      {bottomBar}
     </div>
   )
 }
