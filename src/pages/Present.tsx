@@ -1421,8 +1421,8 @@ function QuestionSlideView({
         {!isTransparentBg && (
           <img src={slide.imgUrl} alt="" aria-hidden className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-30" />
         )}
-        {/* Full image — object-contain so nothing is cropped */}
-        <img src={slide.imgUrl} alt="" className="absolute inset-0 h-full w-full object-contain" />
+        {/* Full image — object-cover fills edge to edge, slight crop on portrait images */}
+        <img src={slide.imgUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
         {/* Colour overlay for text readability — skip for transparent theme */}
         {!isTransparentBg && (
           <div className="absolute inset-0" style={{ backgroundColor: `${c.bg}cc` }} />

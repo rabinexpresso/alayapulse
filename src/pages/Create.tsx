@@ -2489,7 +2489,7 @@ function RatingEditor({ slide, onUpdate }: {
             {/* Per-parameter scale labels */}
             <div className="mt-2 grid grid-cols-2 gap-2 pl-9">
               <div>
-                <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-midnight-sky-400">
+                <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-midnight-sky-600">
                   Left (at 0)
                 </label>
                 <input
@@ -2500,7 +2500,7 @@ function RatingEditor({ slide, onUpdate }: {
                 />
               </div>
               <div>
-                <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-midnight-sky-400">
+                <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-midnight-sky-600">
                   Right (at {ratingMax})
                 </label>
                 <input
@@ -2623,7 +2623,7 @@ function SlidePreviewCard({ slide }: { slide: QuestionSlide }) {
               className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-25" />
           )}
           <img src={slide.imgUrl} alt=""
-            className="absolute inset-0 h-full w-full object-contain" />
+            className="absolute inset-0 h-full w-full object-cover" />
           {/* Colour overlay — skip for transparent theme so image shows unshaded */}
           {!isTransparent && (
             <div className="absolute inset-0" style={{ backgroundColor: `${c.bg}cc` }} />
