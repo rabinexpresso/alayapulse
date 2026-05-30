@@ -977,7 +977,7 @@ export default function Create() {
               disabled={isStarting}
               className="flex items-center gap-2 rounded-xl bg-sky-blue px-3 py-2 text-sm font-semibold text-white shadow-[0_0_16px_-4px] shadow-sky-blue/50 transition-all hover:scale-[1.02] hover:shadow-[0_0_24px_-2px] hover:shadow-sky-blue/70 disabled:opacity-60"
             >
-              Slide Show
+              New Slide Show
             </motion.button>
           </div>
         ) : (
