@@ -2622,26 +2622,19 @@ function SlidePreviewCard({ slide }: { slide: QuestionSlide }) {
 
       {/* Slide content */}
       <div className="relative flex h-full">
-        {hasRef && slide.imgUrl && isLandscape ? (
-          /* Landscape: image top band (44%), question below — matches presenter */
-          <div className="flex flex-1 flex-col overflow-hidden">
-            <div className="relative h-[44%] shrink-0 overflow-hidden">
-              <img src={slide.imgUrl} alt="Reference"
-                className="absolute inset-0 h-full w-full object-cover" />
-            </div>
-            <div className="flex flex-1 flex-col overflow-hidden">
-              {questionPanel}
-            </div>
-          </div>
-        ) : hasRef && slide.imgUrl ? (
-          /* Portrait: question left (48%), image right panel */
+        {hasRef && slide.imgUrl ? (
+          /* Reference image always in right panel.
+             Portrait: object-contain (full image). Landscape: object-cover (no empty bars). */
           <>
             <div className="flex w-[48%] flex-col overflow-hidden">
               {questionPanel}
             </div>
             <div className="relative flex-1 overflow-hidden">
               <img src={slide.imgUrl} alt="Reference"
-                className="absolute inset-0 h-full w-full object-contain px-3 py-2" />
+                className={cn(
+                  'absolute inset-0 h-full w-full',
+                  isLandscape ? 'object-cover' : 'object-contain px-3 py-2',
+                )} />
             </div>
           </>
         ) : (
