@@ -294,15 +294,20 @@ export default function Vote() {
                   )}
                 </AnimatePresence>
 
-                {/* Optional slide image */}
+                {/* Optional slide image — shown when layout is 'reference' (or legacy top/right).
+                    Hidden for 'background' since that's a presenter-only aesthetic.
+                    Full object-contain so nothing is ever cropped; audience can pinch-zoom. */}
                 {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                {(slideData as any).imgUrl && (
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  <img
-                    src={(slideData as any).imgUrl as string}
-                    alt=""
-                    className="mb-4 h-32 w-full max-w-xs rounded-xl object-cover shadow-sm"
-                  />
+                {(slideData as any).imgUrl && (slideData as any).imgLayout !== 'background' && (
+                  <div className="mb-5 w-full overflow-hidden rounded-2xl border border-midnight-sky-100 bg-midnight-sky-50 shadow-sm">
+                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                    <img
+                      src={(slideData as any).imgUrl as string}
+                      alt="Reference"
+                      className="w-full object-contain"
+                      style={{ maxHeight: '38vh' }}
+                    />
+                  </div>
                 )}
 
                 {/* Question text */}

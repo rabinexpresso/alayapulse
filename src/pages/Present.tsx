@@ -96,7 +96,7 @@ interface QSlide {
   rightLabel?:  string
   theme?:       string
   imgUrl?:      string
-  imgLayout?:   'top' | 'right' | 'background'
+  imgLayout?:   'top' | 'right' | 'background' | 'reference'
 }
 
 interface CanvasBg     { type: 'color' | 'gradient'; value: string }
@@ -1296,12 +1296,26 @@ function QuestionSlideView({
   const meta   = QTYPE_META[slide.type]
   const c      = qColors(slide.theme)
   const layout = slide.imgLayout ?? 'top'
-  const hasSideImg = !!(slide.imgUrl && layout === 'right')
-  const hasBgImg   = !!(slide.imgUrl && layout === 'background')
+
+  // 'reference', 'top', 'right' all use the smart reference layout.
+  // 'background' keeps the full-bleed overlay style.
+  const hasRefImg = !!(slide.imgUrl && layout !== 'background')
+  const hasBgImg  = !!(slide.imgUrl && layout === 'background')
+
+  // Detect aspect ratio to auto-pick portrait (right panel) vs landscape (top panel).
+  // Defaults to portrait while loading — switches instantly when onLoad fires.
+  const [imgAspect, setImgAspect] = useState<number | null>(null)
+  useEffect(() => {
+    if (!slide.imgUrl) { setImgAspect(null); return }
+    const img = new Image()
+    img.onload = () => setImgAspect(img.naturalWidth / img.naturalHeight)
+    img.src = slide.imgUrl
+  }, [slide.imgUrl])
+  const isLandscape = imgAspect !== null && imgAspect >= 1.35
 
   /* Shared MCQ options block */
   const MCQOptions = () => slide.type === 'mcq' ? (
-    <div className={cn('mt-8 grid gap-3', hasSideImg ? 'grid-cols-1 max-w-full' : 'grid-cols-2 max-w-3xl')}>
+    <div className={cn('mt-6 grid gap-3', hasRefImg && !isLandscape ? 'grid-cols-1 max-w-full' : 'grid-cols-2 max-w-3xl')}>
       {slide.options.map((opt, i) => (
         <motion.div
           key={i}
@@ -1326,7 +1340,7 @@ function QuestionSlideView({
     const lefts  = slide.leftLabels  ?? slide.options.map(() => slide.leftLabel  ?? '')
     const rights = slide.rightLabels ?? slide.options.map(() => slide.rightLabel ?? '')
     return (
-      <div className="mt-8 max-w-4xl">
+      <div className="mt-6 max-w-4xl">
         <p className="mb-3 text-sm font-medium" style={{ color: c.fgDim }}>Rate each on a 0–{rmax} scale</p>
         <div className="grid gap-3 sm:grid-cols-2">
           {slide.options.map((opt, i) => {
@@ -1360,7 +1374,6 @@ function QuestionSlideView({
   /* Shared bottom bar — response count + show results */
   const BottomBar = () => (
     <div className="flex flex-wrap items-center gap-3">
-      {/* Response count pill */}
       <div className="flex items-center gap-2.5 rounded-full px-5 py-2.5 backdrop-blur-sm"
         style={{ border: `1px solid ${c.cardBorder}`, backgroundColor: c.cardBg }}
       >
@@ -1376,8 +1389,6 @@ function QuestionSlideView({
         </motion.span>
         <span className="text-sm" style={{ color: c.fgFaint }}>so far</span>
       </div>
-
-      {/* Show results button */}
       <motion.button onClick={onReveal} whileTap={{ scale: 0.97 }}
         className="flex items-center gap-2.5 rounded-2xl bg-hot-pink px-7 py-3.5 text-sm font-semibold text-white shadow-[0_0_28px_-6px] shadow-hot-pink/60 transition-shadow hover:shadow-[0_0_36px_-4px] hover:shadow-hot-pink/80"
       >
@@ -1387,7 +1398,7 @@ function QuestionSlideView({
     </div>
   )
 
-  /* ── BACKGROUND layout ─────────────────────────────────────────────── */
+  /* ── BACKGROUND layout — full-bleed image with theme overlay ─────── */
   if (hasBgImg) {
     return (
       <div className="absolute inset-0 flex flex-col overflow-hidden pb-24" style={{ backgroundColor: c.bg }}>
@@ -1417,13 +1428,13 @@ function QuestionSlideView({
     )
   }
 
-  /* ── SIDE (right) layout ────────────────────────────────────────────── */
-  if (hasSideImg) {
+  /* ── REFERENCE layout — portrait image: right panel (58%) ─────────── */
+  if (hasRefImg && !isLandscape) {
     return (
       <div className="absolute inset-0 flex flex-col overflow-hidden pb-24" style={{ backgroundColor: c.bg }}>
         <div className="flex flex-1 overflow-hidden">
-          {/* Left: badge + question + options */}
-          <div className="flex flex-1 flex-col overflow-hidden px-14 pt-12">
+          {/* Left: question content (42%) */}
+          <div className="flex w-[42%] flex-col overflow-hidden px-12 pt-12">
             <motion.span initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
               className="w-fit rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
@@ -1433,30 +1444,79 @@ function QuestionSlideView({
             </motion.span>
             <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
-              className="mt-6 max-w-3xl text-4xl font-semibold leading-tight tracking-tight md:text-5xl lg:text-[3rem]"
+              className="mt-5 text-3xl font-semibold leading-tight tracking-tight md:text-4xl lg:text-[2.6rem]"
               style={{ color: c.fg }}
             >
               {slide.question}
             </motion.h1>
             <MCQOptions />
             <RatingParams />
+            <div className="flex-1" />
           </div>
-          {/* Right: image */}
+          {/* Right: reference image (58%) — object-contain, never cropped */}
           <motion.div
-            initial={{ opacity: 0, x: 30 }}
+            initial={{ opacity: 0, x: 24 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
-            className="w-[40%] shrink-0 p-8 pl-0"
+            className="relative flex-1 overflow-hidden"
           >
-            <img src={slide.imgUrl} alt="" className="h-full w-full rounded-3xl object-cover shadow-2xl" />
+            {/* Blurred fill for letterbox areas */}
+            <img src={slide.imgUrl} alt="" aria-hidden
+              className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-20" />
+            {/* Sharp full image — never cropped */}
+            <img src={slide.imgUrl} alt="Reference image"
+              className="absolute inset-0 h-full w-full object-contain p-5" />
           </motion.div>
         </div>
-        <div className="px-14"><BottomBar /></div>
+        <div className="px-12 pb-0"><BottomBar /></div>
       </div>
     )
   }
 
-  /* ── TOP layout (default) ───────────────────────────────────────────── */
+  /* ── REFERENCE layout — landscape image: top panel (44%) ──────────── */
+  if (hasRefImg && isLandscape) {
+    return (
+      <div className="absolute inset-0 flex flex-col overflow-hidden pb-24" style={{ backgroundColor: c.bg }}>
+        {/* Top: reference image (44% height) — object-contain, never cropped */}
+        <motion.div
+          initial={{ opacity: 0, y: -16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+          className="relative h-[44%] shrink-0 overflow-hidden"
+        >
+          {/* Blurred fill for letterbox areas */}
+          <img src={slide.imgUrl} alt="" aria-hidden
+            className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-20" />
+          {/* Sharp full image — never cropped */}
+          <img src={slide.imgUrl} alt="Reference image"
+            className="absolute inset-0 h-full w-full object-contain px-12 py-3" />
+        </motion.div>
+        {/* Bottom: question content */}
+        <div className="flex flex-1 flex-col overflow-hidden px-14 pt-5">
+          <motion.span initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+            className="w-fit rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
+            style={{ backgroundColor: c.fg, color: c.bg }}
+          >
+            {meta.label}
+          </motion.span>
+          <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
+            className="mt-4 max-w-5xl text-3xl font-semibold leading-tight tracking-tight md:text-4xl"
+            style={{ color: c.fg }}
+          >
+            {slide.question}
+          </motion.h1>
+          <MCQOptions />
+          <RatingParams />
+          <div className="flex-1" />
+          <BottomBar />
+        </div>
+      </div>
+    )
+  }
+
+  /* ── NO IMAGE — full-width layout ──────────────────────────────────── */
   return (
     <div className="absolute inset-0 flex flex-col overflow-hidden px-14 pt-12 pb-24" style={{ backgroundColor: c.bg }}>
       <motion.span initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
@@ -1466,15 +1526,6 @@ function QuestionSlideView({
       >
         {meta.label}
       </motion.span>
-
-      {slide.imgUrl && (
-        <motion.img src={slide.imgUrl} alt=""
-          initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.45, delay: 0.04 }}
-          className="mt-5 h-36 max-w-sm rounded-2xl object-cover shadow-xl xl:h-44"
-        />
-      )}
-
       <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
         className="mt-6 max-w-5xl text-4xl font-semibold leading-tight tracking-tight md:text-5xl lg:text-[3.2rem]"
@@ -1482,7 +1533,6 @@ function QuestionSlideView({
       >
         {slide.question}
       </motion.h1>
-
       <MCQOptions />
       <RatingParams />
       <div className="flex-1" />

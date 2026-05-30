@@ -167,7 +167,7 @@ interface QuestionSlide {
   /** Optional header image shown above the question on the big screen. */
   imgUrl?:    string
   /** How the image is positioned relative to the slide content. */
-  imgLayout?: 'top' | 'right' | 'background'
+  imgLayout?: 'top' | 'right' | 'background' | 'reference'
 }
 type ContentTemplate = 'heading' | 'bullets' | 'quote'
 interface ContentSlide {
@@ -2148,22 +2148,23 @@ function QuestionEditor({ slide, onUpdate }: {
               <label className="mb-2.5 block text-[11px] font-semibold text-midnight-sky-600">
                 Slide image <span className="font-light">(optional)</span>
               </label>
-              <SlideImagePicker imgUrl={slide.imgUrl} onChange={url => onUpdate({ imgUrl: url, imgLayout: url ? (slide.imgLayout ?? 'top') : undefined })} />
+              <SlideImagePicker imgUrl={slide.imgUrl} onChange={url => onUpdate({ imgUrl: url, imgLayout: url ? (slide.imgLayout ?? 'reference') : undefined })} />
               {slide.imgUrl && (
                 <div className="mt-3 flex items-center gap-1">
-                  <span className="mr-1 text-[10px] font-medium text-midnight-sky-400">Position:</span>
-                  {(['top', 'right', 'background'] as const).map(layout => (
+                  <span className="mr-1 text-[10px] font-medium text-midnight-sky-400">Display:</span>
+                  {(['reference', 'background'] as const).map(opt => (
                     <button
-                      key={layout}
-                      onClick={() => onUpdate({ imgLayout: layout })}
+                      key={opt}
+                      onClick={() => onUpdate({ imgLayout: opt })}
                       className={cn(
                         'rounded-md px-2.5 py-1 text-[10px] font-medium transition-all',
-                        (slide.imgLayout ?? 'top') === layout
+                        // treat legacy 'top'/'right' as 'reference' for highlight purposes
+                        (['reference', 'top', 'right'].includes(slide.imgLayout ?? 'reference') ? 'reference' : slide.imgLayout) === opt
                           ? 'bg-midnight-sky-900 text-white'
                           : 'bg-midnight-sky-100 text-midnight-sky-500 hover:bg-midnight-sky-200',
                       )}
                     >
-                      {layout === 'top' ? 'Above' : layout === 'right' ? 'Side' : 'Background'}
+                      {opt === 'reference' ? 'Reference' : 'Background'}
                     </button>
                   ))}
                 </div>
@@ -2563,27 +2564,25 @@ function SlidePreviewCard({ slide }: { slide: QuestionSlide }) {
     )
   }
 
-  /* Side layout — image on right, content on left */
-  if (layout === 'right' && slide.imgUrl) {
+  /* Reference layout (portrait default) — image on right, content on left */
+  if ((layout === 'reference' || layout === 'right' || layout === 'top') && slide.imgUrl) {
     return (
       <div className="flex gap-3">
         <div className="min-w-0 flex-1">
           {renderQuestionText()}
           {renderInputArea()}
         </div>
-        <div className="w-[38%] shrink-0 self-stretch">
-          <img src={slide.imgUrl} alt="" className="h-full min-h-[80px] w-full rounded-xl object-cover" />
+        <div className="relative w-[40%] shrink-0 self-stretch overflow-hidden rounded-xl" style={{ minHeight: 80 }}>
+          <img src={slide.imgUrl} alt="" className="absolute inset-0 h-full w-full scale-110 object-cover blur-lg opacity-25" />
+          <img src={slide.imgUrl} alt="" className="absolute inset-0 h-full w-full object-contain p-1" />
         </div>
       </div>
     )
   }
 
-  /* Top layout (default) — image above question text */
+  /* No image — question text + input area only */
   return (
     <div>
-      {slide.imgUrl && (
-        <img src={slide.imgUrl} alt="" className="mb-3 h-28 w-full rounded-xl object-cover" />
-      )}
       {renderQuestionText()}
       {renderInputArea()}
     </div>
