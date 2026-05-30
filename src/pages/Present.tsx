@@ -1317,7 +1317,8 @@ function QuestionSlideView({
 
   /* Shared MCQ options block */
   const MCQOptions = () => slide.type === 'mcq' ? (
-    <div className={cn('mt-6 grid gap-3', hasRefImg && !isLandscape ? 'grid-cols-1 max-w-full' : 'grid-cols-2 max-w-3xl')}>
+    // Always single column — options extend full width so long text never wraps into a narrow half-column
+    <div className="mt-6 flex flex-col gap-3">
       {slide.options.map((opt, i) => (
         <motion.div
           key={i}
@@ -1644,14 +1645,14 @@ function MCQResults({ options, votes, vizType = 'bar' }: {
   return <MCQBarChart options={options} votes={votes} />
 }
 
-/* ── Bar chart (original) ─────────────────────────────────────────────── */
+/* ── Bar chart — stacked layout: full-width label on top, bar below ───── */
 
 function MCQBarChart({ options, votes }: { options: string[]; votes: number[] }) {
   const total = votes.reduce((s, v) => s + v, 0)
   const maxV  = Math.max(...votes, 1)
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
       {options.map((opt, i) => {
         const v        = votes[i] ?? 0
         const pct      = total > 0 ? Math.round((v / total) * 100) : 0
@@ -1662,34 +1663,38 @@ function MCQBarChart({ options, votes }: { options: string[]; votes: number[] })
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: i * 0.08, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-            className="flex items-start gap-4"
+            className="flex flex-col gap-2"
           >
-            <span className={cn('flex size-10 shrink-0 items-center justify-center rounded-xl text-sm font-bold', isWinner ? 'bg-hot-pink text-white' : 'bg-white/10 text-white/50')}>
-              {String.fromCharCode(65 + i)}
-            </span>
-            {/* Label: fixed width, wraps onto multiple lines for long options */}
-            <span className={cn('w-[22%] shrink-0 break-words text-base font-medium leading-snug', isWinner ? 'text-white' : 'text-white/65')}>
-              {opt}
-            </span>
-            <div className="relative mt-1.5 h-7 min-w-0 flex-1 overflow-hidden rounded-xl bg-white/10">
-              <motion.div
-                className={cn('absolute inset-y-0 left-0 rounded-xl', isWinner ? 'bg-hot-pink' : 'bg-white/25')}
-                initial={{ width: '0%' }}
-                animate={{ width: `${pct}%` }}
-                transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1], delay: i * 0.08 }}
-              />
-              {isWinner && (
-                <motion.div
-                  className="absolute inset-y-0 left-0 w-full bg-gradient-to-r from-transparent via-white/20 to-transparent"
-                  animate={{ x: ['-100%', '200%'] }}
-                  transition={{ duration: 2.2, repeat: Infinity, repeatDelay: 1 }}
-                />
-              )}
+            {/* Row 1: badge + full-width label + percentage */}
+            <div className="flex items-start gap-4">
+              <span className={cn('flex size-10 shrink-0 items-center justify-center rounded-xl text-sm font-bold', isWinner ? 'bg-hot-pink text-white' : 'bg-white/10 text-white/50')}>
+                {String.fromCharCode(65 + i)}
+              </span>
+              <span className={cn('min-w-0 flex-1 break-words text-base font-medium leading-snug', isWinner ? 'text-white' : 'text-white/65')}>
+                {opt}
+              </span>
+              <span className={cn('shrink-0 text-right text-2xl font-bold tabular-nums', isWinner ? 'text-hot-pink' : 'text-white/50')}>
+                {pct}%
+              </span>
             </div>
-            {/* Percentage */}
-            <span className={cn('mt-1 w-[4.5rem] shrink-0 text-right text-2xl font-bold tabular-nums', isWinner ? 'text-hot-pink' : 'text-white/50')}>
-              {pct}%
-            </span>
+            {/* Row 2: bar indented to align under the label text */}
+            <div className="pl-14">  {/* 40px badge + 16px gap */}
+              <div className="relative h-7 overflow-hidden rounded-xl bg-white/10">
+                <motion.div
+                  className={cn('absolute inset-y-0 left-0 rounded-xl', isWinner ? 'bg-hot-pink' : 'bg-white/25')}
+                  initial={{ width: '0%' }}
+                  animate={{ width: `${pct}%` }}
+                  transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1], delay: i * 0.08 }}
+                />
+                {isWinner && (
+                  <motion.div
+                    className="absolute inset-y-0 left-0 w-full bg-gradient-to-r from-transparent via-white/20 to-transparent"
+                    animate={{ x: ['-100%', '200%'] }}
+                    transition={{ duration: 2.2, repeat: Infinity, repeatDelay: 1 }}
+                  />
+                )}
+              </div>
+            </div>
           </motion.div>
         )
       })}
