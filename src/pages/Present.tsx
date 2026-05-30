@@ -1438,45 +1438,44 @@ function QuestionSlideView({
       : 44  // sensible fallback while aspect ratio is loading
 
     return (
-      <div className="absolute inset-0 flex flex-col overflow-hidden pb-24" style={{ backgroundColor: c.bg }}>
-        <div className="flex flex-1 overflow-hidden">
-          {/* Left: question content — takes all remaining space */}
-          <div className="flex flex-1 flex-col overflow-hidden px-12 pt-12">
-            <motion.span initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-              className="w-fit rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
-              style={{ backgroundColor: c.fg, color: c.bg }}
-            >
-              {meta.label}
-            </motion.span>
-            <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
-              className="mt-5 text-3xl font-semibold leading-tight tracking-tight md:text-4xl lg:text-[2.6rem]"
-              style={{ color: c.fg }}
-            >
-              {slide.question}
-            </motion.h1>
-            <MCQOptions />
-            <RatingParams />
-            <div className="flex-1" />
-          </div>
-          {/* Right: reference image — width sized to image's natural aspect ratio */}
-          <motion.div
-            initial={{ opacity: 0, x: 24 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
-            className="relative shrink-0 overflow-hidden"
-            style={{ width: `${imgPanelPct}%` }}
+      // Outer: simple horizontal flex — no flex-col so image spans full height to HUD
+      <div className="absolute inset-0 flex overflow-hidden pb-24" style={{ backgroundColor: c.bg }}>
+        {/* Left: question content + BottomBar embedded at bottom */}
+        <div className="flex flex-1 flex-col overflow-hidden px-12 pt-12 pb-4">
+          <motion.span initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+            className="w-fit rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
+            style={{ backgroundColor: c.fg, color: c.bg }}
           >
-            {/* Blurred fill for letterbox areas */}
-            <img src={slide.imgUrl} alt="" aria-hidden
-              className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-20" />
-            {/* Sharp full image — never cropped */}
-            <img src={slide.imgUrl} alt="Reference image"
-              className="absolute inset-0 h-full w-full object-contain p-5" />
-          </motion.div>
+            {meta.label}
+          </motion.span>
+          <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
+            className="mt-5 text-3xl font-semibold leading-tight tracking-tight md:text-4xl lg:text-[2.6rem]"
+            style={{ color: c.fg }}
+          >
+            {slide.question}
+          </motion.h1>
+          <MCQOptions />
+          <RatingParams />
+          <div className="flex-1" />
+          <BottomBar />
         </div>
-        <div className="px-12 pb-0"><BottomBar /></div>
+        {/* Right: reference image — full height to HUD edge, width from aspect ratio */}
+        <motion.div
+          initial={{ opacity: 0, x: 24 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
+          className="relative shrink-0 overflow-hidden"
+          style={{ width: `${imgPanelPct}%` }}
+        >
+          {/* Blurred fill for letterbox areas */}
+          <img src={slide.imgUrl} alt="" aria-hidden
+            className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-20" />
+          {/* Sharp full image — never cropped, small horizontal padding only */}
+          <img src={slide.imgUrl} alt="Reference image"
+            className="absolute inset-0 h-full w-full object-contain px-4 py-2" />
+        </motion.div>
       </div>
     )
   }
@@ -1658,16 +1657,16 @@ function MCQBarChart({ options, votes }: { options: string[]; votes: number[] })
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: i * 0.08, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-            className="flex items-center gap-4"
+            className="flex items-start gap-4"
           >
             <span className={cn('flex size-10 shrink-0 items-center justify-center rounded-xl text-sm font-bold', isWinner ? 'bg-hot-pink text-white' : 'bg-white/10 text-white/50')}>
               {String.fromCharCode(65 + i)}
             </span>
-            {/* Label: percentage-based width so it scales with zoom */}
-            <span className={cn('w-[20%] shrink-0 truncate text-base font-medium leading-tight', isWinner ? 'text-white' : 'text-white/65')}>
+            {/* Label: fixed width, wraps onto multiple lines for long options */}
+            <span className={cn('w-[22%] shrink-0 break-words text-base font-medium leading-snug', isWinner ? 'text-white' : 'text-white/65')}>
               {opt}
             </span>
-            <div className="relative h-10 min-w-0 flex-1 overflow-hidden rounded-xl bg-white/10">
+            <div className="relative mt-1.5 h-7 min-w-0 flex-1 overflow-hidden rounded-xl bg-white/10">
               <motion.div
                 className={cn('absolute inset-y-0 left-0 rounded-xl', isWinner ? 'bg-hot-pink' : 'bg-white/25')}
                 initial={{ width: '0%' }}
@@ -1682,8 +1681,8 @@ function MCQBarChart({ options, votes }: { options: string[]; votes: number[] })
                 />
               )}
             </div>
-            {/* Percentage: wide enough for "100%" at any zoom, shrink-0 so it never squeezes */}
-            <span className={cn('w-[4.5rem] shrink-0 text-right text-2xl font-bold tabular-nums', isWinner ? 'text-hot-pink' : 'text-white/50')}>
+            {/* Percentage */}
+            <span className={cn('mt-1 w-[4.5rem] shrink-0 text-right text-2xl font-bold tabular-nums', isWinner ? 'text-hot-pink' : 'text-white/50')}>
               {pct}%
             </span>
           </motion.div>
