@@ -1322,13 +1322,13 @@ function QuestionSlideView({
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.12 + i * 0.07, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-          className="flex items-center gap-3 rounded-2xl px-4 py-3.5 text-left backdrop-blur-sm"
+          className="flex min-w-0 items-start gap-3 rounded-2xl px-4 py-3.5 text-left backdrop-blur-sm"
           style={{ border: `1px solid ${c.cardBorder}`, backgroundColor: c.cardBg }}
         >
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold" style={{ backgroundColor: c.fg, color: c.bg }}>
+          <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold" style={{ backgroundColor: c.fg, color: c.bg }}>
             {String.fromCharCode(65 + i)}
           </span>
-          <span className="text-sm font-medium leading-snug" style={{ color: c.fg }}>{opt}</span>
+          <span className="min-w-0 break-words text-sm font-medium leading-snug" style={{ color: c.fg }}>{opt}</span>
         </motion.div>
       ))}
     </div>
@@ -1428,13 +1428,20 @@ function QuestionSlideView({
     )
   }
 
-  /* ── REFERENCE layout — portrait image: right panel (58%) ─────────── */
+  /* ── REFERENCE layout — portrait image: right panel (aspect-ratio-sized) ── */
   if (hasRefImg && !isLandscape) {
+    // Compute image panel width from its natural aspect ratio.
+    // Heuristic: available panel height ≈ 50% of slide width (for a 16:9 viewport).
+    // Panel width % = 50% × aspect_ratio, clamped to [24%, 52%].
+    const imgPanelPct = imgAspect
+      ? Math.min(52, Math.max(24, Math.round(50 * imgAspect)))
+      : 44  // sensible fallback while aspect ratio is loading
+
     return (
       <div className="absolute inset-0 flex flex-col overflow-hidden pb-24" style={{ backgroundColor: c.bg }}>
         <div className="flex flex-1 overflow-hidden">
-          {/* Left: question content (42%) */}
-          <div className="flex w-[42%] flex-col overflow-hidden px-12 pt-12">
+          {/* Left: question content — takes all remaining space */}
+          <div className="flex flex-1 flex-col overflow-hidden px-12 pt-12">
             <motion.span initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
               className="w-fit rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
@@ -1453,12 +1460,13 @@ function QuestionSlideView({
             <RatingParams />
             <div className="flex-1" />
           </div>
-          {/* Right: reference image (58%) — object-contain, never cropped */}
+          {/* Right: reference image — width sized to image's natural aspect ratio */}
           <motion.div
             initial={{ opacity: 0, x: 24 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
-            className="relative flex-1 overflow-hidden"
+            className="relative shrink-0 overflow-hidden"
+            style={{ width: `${imgPanelPct}%` }}
           >
             {/* Blurred fill for letterbox areas */}
             <img src={slide.imgUrl} alt="" aria-hidden

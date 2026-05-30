@@ -2247,20 +2247,23 @@ function MCQEditor({ slide, onUpdate }: {
         <span className="ml-1 font-light text-midnight-sky-500">({slide.options.length}/6 — pick one)</span>
       </label>
       {slide.options.map((opt, i) => (
-        <div key={i} className="flex items-center gap-2">
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-midnight-sky-100 text-xs font-bold text-midnight-sky-600">
+        <div key={i} className="flex items-start gap-2">
+          <span className="mt-2.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-midnight-sky-100 text-xs font-bold text-midnight-sky-600">
             {String.fromCharCode(65 + i)}
           </span>
-          <input
+          {/* Auto-expanding textarea — grows with content, no horizontal overflow */}
+          <textarea
             value={opt}
+            rows={1}
             onChange={e => setOption(i, e.target.value)}
             placeholder={`Option ${String.fromCharCode(65 + i)}`}
-            className="flex-1 rounded-xl border border-midnight-sky-200 bg-white px-3.5 py-2.5 text-sm text-midnight-sky-900 placeholder:text-midnight-sky-400 outline-none transition-all focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/15"
+            style={{ fieldSizing: 'content' } as React.CSSProperties}
+            className="flex-1 resize-none overflow-hidden rounded-xl border border-midnight-sky-200 bg-white px-3.5 py-2.5 text-sm leading-snug text-midnight-sky-900 placeholder:text-midnight-sky-400 outline-none transition-all focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/15"
           />
           {slide.options.length > 2 && (
             <button
               onClick={() => removeOption(i)}
-              className="rounded-lg p-1.5 text-midnight-sky-400 transition hover:bg-red-50 hover:text-red-400"
+              className="mt-1.5 rounded-lg p-1.5 text-midnight-sky-400 transition hover:bg-red-50 hover:text-red-400"
             >
               <Trash2 className="size-3.5" />
             </button>
