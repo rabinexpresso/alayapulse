@@ -1493,19 +1493,15 @@ function QuestionSlideView({
   if (hasRefImg && isLandscape) {
     return (
       <div className="absolute inset-0 flex flex-col overflow-hidden pb-24" style={{ backgroundColor: c.bg }}>
-        {/* Top: reference image (44% height) — object-contain, never cropped */}
+        {/* Top: reference image (44% height) — object-cover fills full width, centres crop */}
         <motion.div
           initial={{ opacity: 0, y: -16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
           className="relative h-[44%] shrink-0 overflow-hidden"
         >
-          {/* Blurred fill for letterbox areas */}
-          <img src={slide.imgUrl} alt="" aria-hidden
-            className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-20" />
-          {/* Sharp full image — never cropped */}
           <img src={slide.imgUrl} alt="Reference image"
-            className="absolute inset-0 h-full w-full object-contain px-12 py-3" />
+            className="absolute inset-0 h-full w-full object-cover" />
         </motion.div>
         {/* Bottom: question content */}
         <div className="flex flex-1 flex-col overflow-hidden px-14 pt-5">

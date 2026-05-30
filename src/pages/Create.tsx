@@ -2533,6 +2533,16 @@ function SlidePreviewCard({ slide }: { slide: QuestionSlide }) {
   const hasRef = !!(slide.imgUrl && layout !== 'background')
   const hasBg  = !!(slide.imgUrl && layout === 'background')
 
+  // Detect aspect ratio to mirror the presenter screen's portrait vs landscape split
+  const [imgAspect, setImgAspect] = useState<number | null>(null)
+  useEffect(() => {
+    if (!slide.imgUrl) { setImgAspect(null); return }
+    const img = new Image()
+    img.onload = () => setImgAspect(img.naturalWidth / img.naturalHeight)
+    img.src = slide.imgUrl
+  }, [slide.imgUrl])
+  const isLandscape = imgAspect !== null && imgAspect >= 1.35
+
   // MCQ options — styled like the actual presenter slide option cards
   const mcqOptions = slide.type === 'mcq' ? (
     <div className="mt-3 flex flex-col gap-1.5">
@@ -2612,13 +2622,23 @@ function SlidePreviewCard({ slide }: { slide: QuestionSlide }) {
 
       {/* Slide content */}
       <div className="relative flex h-full">
-        {hasRef && slide.imgUrl ? (
+        {hasRef && slide.imgUrl && isLandscape ? (
+          /* Landscape: image top band (44%), question below — matches presenter */
+          <div className="flex flex-1 flex-col overflow-hidden">
+            <div className="relative h-[44%] shrink-0 overflow-hidden">
+              <img src={slide.imgUrl} alt="Reference"
+                className="absolute inset-0 h-full w-full object-cover" />
+            </div>
+            <div className="flex flex-1 flex-col overflow-hidden">
+              {questionPanel}
+            </div>
+          </div>
+        ) : hasRef && slide.imgUrl ? (
+          /* Portrait: question left (48%), image right panel */
           <>
-            {/* Left: question + options */}
             <div className="flex w-[48%] flex-col overflow-hidden">
               {questionPanel}
             </div>
-            {/* Right: reference image — object-contain, no cropping */}
             <div className="relative flex-1 overflow-hidden">
               <img src={slide.imgUrl} alt="Reference"
                 className="absolute inset-0 h-full w-full object-contain px-3 py-2" />
