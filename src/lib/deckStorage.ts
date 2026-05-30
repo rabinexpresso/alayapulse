@@ -240,6 +240,16 @@ export async function cloudListDecks(): Promise<Deck[]> {
     .sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
+/**
+ * Firestore rejects any field whose value is `undefined`.
+ * JSON round-trip removes `undefined` fields automatically (JSON.stringify
+ * omits them), giving us a clean object safe to pass to setDoc/updateDoc.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function stripUndefined<T>(obj: T): T {
+  return JSON.parse(JSON.stringify(obj))
+}
+
 export async function cloudSaveDeck(deck: Deck): Promise<void> {
   const user = auth.currentUser
   if (!user) throw new Error('Not signed in')
@@ -274,11 +284,11 @@ export async function cloudSaveDeck(deck: Deck): Promise<void> {
     }
     return s
   })
-  await setDoc(doc(decksRef(user.uid), deck.id), {
+  await setDoc(doc(decksRef(user.uid), deck.id), stripUndefined({
     ...deck,
     slides,
     updatedAt: Date.now(),
-  })
+  }))
 }
 
 export async function cloudDeleteDeck(id: string): Promise<void> {
@@ -374,7 +384,7 @@ export async function cloudSaveResults(deckId: string, results: DeckResults): Pr
   const user = auth.currentUser
   if (!user) throw new Error('Not signed in')
   const trimmed = trimResultsForFirestore(results)
-  await setDoc(resultsDoc(user.uid, deckId), trimmed)
+  await setDoc(resultsDoc(user.uid, deckId), stripUndefined(trimmed))
 }
 
 export async function cloudLoadResults(deckId: string): Promise<DeckResults | null> {
