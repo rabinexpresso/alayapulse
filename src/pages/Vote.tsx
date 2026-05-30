@@ -121,6 +121,11 @@ export default function Vote() {
   const handleSubmit = async (value: string) => {
     const sType = (slideData as { type: string } | undefined)?.type ?? ''
     if (!slideData || !INTERACTIVE_TYPES.has(sType) || alreadySubmitted || submitting) return
+    // Extra guard for word cloud: prevent over-submission even if alreadySubmitted lags
+    if (slideData.type === 'wordcloud') {
+      const maxSubs = (slideData as { wcMaxSubmissions?: number }).wcMaxSubmissions ?? 3
+      if ((wcSubmissions[slideId] ?? 0) >= maxSubs) return
+    }
     setSubmitting(true)
     setSubmitError(null)
     try {
@@ -701,26 +706,25 @@ const BLOCKED_WORDS = new Set([
   'shit','shitting','shits','bullshit',
   // B-word
   'bitch','bitches','bitching',
-  // Body parts used offensively
+  // Body parts / sexual
   'ass','asshole','arsehole','arse',
+  'anal','anus',
   'dick','dickhead','dicks',
   'cock','cocks','cocksucker',
   'cunt','cunts',
   'penis','penises','vagina','vulva',
   'pussy','pussies',
   'boob','boobs','tit','tits','titties',
-  'balls','ballsack','nutsack','testicle',
+  'balls','ballsack','nutsack','testicle','testicles',
   'nipple','nipples',
-  // Sex-related
-  'sex','sexy','sexist','rape','raping','rapist','molest','molestation',
-  'porn','porno','pornography','masturbate','masturbation','jerk','jizz','cum','cumshot',
+  'sex','sexy','sexual','rape','raping','rapist','molest','molestation',
+  'porn','porno','pornography','masturbate','masturbation','jizz','cum','cumshot',
   'whore','slut','hoe','hooker','prostitute',
-  'dildo','condom','vibrator',
-  // Slurs (racism, homophobia, etc.) — abbreviated to avoid listing them fully
+  'dildo','vibrator',
+  // Slurs
   'nigger','nigga','faggot','fag','dyke','chink','spic','kike','retard','retarded',
-  // Other common profanity
+  // Other profanity
   'bastard','piss','prick','wanker','wank','tosser','twat','pedo','pedophile',
-  'crap','damn','hell',  // lighter words kept as a soft block for professional context
 ])
 function containsProfanity(text: string): boolean {
   return text.toLowerCase().split(/\s+/).some(w => BLOCKED_WORDS.has(w.replace(/[^a-z]/g, '')))
@@ -735,7 +739,9 @@ function WordCloudQuestion({
   maxSubmissions:   number
 }) {
   const [input,        setInput]        = useState('')
-  const [recentlySent, setRecentlySent] = useState<string | null>(null)
+  // Toast stores the word AND the remaining-after count captured at submit time,
+  // so it doesn't update when the parent re-renders with a new submissionsUsed value.
+  const [recentlySent, setRecentlySent] = useState<{ word: string; remaining: number } | null>(null)
   const [inputError,   setInputError]   = useState<string | null>(null)
   const MAX_CHARS = 40
   const MAX_WORDS = 3
@@ -745,21 +751,44 @@ function WordCloudQuestion({
   const tooMany    = wordCount > MAX_WORDS
   const isValid    = input.trim().length > 0 && !tooMany && !submitting
 
+  // Component-level hard stop — renders a "done" state even if parent hasn't locked yet
+  const allUsed = submissionsUsed >= maxSubmissions
+
   const handleSubmit = () => {
     const trimmed = input.trim()
-    if (!trimmed || submitting || tooMany) return
+    if (!trimmed || submitting || tooMany || allUsed) return
     if (containsProfanity(trimmed)) {
       setInputError('Please keep it appropriate — try a different word.')
       return
     }
     setInputError(null)
-    setRecentlySent(trimmed)
+    // Capture remaining BEFORE the parent state update changes submissionsUsed
+    const remainingAfter = maxSubmissions - submissionsUsed - 1
+    setRecentlySent({ word: trimmed, remaining: remainingAfter })
     onSubmit(trimmed.toLowerCase())
-    setInput('')  // Optimistic clear — error banner shows if the submit actually fails
+    setInput('')  // Optimistic clear
     setTimeout(() => setRecentlySent(null), 3000)
   }
 
-  const submissionsLeft = maxSubmissions - submissionsUsed
+  // If all submissions are used, show a compact "done" panel instead of the form
+  if (allUsed) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-5 py-10 text-center">
+        <motion.div
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          transition={{ type: 'spring', stiffness: 420, damping: 18 }}
+          className="flex size-16 items-center justify-center rounded-full bg-fresh-green shadow-[0_0_32px_-4px] shadow-fresh-green/40"
+        >
+          <Check className="size-8 text-white" strokeWidth={2.5} />
+        </motion.div>
+        <div>
+          <p className="text-lg font-semibold text-midnight-sky-900">All words submitted!</p>
+          <p className="mt-1 font-light text-midnight-sky-500">Watch the cloud grow on the presenter's screen.</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-1 flex-col gap-4">
@@ -795,13 +824,12 @@ function WordCloudQuestion({
           >
             <Check className="size-4 shrink-0" strokeWidth={2.5} />
             <span>
-              &ldquo;{recentlySent}&rdquo; added to the cloud!
-              {submissionsLeft > 1 && <span className="ml-1 font-light text-fresh-green/70">
-                {submissionsLeft - 1} more to go
-              </span>}
-              {submissionsLeft === 1 && <span className="ml-1 font-light text-fresh-green/70">
-                1 more left
-              </span>}
+              &ldquo;{recentlySent.word}&rdquo; added to the cloud!
+              {recentlySent.remaining > 0 && (
+                <span className="ml-1 font-light text-fresh-green/70">
+                  {recentlySent.remaining} more to go
+                </span>
+              )}
             </span>
           </motion.div>
         )}

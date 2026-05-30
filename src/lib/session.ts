@@ -63,6 +63,10 @@ export interface QuestionSlide {
   leftLabel?:   string
   rightLabel?:  string
   theme?:       string
+  imgUrl?:      string
+  imgLayout?:   string
+  /** Word Cloud only — max submissions per person. Default 3. */
+  wcMaxSubmissions?: number
 }
 
 /* ─── Canvas slide types ────────────────────────────────────────────────── */

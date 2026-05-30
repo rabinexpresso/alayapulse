@@ -1877,14 +1877,15 @@ interface PlacedWord {
 }
 
 /** Measure a word's pixel bounding box using an offscreen canvas.
- *  Extra horizontal padding (0.5 × font size) compensates for the gap between
- *  canvas font metrics and the actual browser-rendered Inter font, preventing
- *  visual overlap even when the canvas falls back to a system font. */
+ *  Large horizontal padding (1.0 × font size) compensates for two sources of error:
+ *  (1) the canvas may fall back to a system font narrower than the rendered Inter, and
+ *  (2) Chromium's canvas metrics under-report variable-font widths.
+ *  Generous padding keeps words visually separated even at high browser zoom. */
 function measureWord(text: string, size: number, weight: string): { w: number; h: number } {
   const canvas = document.createElement('canvas')
   const ctx    = canvas.getContext('2d')!
   ctx.font     = `${weight} ${size}px Inter, system-ui, sans-serif`
-  return { w: ctx.measureText(text).width + size * 0.5, h: size * 1.45 }
+  return { w: ctx.measureText(text).width + size * 1.0, h: size * 1.6 }
 }
 
 /**
@@ -1936,7 +1937,7 @@ function layoutWordCloud(
 
       if (x1 < 6 || y1 < 6 || x2 > cw - 6 || y2 > ch - 6) continue
 
-      const gap = 8
+      const gap = 12
       if (placed.some(p =>
         x2 + gap > p.x1 && x1 - gap < p.x2 &&
         y2 + gap > p.y1 && y1 - gap < p.y2,
