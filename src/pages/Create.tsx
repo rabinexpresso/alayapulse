@@ -724,6 +724,28 @@ export default function Create() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastResults, storageBackend])
 
+  // ── Auto-save on change (debounced 3 s) ─────────────────────────────
+  // Fires 3 seconds after any slide content or title change, but only
+  // when a storage backend is already chosen — we never pop the save
+  // modal automatically while the user is in the middle of editing.
+  // Skips on the very first render so we don't re-save decks loaded from
+  // My Decks without any actual change.
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const hasEditedRef     = useRef(false)
+  useEffect(() => {
+    // Mark that we've seen at least one render so subsequent changes are real edits
+    if (!hasEditedRef.current) { hasEditedRef.current = true; return }
+    if (!storageBackend || slides.length === 0) return
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+    autoSaveTimerRef.current = setTimeout(() => {
+      saveDeck(storageBackend).catch(() => { /* shown via saveError state */ })
+    }, 3000)
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slides, deckTitle])
+
   // Split a single HTML slide into N slides — each pointing at a different
   // internal slide of the source HTML deck (hash navigation: #/0, #/1, …).
   // Works with reveal.js, impress.js, and any framework that listens to hashchange.
