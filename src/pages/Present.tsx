@@ -1328,7 +1328,7 @@ function QuestionSlideView({
           <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold" style={{ backgroundColor: c.fg, color: c.bg }}>
             {String.fromCharCode(65 + i)}
           </span>
-          <span className="min-w-0 break-words text-sm font-medium leading-snug" style={{ color: c.fg }}>{opt}</span>
+          <span className="min-w-0 break-words text-base font-medium leading-snug" style={{ color: c.fg }}>{opt}</span>
         </motion.div>
       ))}
     </div>
@@ -1472,9 +1472,9 @@ function QuestionSlideView({
           {/* Blurred fill for letterbox areas */}
           <img src={slide.imgUrl} alt="" aria-hidden
             className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-20" />
-          {/* Sharp full image — never cropped, small horizontal padding only */}
+          {/* Sharp full image — never cropped, horizontal padding only so it fills top-to-bottom */}
           <img src={slide.imgUrl} alt="Reference image"
-            className="absolute inset-0 h-full w-full object-contain px-4 py-2" />
+            className="absolute inset-0 h-full w-full object-contain px-3" />
         </motion.div>
       </div>
     )
