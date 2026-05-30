@@ -1695,7 +1695,7 @@ function VizLegend({ options, votes, total, maxV }: {
   options: string[]; votes: number[]; total: number; maxV: number
 }) {
   return (
-    <div className="flex flex-1 flex-col justify-center gap-3">
+    <div className="flex min-w-0 flex-1 flex-col justify-center gap-3">
       {options.map((opt, i) => {
         const v        = votes[i] ?? 0
         const pct      = total > 0 ? Math.round((v / total) * 100) : 0
@@ -1706,16 +1706,16 @@ function VizLegend({ options, votes, total, maxV }: {
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: i * 0.08, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-            className="flex items-center gap-3"
+            className="flex min-w-0 items-center gap-3"
           >
             <span
               className="size-3 shrink-0 rounded-full"
               style={{ backgroundColor: VIZ_COLORS[i % VIZ_COLORS.length] }}
             />
-            <span className={cn('flex-1 text-base font-medium leading-snug', isWinner ? 'text-white' : 'text-white/60')}>
+            <span className={cn('min-w-0 flex-1 truncate text-base font-medium leading-snug', isWinner ? 'text-white' : 'text-white/60')}>
               {opt}
             </span>
-            <span className={cn('text-xl font-bold tabular-nums', isWinner ? 'text-white' : 'text-white/40')}>
+            <span className={cn('shrink-0 text-xl font-bold tabular-nums', isWinner ? 'text-white' : 'text-white/40')}>
               {pct}%
             </span>
           </motion.div>
@@ -1810,9 +1810,9 @@ function MCQPieChart({ options, votes }: { options: string[]; votes: number[] })
   })
 
   return (
-    <div className="flex items-center gap-12">
-      {/* Pie */}
-      <svg viewBox="0 0 120 120" className="size-56 shrink-0">
+    <div className="flex min-w-0 items-center gap-6">
+      {/* Pie — responsive size so it doesn't crowd the legend at high zoom */}
+      <svg viewBox="0 0 120 120" className="size-36 shrink-0 lg:size-48 xl:size-56">
         {total === 0 ? (
           <circle r={54} cx={60} cy={60} fill="rgba(255,255,255,0.08)" />
         ) : (
