@@ -98,10 +98,12 @@ interface QSlide {
   theme?:       string
   imgUrl?:      string
   imgLayout?:   'top' | 'right' | 'background' | 'reference'
-  /** MCQ only — 0-based index of the correct option for presenter reveal. */
-  correctAnswer?: number
+  /** MCQ only — 0-based indices of correct options (supports multiple). */
+  correctAnswers?: number[]
   /** Word Cloud only — max submissions per person. */
   wcMaxSubmissions?: number
+  /** Open Ended only — max responses per person. Default 1. */
+  oeMaxSubmissions?: number
 }
 
 interface CanvasBg     { type: 'color' | 'gradient'; value: string }
@@ -330,11 +332,13 @@ export default function Present() {
     }
   }, [])
 
-  // Called by TimerCount when the countdown hits zero
+  // Called by TimerCount when the countdown hits zero.
+  // We intentionally do NOT call clearTimer here — leaving timerEndsAt in
+  // Firestore (past timestamp) keeps audience phones locked at "Time's up!".
+  // clearTimer is called when the presenter manually stops or navigates away.
   const handleTimerExpire = useCallback(() => {
     setTimerEndsAt(null)
     setTimerDuration(null)
-    if (isRealSessionRef.current) clearTimer(codeRef.current).catch(console.error)
     // Auto-reveal results if still collecting responses
     if (isQuestionRef.current && phaseRef.current === 'question') {
       setTransType('phase')
@@ -1556,10 +1560,8 @@ function ResultsSlideView({
   const c         = qColors(slide.theme)
   const ratingMax = slide.ratingMax === 10 ? 10 : 5
 
-  // MCQ correct-answer reveal state — local only, resets automatically when
-  // the component is remounted (i.e. when the presenter moves to a new slide).
   const [answerRevealed, setAnswerRevealed] = useState(false)
-  const hasCorrAnswer = slide.type === 'mcq' && typeof slide.correctAnswer === 'number'
+  const hasCorrAnswer = slide.type === 'mcq' && (slide.correctAnswers ?? []).length > 0
 
   // Open Ended: set of pinned response texts (first 60 chars used as key).
   const [pinnedKeys, setPinnedKeys] = useState<Set<string>>(new Set())
@@ -1624,7 +1626,7 @@ function ResultsSlideView({
             options={slide.options}
             votes={mcqVotes}
             vizType={slide.vizType ?? 'bar'}
-            correctAnswer={slide.correctAnswer}
+            correctAnswers={slide.correctAnswers}
             revealed={answerRevealed}
           />
         )}
@@ -1662,26 +1664,27 @@ function ResultsSlideView({
 // Shared palette for pie / donut segments
 const VIZ_COLORS = ['#ff0065', '#00b0ff', '#42db66', '#ffc709', '#a855f7', '#f97316']
 
-function MCQResults({ options, votes, vizType = 'bar', correctAnswer, revealed }: {
-  options:       string[]
-  votes:         number[]
-  vizType?:      'bar' | 'pie' | 'donut'
-  correctAnswer?: number
-  revealed?:     boolean
+function MCQResults({ options, votes, vizType = 'bar', correctAnswers, revealed }: {
+  options:        string[]
+  votes:          number[]
+  vizType?:       'bar' | 'pie' | 'donut'
+  correctAnswers?: number[]
+  revealed?:      boolean
 }) {
-  if (vizType === 'pie')   return <MCQPieChart   options={options} votes={votes} correctAnswer={correctAnswer} revealed={revealed} />
-  if (vizType === 'donut') return <MCQDonutChart options={options} votes={votes} correctAnswer={correctAnswer} revealed={revealed} />
-  return <MCQBarChart options={options} votes={votes} correctAnswer={correctAnswer} revealed={revealed} />
+  if (vizType === 'pie')   return <MCQPieChart   options={options} votes={votes} correctAnswers={correctAnswers} revealed={revealed} />
+  if (vizType === 'donut') return <MCQDonutChart options={options} votes={votes} correctAnswers={correctAnswers} revealed={revealed} />
+  return <MCQBarChart options={options} votes={votes} correctAnswers={correctAnswers} revealed={revealed} />
 }
 
 /* ── Bar chart — stacked layout: full-width label on top, bar below ───── */
 
-function MCQBarChart({ options, votes, correctAnswer, revealed }: {
+function MCQBarChart({ options, votes, correctAnswers, revealed }: {
   options: string[]; votes: number[]
-  correctAnswer?: number; revealed?: boolean
+  correctAnswers?: number[]; revealed?: boolean
 }) {
   const total = votes.reduce((s, v) => s + v, 0)
   const maxV  = Math.max(...votes, 1)
+  const corrSet = new Set(correctAnswers ?? [])
 
   return (
     <div className="flex flex-col gap-5">
@@ -1689,8 +1692,8 @@ function MCQBarChart({ options, votes, correctAnswer, revealed }: {
         const v          = votes[i] ?? 0
         const pct        = total > 0 ? Math.round((v / total) * 100) : 0
         const isWinner   = v > 0 && v === maxV
-        const isCorrect  = revealed && correctAnswer === i
-        const isWrong    = revealed && typeof correctAnswer === 'number' && correctAnswer !== i
+        const isCorrect  = revealed && corrSet.has(i)
+        const isWrong    = revealed && corrSet.size > 0 && !corrSet.has(i)
         return (
           <motion.div
             key={i}
@@ -1770,18 +1773,19 @@ function describeArc(cx: number, cy: number, r: number, startAngle: number, endA
 
 /* ── Legend shared by pie / donut ─────────────────────────────────────── */
 
-function VizLegend({ options, votes, total, maxV, correctAnswer, revealed }: {
+function VizLegend({ options, votes, total, maxV, correctAnswers, revealed }: {
   options: string[]; votes: number[]; total: number; maxV: number
-  correctAnswer?: number; revealed?: boolean
+  correctAnswers?: number[]; revealed?: boolean
 }) {
+  const corrSet = new Set(correctAnswers ?? [])
   return (
     <div className="flex min-w-0 flex-1 flex-col justify-center gap-3">
       {options.map((opt, i) => {
         const v         = votes[i] ?? 0
         const pct       = total > 0 ? Math.round((v / total) * 100) : 0
         const isWinner  = v > 0 && v === maxV
-        const isCorrect = revealed && correctAnswer === i
-        const isWrong   = revealed && typeof correctAnswer === 'number' && correctAnswer !== i
+        const isCorrect = revealed && corrSet.has(i)
+        const isWrong   = revealed && corrSet.size > 0 && !corrSet.has(i)
         return (
           <motion.div
             key={i}
@@ -1815,10 +1819,11 @@ function VizLegend({ options, votes, total, maxV, correctAnswer, revealed }: {
 
 /* ── Donut chart ──────────────────────────────────────────────────────── */
 
-function MCQDonutChart({ options, votes, correctAnswer, revealed }: {
+function MCQDonutChart({ options, votes, correctAnswers, revealed }: {
   options: string[]; votes: number[]
-  correctAnswer?: number; revealed?: boolean
+  correctAnswers?: number[]; revealed?: boolean
 }) {
+  const corrSet = new Set(correctAnswers ?? [])
   const total  = votes.reduce((s, v) => s + v, 0)
   const maxV   = Math.max(...votes, 1)
   const winner = votes.indexOf(Math.max(...votes))
@@ -1848,13 +1853,13 @@ function MCQDonutChart({ options, votes, correctAnswer, revealed }: {
               strokeDasharray={`${circ * 0.99} ${circ * 0.01}`} />
           ) : (
             segments.map((seg, i) => {
-              const isWrong = revealed && typeof correctAnswer === 'number' && correctAnswer !== i
+              const isWrong = revealed && corrSet.size > 0 && !corrSet.has(i)
               return (
                 <motion.circle
                   key={i}
                   r={R} cx={CX} cy={CY}
                   fill="none"
-                  stroke={revealed && correctAnswer === i ? '#42db66' : seg.color}
+                  stroke={revealed && corrSet.has(i) ? '#42db66' : seg.color}
                   strokeWidth={20}
                   strokeDasharray={`${seg.dashLen} ${circ - seg.dashLen}`}
                   strokeDashoffset={-seg.offset}
@@ -1871,7 +1876,7 @@ function MCQDonutChart({ options, votes, correctAnswer, revealed }: {
           {total > 0 ? (
             <>
               <span className="text-3xl font-bold tabular-nums"
-                style={{ color: revealed && correctAnswer === winner ? '#42db66' : VIZ_COLORS[winner % VIZ_COLORS.length] }}>
+                style={{ color: revealed && corrSet.has(winner) ? '#42db66' : VIZ_COLORS[winner % VIZ_COLORS.length] }}>
                 {Math.round((votes[winner] / total) * 100)}%
               </span>
               <span className="mt-0.5 max-w-[80px] text-xs font-medium leading-tight text-white/55">
@@ -1883,19 +1888,20 @@ function MCQDonutChart({ options, votes, correctAnswer, revealed }: {
           )}
         </div>
       </div>
-      <VizLegend options={options} votes={votes} total={total} maxV={maxV} correctAnswer={correctAnswer} revealed={revealed} />
+      <VizLegend options={options} votes={votes} total={total} maxV={maxV} correctAnswers={correctAnswers} revealed={revealed} />
     </div>
   )
 }
 
 /* ── Pie chart ────────────────────────────────────────────────────────── */
 
-function MCQPieChart({ options, votes, correctAnswer, revealed }: {
+function MCQPieChart({ options, votes, correctAnswers, revealed }: {
   options: string[]; votes: number[]
-  correctAnswer?: number; revealed?: boolean
+  correctAnswers?: number[]; revealed?: boolean
 }) {
-  const total = votes.reduce((s, v) => s + v, 0)
-  const maxV  = Math.max(...votes, 1)
+  const total   = votes.reduce((s, v) => s + v, 0)
+  const maxV    = Math.max(...votes, 1)
+  const corrSet = new Set(correctAnswers ?? [])
 
   let cumAngle = 0
   const segments = options.map((opt, i) => {
@@ -1908,18 +1914,17 @@ function MCQPieChart({ options, votes, correctAnswer, revealed }: {
 
   return (
     <div className="flex min-w-0 items-center gap-6">
-      {/* Pie — responsive size so it doesn't crowd the legend at high zoom */}
       <svg viewBox="0 0 120 120" className="size-36 shrink-0 lg:size-48 xl:size-56">
         {total === 0 ? (
           <circle r={54} cx={60} cy={60} fill="rgba(255,255,255,0.08)" />
         ) : (
           segments.map((seg, i) => {
-            const isWrong = revealed && typeof correctAnswer === 'number' && correctAnswer !== i
+            const isWrong = revealed && corrSet.size > 0 && !corrSet.has(i)
             return (
               <motion.path
                 key={i}
                 d={describeArc(60, 60, 54, seg.startAngle, seg.endAngle)}
-                fill={revealed && correctAnswer === i ? '#42db66' : seg.color}
+                fill={revealed && corrSet.has(i) ? '#42db66' : seg.color}
                 initial={{ opacity: 0, scale: 0.85 }}
                 animate={{ opacity: isWrong ? 0.2 : 1, scale: 1 }}
                 transition={{ duration: 0.5, delay: i * 0.08, ease: [0.16, 1, 0.3, 1] }}
@@ -1929,7 +1934,7 @@ function MCQPieChart({ options, votes, correctAnswer, revealed }: {
           })
         )}
       </svg>
-      <VizLegend options={options} votes={votes} total={total} maxV={maxV} correctAnswer={correctAnswer} revealed={revealed} />
+      <VizLegend options={options} votes={votes} total={total} maxV={maxV} correctAnswers={correctAnswers} revealed={revealed} />
     </div>
   )
 }
@@ -2236,21 +2241,21 @@ function OpenEndedResults({
               animate={{ opacity: 1, y: 0, scale: 1 }}
               transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
               className={cn(
-                'group relative rounded-2xl border p-5 backdrop-blur-sm',
+                'relative rounded-2xl border p-5 backdrop-blur-sm',
                 isPinned
                   ? 'border-hot-pink/50 bg-hot-pink/8'
                   : 'border-white/10 bg-white/5',
               )}
             >
-              {/* Pin button — appears on hover or when already pinned */}
+              {/* Pin button — always visible so it's clickable on touch screens */}
               <button
                 onClick={() => onTogglePin(key)}
                 title={isPinned ? 'Unpin' : 'Pin to top'}
                 className={cn(
                   'absolute right-3 top-3 rounded-lg p-1.5 transition-all',
                   isPinned
-                    ? 'text-hot-pink opacity-100'
-                    : 'text-white/20 opacity-0 group-hover:opacity-100 hover:text-white/60',
+                    ? 'text-hot-pink'
+                    : 'text-white/30 hover:text-white/70',
                 )}
               >
                 <Pin className={cn('size-3.5', isPinned && 'fill-current')} />

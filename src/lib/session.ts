@@ -67,8 +67,10 @@ export interface QuestionSlide {
   imgLayout?:   string
   /** Word Cloud only — max submissions per person. Default 3. */
   wcMaxSubmissions?: number
-  /** MCQ only — 0-based index of the correct option. Used for presenter answer reveal. */
-  correctAnswer?: number
+  /** Open Ended only — max responses per person. Default 1. */
+  oeMaxSubmissions?: number
+  /** MCQ only — 0-based indices of correct options (supports multiple). Used for presenter answer reveal. */
+  correctAnswers?: number[]
 }
 
 /* ─── Canvas slide types ────────────────────────────────────────────────── */
@@ -241,8 +243,10 @@ export async function createSession(title: string, rawSlides: any[]): Promise<st
       ...(s.imgLayout  ? { imgLayout:  String(s.imgLayout)  } : {}),
       // Word Cloud: preserve presenter-configured submission limit
       ...(typeof s.wcMaxSubmissions === 'number' ? { wcMaxSubmissions: s.wcMaxSubmissions } : {}),
-      // MCQ: preserve correct answer index for presenter reveal
-      ...(typeof s.correctAnswer === 'number' ? { correctAnswer: s.correctAnswer } : {}),
+      // MCQ: preserve correct answer indices for presenter reveal
+      ...(Array.isArray(s.correctAnswers) && s.correctAnswers.length > 0 ? { correctAnswers: s.correctAnswers as number[] } : {}),
+      // Open Ended: preserve max submissions per person
+      ...(typeof s.oeMaxSubmissions === 'number' ? { oeMaxSubmissions: s.oeMaxSubmissions } : {}),
     }
   })
 
@@ -367,8 +371,10 @@ export async function updateSessionSlides(code: string, rawSlides: any[]): Promi
       ...(s.imgLayout  ? { imgLayout:  String(s.imgLayout)  } : {}),
       // Word Cloud: preserve presenter-configured submission limit
       ...(typeof s.wcMaxSubmissions === 'number' ? { wcMaxSubmissions: s.wcMaxSubmissions } : {}),
-      // MCQ: preserve correct answer index for presenter reveal
-      ...(typeof s.correctAnswer === 'number' ? { correctAnswer: s.correctAnswer } : {}),
+      // MCQ: preserve correct answer indices for presenter reveal
+      ...(Array.isArray(s.correctAnswers) && s.correctAnswers.length > 0 ? { correctAnswers: s.correctAnswers as number[] } : {}),
+      // Open Ended: preserve max submissions per person
+      ...(typeof s.oeMaxSubmissions === 'number' ? { oeMaxSubmissions: s.oeMaxSubmissions } : {}),
     }
   })
   await updateDoc(doc(db, 'sessions', code.toUpperCase()), { slides })

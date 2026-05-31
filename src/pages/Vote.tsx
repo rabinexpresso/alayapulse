@@ -45,6 +45,14 @@ export default function Vote() {
       return stored ? JSON.parse(stored) as Record<string, string[]> : {}
     } catch { return {} }
   })
+  // Open-ended multi-submit: track how many responses each person has submitted per slide
+  const oeStorageKey = `alaya-oe-${sessionCode ?? ''}`
+  const [oeSubmissions, setOeSubmissions] = useState<Record<string, number>>(() => {
+    try {
+      const stored = sessionStorage.getItem(`alaya-oe-${sessionCode ?? ''}`)
+      return stored ? JSON.parse(stored) as Record<string, number> : {}
+    } catch { return {} }
+  })
   const [submitting,      setSubmitting]      = useState(false)
   const [submitError,     setSubmitError]     = useState<string | null>(null)
   const [showLeaveModal,  setShowLeaveModal]  = useState(false)
@@ -129,10 +137,15 @@ export default function Vote() {
   const handleSubmit = async (value: string) => {
     const sType = (slideData as { type: string } | undefined)?.type ?? ''
     if (!slideData || !INTERACTIVE_TYPES.has(sType) || alreadySubmitted || submitting) return
-    // Extra guard for word cloud: prevent over-submission even if alreadySubmitted lags
+    // Extra guard for word cloud
     if (slideData.type === 'wordcloud') {
       const maxSubs = (slideData as { wcMaxSubmissions?: number }).wcMaxSubmissions ?? 3
       if ((wcSubmissions[slideId] ?? 0) >= maxSubs) return
+    }
+    // Extra guard for open-ended multi-submit
+    if (slideData.type === 'openended') {
+      const maxSubs = (slideData as { oeMaxSubmissions?: number }).oeMaxSubmissions ?? 1
+      if ((oeSubmissions[slideId] ?? 0) >= maxSubs) return
     }
     setSubmitting(true)
     setSubmitError(null)
@@ -145,17 +158,28 @@ export default function Vote() {
       })
 
       if (slideData.type === 'wordcloud') {
-        // Word cloud: allow multiple submissions up to wcMaxSubmissions
         const maxSubs  = (slideData as { wcMaxSubmissions?: number }).wcMaxSubmissions ?? 3
         const newCount = (wcSubmissions[slideData.id] ?? 0) + 1
         const updated  = { ...wcSubmissions, [slideData.id]: newCount }
         setWcSubmissions(updated)
         try { sessionStorage.setItem(wcStorageKey, JSON.stringify(updated)) } catch {}
-        // Record the actual word so duplicates can be blocked
         const updatedWords = { ...wcWords, [slideData.id]: [...(wcWords[slideData.id] ?? []), value.toLowerCase()] }
         setWcWords(updatedWords)
         try { sessionStorage.setItem(wcWordsStorageKey, JSON.stringify(updatedWords)) } catch {}
-        // Only lock when the max is reached
+        if (newCount >= maxSubs) {
+          setSubmittedSlides(prev => {
+            const next = new Set([...prev, slideData.id])
+            try { sessionStorage.setItem(storageKey, JSON.stringify([...next])) } catch {}
+            return next
+          })
+        }
+      } else if (slideData.type === 'openended') {
+        // Open-ended: allow multiple submissions up to oeMaxSubmissions
+        const maxSubs  = (slideData as { oeMaxSubmissions?: number }).oeMaxSubmissions ?? 1
+        const newCount = (oeSubmissions[slideData.id] ?? 0) + 1
+        const updated  = { ...oeSubmissions, [slideData.id]: newCount }
+        setOeSubmissions(updated)
+        try { sessionStorage.setItem(oeStorageKey, JSON.stringify(updated)) } catch {}
         if (newCount >= maxSubs) {
           setSubmittedSlides(prev => {
             const next = new Set([...prev, slideData.id])
@@ -202,14 +226,14 @@ export default function Vote() {
         style={{ width: 0 }}
       />
 
-      {/* Timer strip — prominent countdown visible to audience */}
+      {/* Timer strip — large prominent countdown visible to audience */}
       {timerSecsLeft !== null && timerDuration && (
-        <div className="relative flex h-12 shrink-0 items-center overflow-hidden bg-midnight-sky-50">
-          {/* Proportional fill bar — shrinks as time runs out */}
+        <div className="relative flex h-20 shrink-0 items-center overflow-hidden bg-midnight-sky-50">
+          {/* Proportional fill — shrinks left-to-right as time runs out */}
           <motion.div
             className={cn(
               'absolute inset-y-0 left-0',
-              timerSecsLeft <= 10 ? 'bg-hot-pink/20' : timerSecsLeft <= 30 ? 'bg-golden-sun/18' : 'bg-sky-blue/15',
+              timerSecsLeft <= 10 ? 'bg-hot-pink/18' : timerSecsLeft <= 30 ? 'bg-golden-sun/15' : 'bg-sky-blue/12',
             )}
             animate={{ width: `${Math.max(0, (timerSecsLeft / timerDuration) * 100)}%` }}
             transition={{ duration: 0.3, ease: 'linear' }}
@@ -217,28 +241,34 @@ export default function Vote() {
           {/* Bottom progress line */}
           <motion.div
             className={cn(
-              'absolute bottom-0 left-0 h-0.5',
+              'absolute bottom-0 left-0 h-1',
               timerSecsLeft <= 10 ? 'bg-hot-pink' : timerSecsLeft <= 30 ? 'bg-golden-sun' : 'bg-sky-blue',
             )}
             animate={{ width: `${Math.max(0, (timerSecsLeft / timerDuration) * 100)}%` }}
             transition={{ duration: 0.3, ease: 'linear' }}
           />
-          {/* Label + big countdown number */}
           <div className="relative flex w-full items-center justify-between px-5">
-            <span className="text-xs font-semibold uppercase tracking-wider text-midnight-sky-500">
-              Time remaining
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-midnight-sky-400">Time remaining</p>
+              {/* Large countdown — the number the user actually reads */}
+              <motion.p
+                key={timerSecsLeft}
+                animate={timerSecsLeft <= 5 ? { scale: [1, 1.15, 1] } : {}}
+                transition={{ duration: 0.25 }}
+                className={cn(
+                  'text-5xl font-extrabold tabular-nums leading-none',
+                  timerSecsLeft <= 10 ? 'text-hot-pink' : timerSecsLeft <= 30 ? 'text-golden-sun' : 'text-sky-blue',
+                )}
+              >
+                {timerSecsLeft}
+              </motion.p>
+            </div>
+            <span className={cn(
+              'text-lg font-bold',
+              timerSecsLeft <= 10 ? 'text-hot-pink/60' : timerSecsLeft <= 30 ? 'text-golden-sun/60' : 'text-sky-blue/60',
+            )}>
+              sec
             </span>
-            <motion.span
-              key={timerSecsLeft}
-              animate={timerSecsLeft <= 5 ? { scale: [1, 1.12, 1] } : {}}
-              transition={{ duration: 0.25 }}
-              className={cn(
-                'text-2xl font-extrabold tabular-nums',
-                timerSecsLeft <= 10 ? 'text-hot-pink' : timerSecsLeft <= 30 ? 'text-golden-sun' : 'text-sky-blue',
-              )}
-            >
-              {timerSecsLeft}s
-            </motion.span>
           </div>
         </div>
       )}
@@ -398,6 +428,8 @@ export default function Vote() {
                 {slideData.type === 'openended' && (
                   <OpenEndedQuestion
                     submitting={submitting}
+                    submissionsUsed={oeSubmissions[slideId] ?? 0}
+                    maxSubmissions={(slideData as { oeMaxSubmissions?: number }).oeMaxSubmissions ?? 1}
                     onSubmit={text => handleSubmit(text)}
                   />
                 )}
@@ -951,26 +983,94 @@ function WordCloudQuestion({
    ───────────────────────────────────────────────────────────────────────── */
 
 function OpenEndedQuestion({
-  submitting, onSubmit,
+  submitting, onSubmit, submissionsUsed, maxSubmissions,
 }: {
-  submitting: boolean
-  onSubmit:  (text: string) => void
+  submitting:      boolean
+  onSubmit:        (text: string) => void
+  submissionsUsed: number
+  maxSubmissions:  number
 }) {
-  const [text, setText] = useState('')
+  const [text,        setText]        = useState('')
+  const [recentlySent, setRecentlySent] = useState(false)
   const MAX = 280
+  const allUsed = submissionsUsed >= maxSubmissions
 
   const handleSubmit = () => {
     const trimmed = text.trim()
-    if (!trimmed || submitting) return
+    if (!trimmed || submitting || allUsed) return
     onSubmit(trimmed)
+    setText('')
+    if (maxSubmissions > 1) {
+      setRecentlySent(true)
+      setTimeout(() => setRecentlySent(false), 2500)
+    }
+  }
+
+  if (allUsed) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-5 py-10 text-center">
+        <motion.div
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          transition={{ type: 'spring', stiffness: 420, damping: 18 }}
+          className="flex size-16 items-center justify-center rounded-full bg-hot-pink shadow-[0_0_32px_-4px] shadow-hot-pink/40"
+        >
+          <Check className="size-8 text-white" strokeWidth={2.5} />
+        </motion.div>
+        <div>
+          <p className="text-lg font-semibold text-midnight-sky-900">
+            {maxSubmissions > 1 ? 'All responses submitted!' : 'Response recorded!'}
+          </p>
+          <p className="mt-1 font-light text-midnight-sky-500">Waiting for the next question…</p>
+        </div>
+      </div>
+    )
   }
 
   return (
     <div className="flex flex-1 flex-col gap-4">
+      {/* Progress indicator — only shown when multi-submit is enabled */}
+      {maxSubmissions > 1 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <p className="whitespace-nowrap text-sm font-medium text-midnight-sky-700">
+            {submissionsUsed === 0
+              ? `You can submit up to ${maxSubmissions} responses`
+              : `${submissionsUsed} of ${maxSubmissions} responses submitted`}
+          </p>
+          <div className="flex gap-1">
+            {Array.from({ length: maxSubmissions }, (_, i) => (
+              <span
+                key={i}
+                className={cn(
+                  'h-2 w-5 rounded-full transition-all',
+                  i < submissionsUsed ? 'bg-hot-pink' : 'bg-midnight-sky-200',
+                )}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Success toast for multi-submit */}
+      <AnimatePresence>
+        {recentlySent && (
+          <motion.div
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            className="flex items-center gap-2 rounded-xl bg-hot-pink/10 px-4 py-2.5 text-sm font-medium text-hot-pink"
+          >
+            <Check className="size-4 shrink-0" strokeWidth={2.5} />
+            Response sent! {maxSubmissions - submissionsUsed} more to go.
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="relative">
         <textarea
           value={text}
           onChange={e => setText(e.target.value.slice(0, MAX))}
+          onKeyDown={e => e.key === 'Enter' && e.metaKey && handleSubmit()}
           placeholder="Share your thoughts…"
           rows={5}
           disabled={submitting}

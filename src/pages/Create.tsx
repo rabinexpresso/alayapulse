@@ -150,8 +150,10 @@ interface QuestionSlide {
   options: string[]
   /** MCQ only — how to display results on the presenter screen. Defaults to 'bar'. */
   vizType?: 'bar' | 'pie' | 'donut'
-  /** MCQ only — 0-based index of the correct option. Used for presenter answer reveal. */
-  correctAnswer?: number
+  /** MCQ only — 0-based indices of correct options (supports multiple). */
+  correctAnswers?: number[]
+  /** Open Ended only — max responses per person. Default 1. */
+  oeMaxSubmissions?: number
   /** Rating only — max value of the 0..N scale. 5 (default) or 10. */
   ratingMax?: 5 | 10
   /** Rating only — PER-PARAMETER anchor labels (parallel to options).
@@ -2192,11 +2194,35 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false }: {
             {slide.type === 'mcq' && <MCQEditor slide={slide} onUpdate={onUpdate} />}
             {slide.type === 'rating' && <RatingEditor slide={slide} onUpdate={onUpdate} />}
             {slide.type === 'openended' && (
-              <div className="mb-1 flex items-start gap-2.5 rounded-xl bg-midnight-sky-50 p-4">
-                <div className="mt-0.5 size-1.5 shrink-0 rounded-full bg-golden-sun" />
-                <p className="text-sm text-midnight-sky-500">
-                  Audience members type a short answer. Responses stream in live on the big screen.
-                </p>
+              <div className="mb-6 space-y-4">
+                <div className="flex items-start gap-2.5 rounded-xl bg-midnight-sky-50 p-4">
+                  <div className="mt-0.5 size-1.5 shrink-0 rounded-full bg-golden-sun" />
+                  <p className="text-sm text-midnight-sky-500">
+                    Audience members type a short answer. Responses stream in live on the big screen.
+                  </p>
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-midnight-sky-700">
+                    Responses per person
+                    <span className="ml-1.5 font-light text-midnight-sky-500">how many answers each person can submit</span>
+                  </label>
+                  <div className="flex gap-2">
+                    {[1, 2, 3].map(n => (
+                      <button
+                        key={n}
+                        onClick={() => onUpdate({ oeMaxSubmissions: n })}
+                        className={cn(
+                          'rounded-xl border px-4 py-2 text-sm transition-all',
+                          (slide.oeMaxSubmissions ?? 1) === n
+                            ? 'border-golden-sun bg-golden-sun/10 font-medium text-golden-sun'
+                            : 'border-midnight-sky-200 text-midnight-sky-500 hover:border-midnight-sky-400 hover:text-midnight-sky-700',
+                        )}
+                      >
+                        {n} {n === 1 ? 'response' : 'responses'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
             {slide.type === 'wordcloud' && (
@@ -2339,51 +2365,54 @@ function MCQEditor({ slide, onUpdate }: {
         Answer options
         <span className="ml-1 font-light text-midnight-sky-500">({slide.options.length}/6 — pick one)</span>
       </label>
-      {slide.options.map((opt, i) => (
-        <div key={i} className="flex items-start gap-2">
-          <span className={cn(
-            'mt-2.5 flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold transition-colors',
-            slide.correctAnswer === i
-              ? 'bg-fresh-green/15 text-fresh-green'
-              : 'bg-midnight-sky-100 text-midnight-sky-600',
-          )}>
-            {String.fromCharCode(65 + i)}
-          </span>
-          {/* Auto-expanding textarea — grows with content, no horizontal overflow */}
-          <textarea
-            value={opt}
-            rows={1}
-            onChange={e => setOption(i, e.target.value)}
-            placeholder={`Option ${String.fromCharCode(65 + i)}`}
-            style={{ fieldSizing: 'content' } as React.CSSProperties}
-            className="flex-1 resize-none overflow-hidden rounded-xl border border-midnight-sky-200 bg-white px-3.5 py-2.5 text-sm leading-snug text-midnight-sky-900 placeholder:text-midnight-sky-400 outline-none transition-all focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/15"
-          />
-          {/* Mark as correct answer — tick turns green when selected */}
-          <button
-            onClick={() => onUpdate({ correctAnswer: slide.correctAnswer === i ? undefined : i })}
-            title={slide.correctAnswer === i ? 'Remove correct answer' : 'Mark as correct answer'}
-            className={cn(
-              'mt-1.5 rounded-lg p-1.5 transition',
-              slide.correctAnswer === i
-                ? 'bg-fresh-green/15 text-fresh-green'
-                : 'text-midnight-sky-300 hover:bg-midnight-sky-50 hover:text-fresh-green',
-            )}
-          >
-            <Check className="size-3.5" />
-          </button>
-          {slide.options.length > 2 && (
+      {slide.options.map((opt, i) => {
+        const isCorrect = (slide.correctAnswers ?? []).includes(i)
+        return (
+          <div key={i} className="flex items-start gap-2">
+            <span className={cn(
+              'mt-2.5 flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold transition-colors',
+              isCorrect ? 'bg-fresh-green/15 text-fresh-green' : 'bg-midnight-sky-100 text-midnight-sky-600',
+            )}>
+              {String.fromCharCode(65 + i)}
+            </span>
+            <textarea
+              value={opt}
+              rows={1}
+              onChange={e => setOption(i, e.target.value)}
+              placeholder={`Option ${String.fromCharCode(65 + i)}`}
+              style={{ fieldSizing: 'content' } as React.CSSProperties}
+              className="flex-1 resize-none overflow-hidden rounded-xl border border-midnight-sky-200 bg-white px-3.5 py-2.5 text-sm leading-snug text-midnight-sky-900 placeholder:text-midnight-sky-400 outline-none transition-all focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/15"
+            />
+            {/* Correct-answer tick — always visible, turns solid green when marked */}
             <button
-              onClick={() => removeOption(i)}
-              className="mt-1.5 rounded-lg p-1.5 text-midnight-sky-400 transition hover:bg-red-50 hover:text-red-400"
+              onClick={() => {
+                const cur = slide.correctAnswers ?? []
+                onUpdate({ correctAnswers: isCorrect ? cur.filter(x => x !== i) : [...cur, i] })
+              }}
+              title={isCorrect ? 'Remove correct answer' : 'Mark as correct answer'}
+              className={cn(
+                'mt-1.5 rounded-lg border p-1.5 transition-all',
+                isCorrect
+                  ? 'border-fresh-green/40 bg-fresh-green/15 text-fresh-green'
+                  : 'border-midnight-sky-200 bg-white text-midnight-sky-400 hover:border-fresh-green/50 hover:bg-fresh-green/8 hover:text-fresh-green',
+              )}
             >
-              <Trash2 className="size-3.5" />
+              <Check className="size-3.5" />
             </button>
-          )}
-        </div>
-      ))}
-      {slide.correctAnswer !== undefined && (
-        <p className="mt-1 text-[11px] font-light text-fresh-green/80">
-          Option {String.fromCharCode(65 + slide.correctAnswer)} is marked correct — use Reveal Answer on the results screen.
+            {slide.options.length > 2 && (
+              <button
+                onClick={() => removeOption(i)}
+                className="mt-1.5 rounded-lg p-1.5 text-midnight-sky-400 transition hover:bg-red-50 hover:text-red-400"
+              >
+                <Trash2 className="size-3.5" />
+              </button>
+            )}
+          </div>
+        )
+      })}
+      {(slide.correctAnswers ?? []).length > 0 && (
+        <p className="mt-1 text-[11px] font-medium text-fresh-green">
+          {(slide.correctAnswers!).map(i => String.fromCharCode(65 + i)).join(', ')} marked correct — press Reveal Answer on the results screen.
         </p>
       )}
       {slide.options.length < 6 && (
