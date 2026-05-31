@@ -1116,27 +1116,34 @@ function ContentSlideView({ slide }: { slide: ContentSlide }) {
 
       {/* ── Bullets template ─────────────────────────────── */}
       {slide.template === 'bullets' && (() => {
-        const totalLen = slide.body.length
-        const bCount   = bullets.length
+        const totalLen  = slide.body.length
+        const bCount    = bullets.length
         // Font + spacing tiers — same philosophy as the quote template
         const textCls =
-          totalLen > 600 || bCount > 5 ? 'text-sm xl:text-base leading-snug'
+          totalLen > 900 || bCount > 6 ? 'text-xs xl:text-sm leading-snug'
+          : totalLen > 600 || bCount > 5 ? 'text-sm xl:text-base leading-snug'
           : totalLen > 350 || bCount > 3 ? 'text-base xl:text-lg leading-snug'
           : totalLen > 180 ? 'text-lg xl:text-xl leading-relaxed'
           : 'text-xl xl:text-2xl leading-relaxed'
         const spacingCls =
-          totalLen > 600 || bCount > 5 ? 'space-y-2'
+          totalLen > 600 || bCount > 5 ? 'space-y-1.5'
           : totalLen > 350 || bCount > 3 ? 'space-y-3'
           : 'space-y-5'
+        // Title font based on title length only — short titles get big font to
+        // fill horizontal space; long titles shrink to avoid wrapping
+        const titleLen = slide.title?.length ?? 0
         const titleTextCls =
-          totalLen > 350 || bCount > 3 ? 'text-2xl xl:text-3xl'
-          : 'text-3xl xl:text-4xl'
+          titleLen > 50 ? 'text-xl xl:text-2xl'
+          : titleLen > 25 ? 'text-2xl xl:text-3xl'
+          : totalLen > 350 || bCount > 3 ? 'text-3xl xl:text-4xl'
+          : 'text-4xl xl:text-5xl'
         const dotCls =
           totalLen > 350 || bCount > 3 ? 'mt-1.5 size-2 shrink-0 rounded-full'
           : 'mt-2.5 size-2.5 shrink-0 rounded-full'
         return (
           <div className={cn(
-            'relative z-10 flex h-full flex-col justify-center py-14',
+            // overflow-x-hidden clips any text that reaches the image panel edge
+            'relative z-10 flex h-full flex-col justify-center overflow-x-hidden py-14',
             hasRefImg ? 'w-[58%] pl-16 pr-4' : 'w-full px-16',
           )}>
             {slide.title && (
@@ -1155,12 +1162,12 @@ function ContentSlideView({ slide }: { slide: ContentSlide }) {
                       initial={{ opacity: 0, x: -20 }}
                       animate={{ opacity: 1, x: 0 }}
                       transition={{ delay: i * 0.1, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-                      className="flex w-full items-start gap-4"
+                      className="flex w-full items-start gap-4 overflow-hidden"
                     >
                       <span className={dotCls} style={{ backgroundColor: c.accent }} />
                       <span
-                        className={cn('min-w-0 flex-1 break-words font-medium', textCls)}
-                        style={{ color: c.text }}
+                        className={cn('min-w-0 flex-1 font-medium', textCls)}
+                        style={{ color: c.text, overflowWrap: 'anywhere' }}
                       >
                         {b}
                       </span>
