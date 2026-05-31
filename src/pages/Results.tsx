@@ -470,11 +470,13 @@ function QuestionResult({ index, question, audienceCount }: {
    ───────────────────────────────────────────────────────────────────────── */
 
 function MCQVisual({ q }: { q: ResultQuestion }) {
-  // Tally votes per option
+  // Tally votes per option — handles multi-select JSON arrays "[0,2]" and legacy "2"
   const votes = Array(q.options.length).fill(0)
   q.responses.forEach(r => {
-    const i = parseInt(r.value, 10)
-    if (!isNaN(i) && i >= 0 && i < q.options.length) votes[i]++
+    let indices: number[]
+    try { const p = JSON.parse(r.value); indices = Array.isArray(p) ? p as number[] : [parseInt(r.value, 10)] }
+    catch { indices = [parseInt(r.value, 10)] }
+    indices.forEach(i => { if (!isNaN(i) && i >= 0 && i < q.options.length) votes[i]++ })
   })
   const total = votes.reduce((s, v) => s + v, 0) || q.responseCount
   const maxV  = Math.max(...votes, 1)
@@ -753,14 +755,20 @@ function RespondentList({ q }: { q: ResultQuestion }) {
 
 function formatResponseValue(r: ResultResponse, q: ResultQuestion): React.ReactNode {
   if (q.type === 'mcq') {
-    const idx = parseInt(r.value, 10)
-    const optText = q.options[idx] || `Option ${String.fromCharCode(65 + idx)}`
+    // Multi-select: "[0,2]" → multiple chips; legacy single: "2" → one chip
+    let indices: number[]
+    try { const p = JSON.parse(r.value); indices = Array.isArray(p) ? p as number[] : [parseInt(r.value, 10)] }
+    catch { indices = [parseInt(r.value, 10)] }
     return (
-      <span className="inline-flex items-center gap-1.5">
-        <span className="flex size-5 items-center justify-center rounded-md bg-hot-pink/10 text-[10px] font-bold text-hot-pink">
-          {String.fromCharCode(65 + idx)}
-        </span>
-        {optText}
+      <span className="inline-flex flex-wrap gap-1.5">
+        {indices.map(idx => (
+          <span key={idx} className="inline-flex items-center gap-1">
+            <span className="flex size-5 items-center justify-center rounded-md bg-hot-pink/10 text-[10px] font-bold text-hot-pink">
+              {String.fromCharCode(65 + idx)}
+            </span>
+            {q.options[idx] || `Option ${String.fromCharCode(65 + idx)}`}
+          </span>
+        ))}
       </span>
     )
   }
@@ -887,8 +895,10 @@ function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckRes
     if (q.type === 'mcq') {
       const votes = Array(q.options.length).fill(0)
       q.responses.forEach(r => {
-        const i = parseInt(r.value, 10)
-        if (!isNaN(i) && i >= 0 && i < q.options.length) votes[i]++
+        let indices: number[]
+        try { const p = JSON.parse(r.value); indices = Array.isArray(p) ? p as number[] : [parseInt(r.value, 10)] }
+        catch { indices = [parseInt(r.value, 10)] }
+        indices.forEach(i => { if (!isNaN(i) && i >= 0 && i < q.options.length) votes[i]++ })
       })
       const total = votes.reduce((s, v) => s + v, 0) || q.responseCount
       // Normalise option text — strip newlines so long options wrap cleanly in the table cell
@@ -985,9 +995,10 @@ function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckRes
 
 function formatResponseAsText(r: ResultResponse, q: ResultQuestion): string {
   if (q.type === 'mcq') {
-    const idx = parseInt(r.value, 10)
-    const opt = q.options[idx] || `Option ${String.fromCharCode(65 + idx)}`
-    return `${String.fromCharCode(65 + idx)}. ${opt}`
+    let indices: number[]
+    try { const p = JSON.parse(r.value); indices = Array.isArray(p) ? p as number[] : [parseInt(r.value, 10)] }
+    catch { indices = [parseInt(r.value, 10)] }
+    return indices.map(idx => `${String.fromCharCode(65 + idx)}. ${q.options[idx] || `Option ${String.fromCharCode(65 + idx)}`}`).join(', ')
   }
   if (q.type === 'rating') {
     const ratingMax = q.ratingMax === 10 ? 10 : 5

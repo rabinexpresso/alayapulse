@@ -137,6 +137,8 @@ export default function Vote() {
   const handleSubmit = async (value: string) => {
     const sType = (slideData as { type: string } | undefined)?.type ?? ''
     if (!slideData || !INTERACTIVE_TYPES.has(sType) || alreadySubmitted || submitting) return
+    // Belt-and-suspenders: if timer has expired, reject any submission
+    if (timerExpired) return
     // Extra guard for word cloud
     if (slideData.type === 'wordcloud') {
       const maxSubs = (slideData as { wcMaxSubmissions?: number }).wcMaxSubmissions ?? 3
@@ -247,22 +249,19 @@ export default function Vote() {
             animate={{ width: `${Math.max(0, (timerSecsLeft / timerDuration) * 100)}%` }}
             transition={{ duration: 0.3, ease: 'linear' }}
           />
-          <div className="relative flex w-full items-center justify-between px-5">
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-midnight-sky-400">Time remaining</p>
-              {/* Large countdown — the number the user actually reads */}
-              <motion.p
-                key={timerSecsLeft}
-                animate={timerSecsLeft <= 5 ? { scale: [1, 1.15, 1] } : {}}
-                transition={{ duration: 0.25 }}
-                className={cn(
-                  'text-5xl font-extrabold tabular-nums leading-none',
-                  timerSecsLeft <= 10 ? 'text-hot-pink' : timerSecsLeft <= 30 ? 'text-golden-sun' : 'text-sky-blue',
-                )}
-              >
-                {timerSecsLeft}
-              </motion.p>
-            </div>
+          {/* Number + "sec" side by side — no gap, no opposite ends */}
+          <div className="relative flex w-full items-baseline gap-1.5 px-5">
+            <motion.p
+              key={timerSecsLeft}
+              animate={timerSecsLeft <= 5 ? { scale: [1, 1.15, 1] } : {}}
+              transition={{ duration: 0.25 }}
+              className={cn(
+                'text-5xl font-extrabold tabular-nums leading-none',
+                timerSecsLeft <= 10 ? 'text-hot-pink' : timerSecsLeft <= 30 ? 'text-golden-sun' : 'text-sky-blue',
+              )}
+            >
+              {timerSecsLeft}
+            </motion.p>
             <span className={cn(
               'text-lg font-bold',
               timerSecsLeft <= 10 ? 'text-hot-pink/60' : timerSecsLeft <= 30 ? 'text-golden-sun/60' : 'text-sky-blue/60',
@@ -404,18 +403,28 @@ export default function Vote() {
                   </div>
                 )}
 
-                {/* Question text */}
-                <h2 className="mb-6 text-xl font-semibold leading-snug text-midnight-sky-900 sm:text-2xl">
-                  {(slideData as { question: string }).question}
-                </h2>
+                {/* Question text — font shrinks and height is capped so answer options are always visible */}
+                {(() => {
+                  const q = (slideData as { question: string }).question
+                  const fontSize = q.length > 140 ? 'text-sm leading-relaxed' : q.length > 70 ? 'text-base leading-snug' : 'text-lg leading-snug sm:text-xl'
+                  return (
+                    <div className="mb-4 max-h-[26vh] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                      <h2 className={`font-semibold text-midnight-sky-900 ${fontSize}`}>{q}</h2>
+                    </div>
+                  )
+                })()}
 
-                {slideData.type === 'mcq' && (
-                  <MCQQuestion
-                    options={(slideData as { options: string[] }).options}
-                    submitting={submitting}
-                    onSubmit={idx => handleSubmit(String(idx))}
-                  />
-                )}
+                {slideData.type === 'mcq' && (() => {
+                  const sd = slideData as { options: string[]; correctAnswers?: number[] }
+                  return (
+                    <MCQQuestion
+                      options={sd.options}
+                      multiSelect={(sd.correctAnswers?.length ?? 0) > 1}
+                      submitting={submitting}
+                      onSubmit={handleSubmit}
+                    />
+                  )
+                })()}
                 {slideData.type === 'wordcloud' && (
                   <WordCloudQuestion
                     submitting={submitting}
@@ -670,22 +679,56 @@ function WrapState({ session: _session, attendeeName }: { session: Session; atte
 const OPTION_LABELS = ['A', 'B', 'C', 'D', 'E', 'F']
 
 function MCQQuestion({
-  options, submitting, onSubmit,
+  options, submitting, onSubmit, multiSelect = false,
 }: {
-  options:   string[]
-  submitting: boolean
-  onSubmit:  (idx: number) => void
+  options:      string[]
+  submitting:   boolean
+  onSubmit:     (value: string) => void
+  multiSelect?: boolean
 }) {
-  const [selected, setSelected] = useState<number | null>(null)
+  // Always use a Set internally — single-select just enforces max 1 item
+  const [selectedSet, setSelectedSet] = useState<Set<number>>(new Set())
+
+  const toggle = (i: number) => {
+    if (submitting) return
+    setSelectedSet(prev => {
+      const next = new Set(prev)
+      if (multiSelect) {
+        // Toggle the tapped option in/out
+        if (next.has(i)) next.delete(i); else next.add(i)
+      } else {
+        // Single-select: replace
+        next.clear(); next.add(i)
+      }
+      return next
+    })
+  }
+
+  const handleSubmit = () => {
+    if (selectedSet.size === 0 || submitting) return
+    if (multiSelect) {
+      onSubmit(JSON.stringify([...selectedSet].sort((a, b) => a - b)))
+    } else {
+      const idx = [...selectedSet][0]
+      if (idx !== undefined) onSubmit(String(idx))
+    }
+  }
 
   return (
     <div className="flex flex-1 flex-col gap-3">
+      {/* Hint when multi-select is enabled */}
+      {multiSelect && (
+        <p className="text-xs font-medium text-midnight-sky-500">
+          Select all that apply, then tap Submit.
+        </p>
+      )}
+
       {options.map((opt, i) => {
-        const isSelected = selected === i
+        const isSelected = selectedSet.has(i)
         return (
           <motion.button
             key={i}
-            onClick={() => !submitting && setSelected(i)}
+            onClick={() => toggle(i)}
             whileTap={{ scale: 0.98 }}
             animate={isSelected ? { scale: [1, 1.02, 1] } : { scale: 1 }}
             transition={{ duration: 0.25, ease: [0.34, 1.56, 0.64, 1] }}
@@ -739,7 +782,7 @@ function MCQQuestion({
       })}
 
       <AnimatePresence>
-        {selected !== null && (
+        {selectedSet.size > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
@@ -748,7 +791,7 @@ function MCQQuestion({
             className="mt-2"
           >
             <SubmitButton
-              onClick={() => selected !== null && onSubmit(selected)}
+              onClick={handleSubmit}
               loading={submitting}
             />
           </motion.div>
@@ -1130,7 +1173,7 @@ function RatingQuestion({
     setRatings(prev => { const n = [...prev]; n[row] = v; return n })
 
   return (
-    <div className="flex flex-1 flex-col gap-4">
+    <div className="flex flex-1 flex-col gap-3">
       {parameters.map((param, row) => {
         const selected = ratings[row]
         const left  = leftLabels[row]  ?? ''
@@ -1141,11 +1184,11 @@ function RatingQuestion({
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4, delay: row * 0.09, ease: [0.16, 1, 0.3, 1] }}
-            className="rounded-2xl border-2 border-midnight-sky-200 bg-white px-5 py-4 transition-colors"
+            className="rounded-2xl border-2 border-midnight-sky-200 bg-white px-4 py-3 transition-colors"
             style={selected >= 0 ? { borderColor: 'rgba(255,0,101,0.3)', background: 'rgba(255,0,101,0.03)' } : {}}
           >
-            <div className="mb-3 flex items-baseline justify-between gap-2">
-              <p className="text-sm font-semibold text-midnight-sky-800">{param}</p>
+            <div className="mb-2 flex items-baseline justify-between gap-2">
+              <p className="line-clamp-2 text-sm font-semibold text-midnight-sky-800">{param}</p>
               <AnimatePresence>
                 {selected >= 0 && (
                   <motion.span
@@ -1162,14 +1205,14 @@ function RatingQuestion({
 
             {/* Per-parameter end labels — only shown if configured */}
             {(left || right) && (
-              <div className="mb-1.5 flex justify-between text-[10px] font-semibold uppercase tracking-wider text-midnight-sky-400">
+              <div className="mb-1 flex justify-between text-[10px] font-semibold uppercase tracking-wider text-midnight-sky-400">
                 <span className="truncate pr-2">{left}</span>
                 <span className="truncate pl-2 text-right">{right}</span>
               </div>
             )}
 
             {/* Number scale 0..ratingMax */}
-            <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${SCALE.length}, minmax(0, 1fr))` }}>
+            <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${SCALE.length}, minmax(0, 1fr))` }}>
               {SCALE.map(v => {
                 const active = selected === v
                 return (
@@ -1180,8 +1223,7 @@ function RatingQuestion({
                     animate={active ? { scale: [1, 1.08, 1] } : {}}
                     transition={{ duration: 0.22, ease: [0.34, 1.56, 0.64, 1] }}
                     className={cn(
-                      'touch-manipulation rounded-lg border py-2 text-xs font-bold tabular-nums transition-colors focus:outline-none',
-                      ratingMax === 10 ? 'sm:text-sm' : 'text-sm',
+                      'touch-manipulation rounded-lg border py-1.5 text-xs font-bold tabular-nums transition-colors focus:outline-none',
                       active
                         ? 'border-hot-pink bg-hot-pink text-white shadow-[0_0_18px_-2px] shadow-hot-pink/40'
                         : 'border-midnight-sky-200 bg-white text-midnight-sky-600 hover:border-hot-pink/40 hover:text-hot-pink',

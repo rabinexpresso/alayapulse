@@ -160,8 +160,17 @@ const DEMO_RATING_DIST = [
 function aggregateMCQ(responses: FirestoreResponse[], count: number): number[] {
   const votes = Array(count).fill(0)
   responses.forEach(r => {
-    const i = parseInt(r.value, 10)
-    if (!isNaN(i) && i >= 0 && i < count) votes[i]++
+    // Multi-select responses are stored as JSON arrays "[0,2]"; legacy single-select as "2"
+    let indices: number[]
+    try {
+      const parsed = JSON.parse(r.value)
+      indices = Array.isArray(parsed) ? parsed as number[] : [parseInt(r.value, 10)]
+    } catch {
+      indices = [parseInt(r.value, 10)]
+    }
+    indices.forEach(i => {
+      if (!isNaN(i) && i >= 0 && i < count) votes[i]++
+    })
   })
   return votes
 }
@@ -1448,7 +1457,7 @@ function QuestionSlideView({
             </motion.span>
             <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
-              className="mt-6 text-4xl font-semibold leading-tight tracking-tight md:text-5xl lg:text-[3.2rem]"
+              className={cn('mt-6 font-semibold leading-tight tracking-tight', slide.question.length > 160 ? 'text-2xl md:text-3xl' : slide.question.length > 80 ? 'text-3xl md:text-4xl' : 'text-4xl md:text-5xl lg:text-[3.2rem]')}
               style={{ color: c.fg }}
             >
               {slide.question}
@@ -1489,7 +1498,7 @@ function QuestionSlideView({
             </motion.span>
             <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
-              className="mt-5 text-3xl font-semibold leading-tight tracking-tight md:text-4xl lg:text-[2.6rem]"
+              className={cn('mt-5 font-semibold leading-tight tracking-tight', slide.question.length > 160 ? 'text-xl md:text-2xl' : slide.question.length > 80 ? 'text-2xl md:text-3xl' : 'text-3xl md:text-4xl lg:text-[2.6rem]')}
               style={{ color: c.fg }}
             >
               {slide.question}
@@ -1596,7 +1605,7 @@ function ResultsSlideView({
           Results live
         </span>
         <h2
-          className="flex-1 text-2xl font-semibold md:text-3xl"
+          className={cn('flex-1 font-semibold', slide.question.length > 160 ? 'text-base md:text-lg' : slide.question.length > 80 ? 'text-lg md:text-xl' : 'text-2xl md:text-3xl')}
           style={{ color: c.fg }}
         >
           {slide.question}
