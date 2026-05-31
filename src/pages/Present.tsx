@@ -1099,7 +1099,7 @@ function ContentSlideView({ slide }: { slide: ContentSlide }) {
           {slide.body && (
             <p
               className={cn(
-                'mt-6 w-full break-words font-light leading-relaxed',
+                'mt-6 w-full break-words font-light leading-relaxed text-justify',
                 !hasRefImg && 'max-w-3xl',
                 (slide.body?.length ?? 0) > 400 ? 'text-base xl:text-lg'
                   : (slide.body?.length ?? 0) > 200 ? 'text-lg xl:text-xl'

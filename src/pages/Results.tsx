@@ -218,7 +218,7 @@ export default function Results() {
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-6 py-3">
           <button
             onClick={() => navigate(-1)}
-            className="rounded-lg border border-hot-pink/35 bg-hot-pink/10 px-3 py-1.5 text-sm font-medium text-hot-pink transition hover:border-hot-pink/60 hover:bg-hot-pink/20"
+            className="rounded-lg bg-fresh-green px-3 py-1.5 text-sm font-medium text-white transition hover:bg-fresh-green/85"
           >
             Back
           </button>
@@ -228,7 +228,7 @@ export default function Results() {
           <button
             onClick={handleDownloadCSV}
             disabled={isDownloadingCsv}
-            className="flex items-center gap-1.5 rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20 disabled:opacity-70"
+            className="flex items-center gap-1.5 rounded-xl bg-sky-blue px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-blue/85 disabled:opacity-70"
           >
             <FileSpreadsheet className="size-3.5" />
             {isDownloadingCsv ? 'Exporting…' : 'Download CSV'}

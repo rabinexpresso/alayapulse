@@ -348,7 +348,7 @@ export default function Vote() {
             className="flex flex-1 flex-col"
           >
             {isWaiting ? (
-              <WaitingState sessionCode={sessionCode} />
+              <WaitingState sessionCode={sessionCode} slide={slideData as any} />
             ) : timerExpired ? (
               <TimesUpState />
             ) : alreadySubmitted ? (
@@ -477,7 +477,91 @@ export default function Vote() {
    Waiting state — shown when the current slide is a PDF / transition slide
    ───────────────────────────────────────────────────────────────────────── */
 
-function WaitingState({ sessionCode }: { sessionCode?: string }) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function WaitingState({ sessionCode, slide }: { sessionCode?: string; slide?: any }) {
+  // Content slides (heading / bullets / quote) — show the actual slide content
+  if (slide?.type === 'content') {
+    const template: string   = slide.template ?? 'heading'
+    const title: string      = slide.title ?? ''
+    const body: string       = slide.body ?? ''
+    const attribution: string = slide.attribution ?? ''
+    const imgUrl: string | undefined = slide.imgUrl
+    const imgLayout: string  = slide.imgLayout ?? 'top'
+    const bullets = body.split('\n').filter((b: string) => b.trim())
+
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+        className="flex flex-1 flex-col gap-5 py-4"
+      >
+        {/* Image — shown for reference/top/right layouts (not background) */}
+        {imgUrl && imgLayout !== 'background' && (
+          <div className="w-full overflow-hidden rounded-2xl border border-midnight-sky-100 bg-midnight-sky-50 shadow-sm">
+            <img
+              src={imgUrl}
+              alt=""
+              className="w-full object-contain"
+              style={{ maxHeight: '38vh' }}
+            />
+          </div>
+        )}
+
+        {/* Background image — subtle tinted banner */}
+        {imgUrl && imgLayout === 'background' && (
+          <div className="relative w-full overflow-hidden rounded-2xl" style={{ minHeight: '14vh' }}>
+            <img src={imgUrl} alt="" className="absolute inset-0 h-full w-full object-cover opacity-25" />
+          </div>
+        )}
+
+        {/* Title */}
+        {title && (
+          <h2 className="text-2xl font-bold leading-tight tracking-tight text-midnight-sky-900">
+            {title}
+          </h2>
+        )}
+
+        {/* Body — bullets */}
+        {template === 'bullets' && bullets.length > 0 && (
+          <ul className="space-y-3">
+            {bullets.map((b: string, i: number) => (
+              <li key={i} className="flex items-start gap-3">
+                <span className="mt-2 size-2 shrink-0 rounded-full bg-hot-pink" />
+                <span className="text-base font-medium leading-relaxed text-midnight-sky-800">{b}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {/* Body — heading subtitle */}
+        {template === 'heading' && body && (
+          <p className="text-base font-light leading-relaxed text-midnight-sky-600">{body}</p>
+        )}
+
+        {/* Body — quote */}
+        {template === 'quote' && body && (
+          <blockquote className="border-l-4 border-hot-pink/40 pl-4">
+            {attribution && (
+              <p className="mb-2 text-xs font-bold uppercase tracking-widest text-hot-pink">{attribution}</p>
+            )}
+            <p className="text-base font-light italic leading-relaxed text-midnight-sky-800" style={{ overflowWrap: 'anywhere' }}>
+              "{body}"
+            </p>
+          </blockquote>
+        )}
+
+        {sessionCode && (
+          <div className="mt-auto flex items-center gap-2 rounded-full bg-midnight-sky-100 px-4 py-1.5 self-start">
+            <span className="text-xs font-medium text-midnight-sky-500">Session</span>
+            <span className="font-mono text-sm font-bold tracking-widest text-midnight-sky-800">{sessionCode}</span>
+          </div>
+        )}
+      </motion.div>
+    )
+  }
+
+  // All other non-interactive slides (pdf, image, video, canvas, html)
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.96 }}
