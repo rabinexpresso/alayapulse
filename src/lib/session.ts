@@ -67,6 +67,8 @@ export interface QuestionSlide {
   imgLayout?:   string
   /** Word Cloud only — max submissions per person. Default 3. */
   wcMaxSubmissions?: number
+  /** MCQ only — 0-based index of the correct option. Used for presenter answer reveal. */
+  correctAnswer?: number
 }
 
 /* ─── Canvas slide types ────────────────────────────────────────────────── */
@@ -239,6 +241,8 @@ export async function createSession(title: string, rawSlides: any[]): Promise<st
       ...(s.imgLayout  ? { imgLayout:  String(s.imgLayout)  } : {}),
       // Word Cloud: preserve presenter-configured submission limit
       ...(typeof s.wcMaxSubmissions === 'number' ? { wcMaxSubmissions: s.wcMaxSubmissions } : {}),
+      // MCQ: preserve correct answer index for presenter reveal
+      ...(typeof s.correctAnswer === 'number' ? { correctAnswer: s.correctAnswer } : {}),
     }
   })
 
@@ -363,6 +367,8 @@ export async function updateSessionSlides(code: string, rawSlides: any[]): Promi
       ...(s.imgLayout  ? { imgLayout:  String(s.imgLayout)  } : {}),
       // Word Cloud: preserve presenter-configured submission limit
       ...(typeof s.wcMaxSubmissions === 'number' ? { wcMaxSubmissions: s.wcMaxSubmissions } : {}),
+      // MCQ: preserve correct answer index for presenter reveal
+      ...(typeof s.correctAnswer === 'number' ? { correctAnswer: s.correctAnswer } : {}),
     }
   })
   await updateDoc(doc(db, 'sessions', code.toUpperCase()), { slides })

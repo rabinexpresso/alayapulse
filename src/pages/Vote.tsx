@@ -202,24 +202,44 @@ export default function Vote() {
         style={{ width: 0 }}
       />
 
-      {/* Timer bar — shows while a countdown is active */}
+      {/* Timer strip — prominent countdown visible to audience */}
       {timerSecsLeft !== null && timerDuration && (
-        <div className="relative h-1.5 w-full shrink-0 bg-midnight-sky-100">
+        <div className="relative flex h-12 shrink-0 items-center overflow-hidden bg-midnight-sky-50">
+          {/* Proportional fill bar — shrinks as time runs out */}
           <motion.div
             className={cn(
-              'h-full',
+              'absolute inset-y-0 left-0',
+              timerSecsLeft <= 10 ? 'bg-hot-pink/20' : timerSecsLeft <= 30 ? 'bg-golden-sun/18' : 'bg-sky-blue/15',
+            )}
+            animate={{ width: `${Math.max(0, (timerSecsLeft / timerDuration) * 100)}%` }}
+            transition={{ duration: 0.3, ease: 'linear' }}
+          />
+          {/* Bottom progress line */}
+          <motion.div
+            className={cn(
+              'absolute bottom-0 left-0 h-0.5',
               timerSecsLeft <= 10 ? 'bg-hot-pink' : timerSecsLeft <= 30 ? 'bg-golden-sun' : 'bg-sky-blue',
             )}
             animate={{ width: `${Math.max(0, (timerSecsLeft / timerDuration) * 100)}%` }}
             transition={{ duration: 0.3, ease: 'linear' }}
           />
-          {/* Seconds label at the right end */}
-          <span className={cn(
-            'absolute right-2 top-1/2 -translate-y-1/2 font-mono text-[10px] font-bold tabular-nums',
-            timerSecsLeft <= 10 ? 'text-hot-pink' : 'text-midnight-sky-500',
-          )}>
-            {timerSecsLeft}s
-          </span>
+          {/* Label + big countdown number */}
+          <div className="relative flex w-full items-center justify-between px-5">
+            <span className="text-xs font-semibold uppercase tracking-wider text-midnight-sky-500">
+              Time remaining
+            </span>
+            <motion.span
+              key={timerSecsLeft}
+              animate={timerSecsLeft <= 5 ? { scale: [1, 1.12, 1] } : {}}
+              transition={{ duration: 0.25 }}
+              className={cn(
+                'text-2xl font-extrabold tabular-nums',
+                timerSecsLeft <= 10 ? 'text-hot-pink' : timerSecsLeft <= 30 ? 'text-golden-sun' : 'text-sky-blue',
+              )}
+            >
+              {timerSecsLeft}s
+            </motion.span>
+          </div>
         </div>
       )}
 

@@ -16,7 +16,7 @@ import {
   Cloud, AlignLeft, AlignCenter, AlignRight, Star, Upload, Play,
   LayoutList, Bookmark, BookmarkCheck, Monitor, LayoutGrid,
   Video, Type, List, Quote, Users, BarChart2, PieChart,
-  Layers, X, Table2, Download,
+  Layers, X, Table2, Download, Check,
 } from 'lucide-react'
 import * as pdfjsLib from 'pdfjs-dist'
 import { AlayaMark } from '@/components/AlayaMark'
@@ -150,6 +150,8 @@ interface QuestionSlide {
   options: string[]
   /** MCQ only — how to display results on the presenter screen. Defaults to 'bar'. */
   vizType?: 'bar' | 'pie' | 'donut'
+  /** MCQ only — 0-based index of the correct option. Used for presenter answer reveal. */
+  correctAnswer?: number
   /** Rating only — max value of the 0..N scale. 5 (default) or 10. */
   ratingMax?: 5 | 10
   /** Rating only — PER-PARAMETER anchor labels (parallel to options).
@@ -2339,7 +2341,12 @@ function MCQEditor({ slide, onUpdate }: {
       </label>
       {slide.options.map((opt, i) => (
         <div key={i} className="flex items-start gap-2">
-          <span className="mt-2.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-midnight-sky-100 text-xs font-bold text-midnight-sky-600">
+          <span className={cn(
+            'mt-2.5 flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold transition-colors',
+            slide.correctAnswer === i
+              ? 'bg-fresh-green/15 text-fresh-green'
+              : 'bg-midnight-sky-100 text-midnight-sky-600',
+          )}>
             {String.fromCharCode(65 + i)}
           </span>
           {/* Auto-expanding textarea — grows with content, no horizontal overflow */}
@@ -2351,6 +2358,19 @@ function MCQEditor({ slide, onUpdate }: {
             style={{ fieldSizing: 'content' } as React.CSSProperties}
             className="flex-1 resize-none overflow-hidden rounded-xl border border-midnight-sky-200 bg-white px-3.5 py-2.5 text-sm leading-snug text-midnight-sky-900 placeholder:text-midnight-sky-400 outline-none transition-all focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/15"
           />
+          {/* Mark as correct answer — tick turns green when selected */}
+          <button
+            onClick={() => onUpdate({ correctAnswer: slide.correctAnswer === i ? undefined : i })}
+            title={slide.correctAnswer === i ? 'Remove correct answer' : 'Mark as correct answer'}
+            className={cn(
+              'mt-1.5 rounded-lg p-1.5 transition',
+              slide.correctAnswer === i
+                ? 'bg-fresh-green/15 text-fresh-green'
+                : 'text-midnight-sky-300 hover:bg-midnight-sky-50 hover:text-fresh-green',
+            )}
+          >
+            <Check className="size-3.5" />
+          </button>
           {slide.options.length > 2 && (
             <button
               onClick={() => removeOption(i)}
@@ -2361,6 +2381,11 @@ function MCQEditor({ slide, onUpdate }: {
           )}
         </div>
       ))}
+      {slide.correctAnswer !== undefined && (
+        <p className="mt-1 text-[11px] font-light text-fresh-green/80">
+          Option {String.fromCharCode(65 + slide.correctAnswer)} is marked correct — use Reveal Answer on the results screen.
+        </p>
+      )}
       {slide.options.length < 6 && (
         <button
           onClick={addOption}

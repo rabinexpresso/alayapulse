@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   ChevronLeft, ChevronRight, X,
   BarChart2, ChevronDown, ChevronUp, Clock,
+  Eye, EyeOff, Pin, Check,
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { cn } from '@/lib/utils'
@@ -97,6 +98,10 @@ interface QSlide {
   theme?:       string
   imgUrl?:      string
   imgLayout?:   'top' | 'right' | 'background' | 'reference'
+  /** MCQ only — 0-based index of the correct option for presenter reveal. */
+  correctAnswer?: number
+  /** Word Cloud only — max submissions per person. */
+  wcMaxSubmissions?: number
 }
 
 interface CanvasBg     { type: 'color' | 'gradient'; value: string }
@@ -1551,9 +1556,20 @@ function ResultsSlideView({
   const c         = qColors(slide.theme)
   const ratingMax = slide.ratingMax === 10 ? 10 : 5
 
-  // For non-navy themes, charts/text need a dark surface to stay readable.
-  // Word cloud is exempt — it floats directly on the slide bg with its own
-  // theme-aware color palette, so no dark panel is needed.
+  // MCQ correct-answer reveal state — local only, resets automatically when
+  // the component is remounted (i.e. when the presenter moves to a new slide).
+  const [answerRevealed, setAnswerRevealed] = useState(false)
+  const hasCorrAnswer = slide.type === 'mcq' && typeof slide.correctAnswer === 'number'
+
+  // Open Ended: set of pinned response texts (first 60 chars used as key).
+  const [pinnedKeys, setPinnedKeys] = useState<Set<string>>(new Set())
+  const togglePin = (key: string) =>
+    setPinnedKeys(prev => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
+
   // For non-navy themes, charts/text need a dark surface to stay readable.
   // Word cloud is exempt — it floats directly on the slide bg with its own palette.
   const needsDarkPanel = (slide.theme ?? 'navy') !== 'navy' && slide.type !== 'wordcloud'
@@ -1569,27 +1585,57 @@ function ResultsSlideView({
       className="absolute inset-0 flex flex-col overflow-hidden px-14 pt-10 pb-24"
       style={{ backgroundColor: slide.theme === 'transparent' ? 'transparent' : c.bg }}
     >
-      {/* Badge + question */}
-      <div className="flex items-center gap-3">
+      {/* Badge + question + optional reveal button */}
+      <div className="flex items-start gap-3">
         <span
-          className="shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+          className="mt-0.5 shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider"
           style={{ backgroundColor: c.fg, color: c.bg }}
         >
           Results live
         </span>
         <h2
-          className="text-2xl font-semibold md:text-3xl"
+          className="flex-1 text-2xl font-semibold md:text-3xl"
           style={{ color: c.fg }}
         >
           {slide.question}
         </h2>
+        {/* Reveal Answer — MCQ only, only shown when a correct answer is set */}
+        {hasCorrAnswer && (
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setAnswerRevealed(v => !v)}
+            className={cn(
+              'mt-0.5 flex shrink-0 items-center gap-2 rounded-xl border px-3.5 py-1.5 text-sm font-semibold transition-all',
+              answerRevealed
+                ? 'border-fresh-green/50 bg-fresh-green/15 text-fresh-green'
+                : 'border-white/20 bg-white/10 text-white/70 hover:border-white/40 hover:bg-white/20',
+            )}
+          >
+            {answerRevealed ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+            {answerRevealed ? 'Hide answer' : 'Reveal answer'}
+          </motion.button>
+        )}
       </div>
 
       {/* Results */}
       <div className={vizWrap}>
-        {slide.type === 'mcq'       && <MCQResults    options={slide.options} votes={mcqVotes} vizType={slide.vizType ?? 'bar'} />}
+        {slide.type === 'mcq' && (
+          <MCQResults
+            options={slide.options}
+            votes={mcqVotes}
+            vizType={slide.vizType ?? 'bar'}
+            correctAnswer={slide.correctAnswer}
+            revealed={answerRevealed}
+          />
+        )}
         {slide.type === 'wordcloud' && <WordCloudResults words={cloudWords} slideTheme={slide.theme} />}
-        {slide.type === 'openended' && <OpenEndedResults answers={openAnswers} />}
+        {slide.type === 'openended' && (
+          <OpenEndedResults
+            answers={openAnswers}
+            pinnedKeys={pinnedKeys}
+            onTogglePin={togglePin}
+          />
+        )}
         {slide.type === 'rating'    && (() => {
           const lefts  = slide.leftLabels  ?? slide.options.map(() => slide.leftLabel  ?? '')
           const rights = slide.rightLabels ?? slide.options.map(() => slide.rightLabel ?? '')
@@ -1616,58 +1662,77 @@ function ResultsSlideView({
 // Shared palette for pie / donut segments
 const VIZ_COLORS = ['#ff0065', '#00b0ff', '#42db66', '#ffc709', '#a855f7', '#f97316']
 
-function MCQResults({ options, votes, vizType = 'bar' }: {
-  options:  string[]
-  votes:    number[]
-  vizType?: 'bar' | 'pie' | 'donut'
+function MCQResults({ options, votes, vizType = 'bar', correctAnswer, revealed }: {
+  options:       string[]
+  votes:         number[]
+  vizType?:      'bar' | 'pie' | 'donut'
+  correctAnswer?: number
+  revealed?:     boolean
 }) {
-  if (vizType === 'pie')   return <MCQPieChart   options={options} votes={votes} />
-  if (vizType === 'donut') return <MCQDonutChart options={options} votes={votes} />
-  return <MCQBarChart options={options} votes={votes} />
+  if (vizType === 'pie')   return <MCQPieChart   options={options} votes={votes} correctAnswer={correctAnswer} revealed={revealed} />
+  if (vizType === 'donut') return <MCQDonutChart options={options} votes={votes} correctAnswer={correctAnswer} revealed={revealed} />
+  return <MCQBarChart options={options} votes={votes} correctAnswer={correctAnswer} revealed={revealed} />
 }
 
 /* ── Bar chart — stacked layout: full-width label on top, bar below ───── */
 
-function MCQBarChart({ options, votes }: { options: string[]; votes: number[] }) {
+function MCQBarChart({ options, votes, correctAnswer, revealed }: {
+  options: string[]; votes: number[]
+  correctAnswer?: number; revealed?: boolean
+}) {
   const total = votes.reduce((s, v) => s + v, 0)
   const maxV  = Math.max(...votes, 1)
 
   return (
     <div className="flex flex-col gap-5">
       {options.map((opt, i) => {
-        const v        = votes[i] ?? 0
-        const pct      = total > 0 ? Math.round((v / total) * 100) : 0
-        const isWinner = v > 0 && v === maxV
+        const v          = votes[i] ?? 0
+        const pct        = total > 0 ? Math.round((v / total) * 100) : 0
+        const isWinner   = v > 0 && v === maxV
+        const isCorrect  = revealed && correctAnswer === i
+        const isWrong    = revealed && typeof correctAnswer === 'number' && correctAnswer !== i
         return (
           <motion.div
             key={i}
             initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
+            animate={{ opacity: isWrong ? 0.28 : 1, x: 0 }}
             transition={{ delay: i * 0.08, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
             className="flex flex-col gap-2"
           >
             {/* Row 1: badge + full-width label + percentage */}
             <div className="flex items-start gap-4">
-              <span className={cn('flex size-10 shrink-0 items-center justify-center rounded-xl text-sm font-bold', isWinner ? 'bg-hot-pink text-white' : 'bg-white/10 text-white/50')}>
-                {String.fromCharCode(65 + i)}
+              <span className={cn(
+                'flex size-10 shrink-0 items-center justify-center rounded-xl text-sm font-bold',
+                isCorrect ? 'bg-fresh-green text-white' : isWinner ? 'bg-hot-pink text-white' : 'bg-white/10 text-white/50',
+              )}>
+                {isCorrect ? <Check className="size-5" strokeWidth={2.5} /> : String.fromCharCode(65 + i)}
               </span>
-              <span className={cn('min-w-0 flex-1 break-words text-base font-medium leading-snug', isWinner ? 'text-white' : 'text-white/65')}>
+              <span className={cn(
+                'min-w-0 flex-1 break-words text-base font-medium leading-snug',
+                isCorrect ? 'text-fresh-green' : isWinner ? 'text-white' : 'text-white/65',
+              )}>
                 {opt}
               </span>
-              <span className={cn('shrink-0 text-right text-2xl font-bold tabular-nums', isWinner ? 'text-hot-pink' : 'text-white/50')}>
+              <span className={cn(
+                'shrink-0 text-right text-2xl font-bold tabular-nums',
+                isCorrect ? 'text-fresh-green' : isWinner ? 'text-hot-pink' : 'text-white/50',
+              )}>
                 {pct}%
               </span>
             </div>
             {/* Row 2: bar indented to align under the label text */}
-            <div className="pl-14">  {/* 40px badge + 16px gap */}
+            <div className="pl-14">
               <div className="relative h-7 overflow-hidden rounded-xl bg-white/10">
                 <motion.div
-                  className={cn('absolute inset-y-0 left-0 rounded-xl', isWinner ? 'bg-hot-pink' : 'bg-white/25')}
+                  className={cn(
+                    'absolute inset-y-0 left-0 rounded-xl',
+                    isCorrect ? 'bg-fresh-green' : isWinner ? 'bg-hot-pink' : 'bg-white/25',
+                  )}
                   initial={{ width: '0%' }}
                   animate={{ width: `${pct}%` }}
                   transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1], delay: i * 0.08 }}
                 />
-                {isWinner && (
+                {(isCorrect || isWinner) && !isWrong && (
                   <motion.div
                     className="absolute inset-y-0 left-0 w-full bg-gradient-to-r from-transparent via-white/20 to-transparent"
                     animate={{ x: ['-100%', '200%'] }}
@@ -1705,31 +1770,40 @@ function describeArc(cx: number, cy: number, r: number, startAngle: number, endA
 
 /* ── Legend shared by pie / donut ─────────────────────────────────────── */
 
-function VizLegend({ options, votes, total, maxV }: {
+function VizLegend({ options, votes, total, maxV, correctAnswer, revealed }: {
   options: string[]; votes: number[]; total: number; maxV: number
+  correctAnswer?: number; revealed?: boolean
 }) {
   return (
     <div className="flex min-w-0 flex-1 flex-col justify-center gap-3">
       {options.map((opt, i) => {
-        const v        = votes[i] ?? 0
-        const pct      = total > 0 ? Math.round((v / total) * 100) : 0
-        const isWinner = v > 0 && v === maxV
+        const v         = votes[i] ?? 0
+        const pct       = total > 0 ? Math.round((v / total) * 100) : 0
+        const isWinner  = v > 0 && v === maxV
+        const isCorrect = revealed && correctAnswer === i
+        const isWrong   = revealed && typeof correctAnswer === 'number' && correctAnswer !== i
         return (
           <motion.div
             key={i}
             initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
+            animate={{ opacity: isWrong ? 0.28 : 1, x: 0 }}
             transition={{ delay: i * 0.08, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
             className="flex min-w-0 items-center gap-3"
           >
             <span
-              className="size-3 shrink-0 rounded-full"
-              style={{ backgroundColor: VIZ_COLORS[i % VIZ_COLORS.length] }}
+              className={cn('size-3 shrink-0 rounded-full', isCorrect && 'ring-2 ring-fresh-green ring-offset-1 ring-offset-midnight-sky-900')}
+              style={{ backgroundColor: isCorrect ? '#42db66' : VIZ_COLORS[i % VIZ_COLORS.length] }}
             />
-            <span className={cn('min-w-0 flex-1 truncate text-base font-medium leading-snug', isWinner ? 'text-white' : 'text-white/60')}>
+            <span className={cn(
+              'min-w-0 flex-1 truncate text-base font-medium leading-snug',
+              isCorrect ? 'text-fresh-green' : isWinner ? 'text-white' : 'text-white/60',
+            )}>
               {opt}
             </span>
-            <span className={cn('shrink-0 text-xl font-bold tabular-nums', isWinner ? 'text-white' : 'text-white/40')}>
+            <span className={cn(
+              'shrink-0 text-xl font-bold tabular-nums',
+              isCorrect ? 'text-fresh-green' : isWinner ? 'text-white' : 'text-white/40',
+            )}>
               {pct}%
             </span>
           </motion.div>
@@ -1741,7 +1815,10 @@ function VizLegend({ options, votes, total, maxV }: {
 
 /* ── Donut chart ──────────────────────────────────────────────────────── */
 
-function MCQDonutChart({ options, votes }: { options: string[]; votes: number[] }) {
+function MCQDonutChart({ options, votes, correctAnswer, revealed }: {
+  options: string[]; votes: number[]
+  correctAnswer?: number; revealed?: boolean
+}) {
   const total  = votes.reduce((s, v) => s + v, 0)
   const maxV   = Math.max(...votes, 1)
   const winner = votes.indexOf(Math.max(...votes))
@@ -1770,20 +1847,23 @@ function MCQDonutChart({ options, votes }: { options: string[]; votes: number[] 
             <circle r={R} cx={CX} cy={CY} fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth={20}
               strokeDasharray={`${circ * 0.99} ${circ * 0.01}`} />
           ) : (
-            segments.map((seg, i) => (
-              <motion.circle
-                key={i}
-                r={R} cx={CX} cy={CY}
-                fill="none"
-                stroke={seg.color}
-                strokeWidth={20}
-                strokeDasharray={`${seg.dashLen} ${circ - seg.dashLen}`}
-                strokeDashoffset={-seg.offset}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.5, delay: i * 0.12 }}
-              />
-            ))
+            segments.map((seg, i) => {
+              const isWrong = revealed && typeof correctAnswer === 'number' && correctAnswer !== i
+              return (
+                <motion.circle
+                  key={i}
+                  r={R} cx={CX} cy={CY}
+                  fill="none"
+                  stroke={revealed && correctAnswer === i ? '#42db66' : seg.color}
+                  strokeWidth={20}
+                  strokeDasharray={`${seg.dashLen} ${circ - seg.dashLen}`}
+                  strokeDashoffset={-seg.offset}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: isWrong ? 0.2 : 1 }}
+                  transition={{ duration: 0.5, delay: i * 0.12 }}
+                />
+              )
+            })
           )}
         </svg>
         {/* Centre label */}
@@ -1791,7 +1871,7 @@ function MCQDonutChart({ options, votes }: { options: string[]; votes: number[] 
           {total > 0 ? (
             <>
               <span className="text-3xl font-bold tabular-nums"
-                style={{ color: VIZ_COLORS[winner % VIZ_COLORS.length] }}>
+                style={{ color: revealed && correctAnswer === winner ? '#42db66' : VIZ_COLORS[winner % VIZ_COLORS.length] }}>
                 {Math.round((votes[winner] / total) * 100)}%
               </span>
               <span className="mt-0.5 max-w-[80px] text-xs font-medium leading-tight text-white/55">
@@ -1803,14 +1883,17 @@ function MCQDonutChart({ options, votes }: { options: string[]; votes: number[] 
           )}
         </div>
       </div>
-      <VizLegend options={options} votes={votes} total={total} maxV={maxV} />
+      <VizLegend options={options} votes={votes} total={total} maxV={maxV} correctAnswer={correctAnswer} revealed={revealed} />
     </div>
   )
 }
 
 /* ── Pie chart ────────────────────────────────────────────────────────── */
 
-function MCQPieChart({ options, votes }: { options: string[]; votes: number[] }) {
+function MCQPieChart({ options, votes, correctAnswer, revealed }: {
+  options: string[]; votes: number[]
+  correctAnswer?: number; revealed?: boolean
+}) {
   const total = votes.reduce((s, v) => s + v, 0)
   const maxV  = Math.max(...votes, 1)
 
@@ -1830,20 +1913,23 @@ function MCQPieChart({ options, votes }: { options: string[]; votes: number[] })
         {total === 0 ? (
           <circle r={54} cx={60} cy={60} fill="rgba(255,255,255,0.08)" />
         ) : (
-          segments.map((seg, i) => (
-            <motion.path
-              key={i}
-              d={describeArc(60, 60, 54, seg.startAngle, seg.endAngle)}
-              fill={seg.color}
-              initial={{ opacity: 0, scale: 0.85 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.5, delay: i * 0.08, ease: [0.16, 1, 0.3, 1] }}
-              style={{ transformOrigin: '60px 60px' }}
-            />
-          ))
+          segments.map((seg, i) => {
+            const isWrong = revealed && typeof correctAnswer === 'number' && correctAnswer !== i
+            return (
+              <motion.path
+                key={i}
+                d={describeArc(60, 60, 54, seg.startAngle, seg.endAngle)}
+                fill={revealed && correctAnswer === i ? '#42db66' : seg.color}
+                initial={{ opacity: 0, scale: 0.85 }}
+                animate={{ opacity: isWrong ? 0.2 : 1, scale: 1 }}
+                transition={{ duration: 0.5, delay: i * 0.08, ease: [0.16, 1, 0.3, 1] }}
+                style={{ transformOrigin: '60px 60px' }}
+              />
+            )
+          })
         )}
       </svg>
-      <VizLegend options={options} votes={votes} total={total} maxV={maxV} />
+      <VizLegend options={options} votes={votes} total={total} maxV={maxV} correctAnswer={correctAnswer} revealed={revealed} />
     </div>
   )
 }
@@ -2106,7 +2192,22 @@ function WordCloudResults({
    Open-ended Results — live answer cards
    ───────────────────────────────────────────────────────────────────────── */
 
-function OpenEndedResults({ answers }: { answers: { name: string; text: string }[] }) {
+function OpenEndedResults({
+  answers, pinnedKeys, onTogglePin,
+}: {
+  answers:      { name: string; text: string }[]
+  pinnedKeys:   Set<string>
+  onTogglePin:  (key: string) => void
+}) {
+  // Newest-first key — first 60 chars of text is unique enough per response
+  const pinKey = (ans: { text: string }) => ans.text.slice(0, 60)
+
+  // Ref on the first card — auto-scroll to it whenever a new answer arrives
+  const topRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    topRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [answers.length])
+
   if (answers.length === 0) {
     return (
       <div className="flex min-h-[150px] items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-sm text-white/35">
@@ -2114,21 +2215,51 @@ function OpenEndedResults({ answers }: { answers: { name: string; text: string }
       </div>
     )
   }
+
+  // Pinned responses float to the top; within each group preserve arrival order
+  const sorted = [
+    ...answers.filter(a => pinnedKeys.has(pinKey(a))),
+    ...answers.filter(a => !pinnedKeys.has(pinKey(a))),
+  ]
+
   return (
     <div className="grid auto-rows-min gap-3 md:grid-cols-2 lg:grid-cols-3">
       <AnimatePresence>
-        {answers.map((ans, i) => (
-          <motion.div
-            key={`${ans.name}-${ans.text.slice(0, 20)}-${i}`}
-            initial={{ opacity: 0, y: 16, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-            className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm"
-          >
-            <p className="text-base font-light leading-relaxed text-white/90">"{ans.text}"</p>
-            <p className="mt-3 text-xs font-medium text-white/35">— {ans.name}</p>
-          </motion.div>
-        ))}
+        {sorted.map((ans, i) => {
+          const key     = pinKey(ans)
+          const isPinned = pinnedKeys.has(key)
+          return (
+            <motion.div
+              ref={i === 0 ? topRef : undefined}
+              key={`${ans.name}-${ans.text.slice(0, 20)}`}
+              initial={{ opacity: 0, y: 16, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+              className={cn(
+                'group relative rounded-2xl border p-5 backdrop-blur-sm',
+                isPinned
+                  ? 'border-hot-pink/50 bg-hot-pink/8'
+                  : 'border-white/10 bg-white/5',
+              )}
+            >
+              {/* Pin button — appears on hover or when already pinned */}
+              <button
+                onClick={() => onTogglePin(key)}
+                title={isPinned ? 'Unpin' : 'Pin to top'}
+                className={cn(
+                  'absolute right-3 top-3 rounded-lg p-1.5 transition-all',
+                  isPinned
+                    ? 'text-hot-pink opacity-100'
+                    : 'text-white/20 opacity-0 group-hover:opacity-100 hover:text-white/60',
+                )}
+              >
+                <Pin className={cn('size-3.5', isPinned && 'fill-current')} />
+              </button>
+              <p className="pr-6 text-base font-light leading-relaxed text-white/90">"{ans.text}"</p>
+              <p className="mt-3 text-xs font-medium text-white/35">— {ans.name}</p>
+            </motion.div>
+          )
+        })}
       </AnimatePresence>
     </div>
   )
@@ -2138,6 +2269,13 @@ function OpenEndedResults({ answers }: { answers: { name: string; text: string }
    Rating Results — average score + distribution histogram per parameter
    ───────────────────────────────────────────────────────────────────────── */
 
+// Rank badge styles: index 0 = 1st (gold), 1 = 2nd (silver), 2 = 3rd (bronze)
+const RANK_BADGES = [
+  { label: '1st', bg: 'bg-golden-sun/25', text: 'text-golden-sun', border: 'border-golden-sun/40' },
+  { label: '2nd', bg: 'bg-white/12',      text: 'text-white/65',   border: 'border-white/20'      },
+  { label: '3rd', bg: 'bg-amber-700/25',  text: 'text-amber-300',  border: 'border-amber-600/40'  },
+]
+
 function RatingResults({ params, avgs, distributions, ratingMax = 5, leftLabels = [], rightLabels = [] }: {
   params:        string[]
   avgs:          number[]
@@ -2146,22 +2284,25 @@ function RatingResults({ params, avgs, distributions, ratingMax = 5, leftLabels 
   leftLabels?:   string[]
   rightLabels?:  string[]
 }) {
-  // Scale row size to the number of parameters so 3+ rows fit a 1080p
-  // screen without a scrollbar. Few rows → roomy. Many rows → compact.
   const dense = params.length >= 4
+
+  // Sort by average score descending — highest rated first
+  const order = params.map((_, i) => i).sort((a, b) => (avgs[b] ?? 0) - (avgs[a] ?? 0))
+
   return (
     <div className={cn('flex flex-col', dense ? 'gap-2.5' : 'gap-3.5')}>
-      {params.map((label, idx) => (
+      {order.map((idx, rank) => (
         <RatingRow
           key={idx}
-          label={label}
+          label={params[idx]}
           avg={avgs[idx] ?? 0}
           dist={distributions[idx] ?? Array(ratingMax + 1).fill(0)}
           ratingMax={ratingMax}
           dense={dense}
           leftLabel ={leftLabels[idx]  ?? ''}
           rightLabel={rightLabels[idx] ?? ''}
-          delay={idx * 0.13}
+          delay={rank * 0.13}
+          rank={rank}
         />
       ))}
     </div>
@@ -2180,16 +2321,18 @@ function ratingBarColor(bucketIdx: number, total: number): string {
   return 'rgba(255,255,255,0.20)'
 }
 
-function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, leftLabel, rightLabel, delay }: {
+function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, leftLabel, rightLabel, delay, rank }: {
   label: string; avg: number; dist: number[]; ratingMax?: number
   dense?: boolean
   leftLabel?: string; rightLabel?: string
   delay: number
+  rank?: number
 }) {
   const displayed  = useCountUp(Math.round(avg * 10), 950) / 10
   const maxCount   = Math.max(...dist, 1)
   const BAR_MAX_PX = dense ? 26 : 36
   const hasEndLabels = !!leftLabel || !!rightLabel
+  const badge = rank !== undefined && rank < 3 ? RANK_BADGES[rank] : null
 
   return (
     <motion.div
@@ -2197,16 +2340,26 @@ function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, leftLabel, 
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.5, delay, ease: [0.16, 1, 0.3, 1] }}
       className={cn(
-        'rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm',
+        'rounded-2xl border backdrop-blur-sm',
+        rank === 0 ? 'border-golden-sun/30 bg-golden-sun/5' : 'border-white/10 bg-white/5',
         dense ? 'px-5 py-3' : 'px-6 py-4',
       )}
     >
-      {/* Top row: parameter label + animated average — sized for readability
-          from across the room without overflowing the viewport */}
+      {/* Top row: rank badge + parameter label + animated average */}
       <div className={cn('flex items-center justify-between gap-4', dense ? 'mb-2.5' : 'mb-3')}>
-        <span className={cn('font-semibold text-white', dense ? 'text-lg md:text-xl' : 'text-xl md:text-2xl')}>
-          {label}
-        </span>
+        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+          {badge && (
+            <span className={cn(
+              'shrink-0 rounded-lg border px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide',
+              badge.bg, badge.text, badge.border,
+            )}>
+              {badge.label}
+            </span>
+          )}
+          <span className={cn('min-w-0 truncate font-semibold text-white', dense ? 'text-lg md:text-xl' : 'text-xl md:text-2xl')}>
+            {label}
+          </span>
+        </div>
         <div className="flex items-baseline gap-1">
           <span className={cn(
             'font-extrabold tabular-nums text-hot-pink',

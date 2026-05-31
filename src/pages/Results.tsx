@@ -581,14 +581,18 @@ function OpenEndedVisual({ q }: { q: ResultQuestion }) {
   )
 }
 
+// Rank badge styles for the Results page (light theme)
+const RESULTS_RANK_BADGES = [
+  { label: '1st', bg: 'bg-golden-sun/15',       text: 'text-amber-700',        border: 'border-amber-400/40'   },
+  { label: '2nd', bg: 'bg-midnight-sky-100',     text: 'text-midnight-sky-500', border: 'border-midnight-sky-200' },
+  { label: '3rd', bg: 'bg-amber-100',            text: 'text-amber-700',        border: 'border-amber-300/50'   },
+]
+
 function RatingVisual({ q }: { q: ResultQuestion }) {
   const ratingMax = q.ratingMax === 10 ? 10 : 5
-  const buckets   = ratingMax + 1   // 0..N inclusive
-  // For rating: parse each response (JSON array of numbers, one per parameter).
-  // Scale is 0..ratingMax inclusive (audience can vote 0).
+  const buckets   = ratingMax + 1
   const sums  = Array(q.options.length).fill(0)
   const cnts  = Array(q.options.length).fill(0)
-  // Per-parameter distribution: dist[paramIdx][bucket] = vote count for that value
   const dist  = Array.from({ length: q.options.length }, () => Array(buckets).fill(0))
   q.responses.forEach(r => {
     try {
@@ -604,6 +608,9 @@ function RatingVisual({ q }: { q: ResultQuestion }) {
   })
   const avgs = sums.map((s, i) => cnts[i] > 0 ? s / cnts[i] : 0)
 
+  // Sort parameters by average score descending
+  const order = q.options.map((_, i) => i).sort((a, b) => avgs[b] - avgs[a])
+
   function bucketColor(bucketIdx: number, total: number): string {
     if (total <= 1) return '#ff0065'
     const t = bucketIdx / (total - 1)
@@ -614,23 +621,37 @@ function RatingVisual({ q }: { q: ResultQuestion }) {
     return 'rgba(0,0,121,0.22)'
   }
 
-  // Per-parameter labels with slide-wide fallback for legacy snapshots
   const lefts  = q.leftLabels  ?? q.options.map(() => q.leftLabel  ?? '')
   const rights = q.rightLabels ?? q.options.map(() => q.rightLabel ?? '')
 
   return (
     <div className="space-y-3">
-      {q.options.map((label, i) => {
-        const avg = avgs[i]
-        const pct = (avg / ratingMax) * 100
+      {order.map((i, rank) => {
+        const label     = q.options[i]
+        const avg       = avgs[i]
+        const pct       = (avg / ratingMax) * 100
         const paramDist = dist[i]
         const maxBucket = Math.max(...paramDist, 1)
-        const left  = lefts[i]  ?? ''
-        const right = rights[i] ?? ''
+        const left      = lefts[i]  ?? ''
+        const right     = rights[i] ?? ''
+        const badge     = rank < 3 ? RESULTS_RANK_BADGES[rank] : null
         return (
-          <div key={i} className="rounded-xl border border-midnight-sky-100 bg-midnight-sky-50/40 p-4">
+          <div key={i} className={cn(
+            'rounded-xl border p-4',
+            rank === 0 ? 'border-amber-200 bg-amber-50/60' : 'border-midnight-sky-100 bg-midnight-sky-50/40',
+          )}>
             <div className="mb-2 flex items-center justify-between gap-3">
-              <span className="text-sm font-semibold text-midnight-sky-800">{label || `Parameter ${i + 1}`}</span>
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                {badge && (
+                  <span className={cn(
+                    'shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+                    badge.bg, badge.text, badge.border,
+                  )}>
+                    {badge.label}
+                  </span>
+                )}
+                <span className="min-w-0 truncate text-sm font-semibold text-midnight-sky-800">{label || `Parameter ${i + 1}`}</span>
+              </div>
               <div className="flex items-baseline gap-0.5">
                 <span className="text-2xl font-extrabold tabular-nums text-hot-pink">{avg.toFixed(1)}</span>
                 <span className="text-base font-semibold text-midnight-sky-500">/{ratingMax}</span>
