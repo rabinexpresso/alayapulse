@@ -1084,13 +1084,30 @@ function ContentSlideView({ slide }: { slide: ContentSlide }) {
           hasRefImg ? 'w-[58%] pl-16 pr-4' : 'w-full px-16',
         )}>
           <h1
-            className="max-w-5xl text-5xl font-bold leading-tight tracking-tight xl:text-6xl 2xl:text-7xl"
+            className={cn(
+              'w-full break-words font-bold leading-tight tracking-tight',
+              !hasRefImg && 'max-w-5xl',
+              (slide.title?.length ?? 0) > 100 ? 'text-2xl xl:text-3xl 2xl:text-4xl'
+                : (slide.title?.length ?? 0) > 60 ? 'text-3xl xl:text-4xl 2xl:text-5xl'
+                : (slide.title?.length ?? 0) > 30 ? 'text-4xl xl:text-5xl 2xl:text-6xl'
+                : 'text-5xl xl:text-6xl 2xl:text-7xl',
+            )}
             style={{ color: c.text }}
           >
             {slide.title || <span style={{ opacity: 0.28 }}>Untitled</span>}
           </h1>
           {slide.body && (
-            <p className="mt-6 max-w-3xl text-2xl font-light leading-relaxed xl:text-3xl" style={{ color: c.textDim }}>
+            <p
+              className={cn(
+                'mt-6 w-full break-words font-light leading-relaxed',
+                !hasRefImg && 'max-w-3xl',
+                (slide.body?.length ?? 0) > 400 ? 'text-base xl:text-lg'
+                  : (slide.body?.length ?? 0) > 200 ? 'text-lg xl:text-xl'
+                  : (slide.body?.length ?? 0) > 80  ? 'text-xl xl:text-2xl'
+                  : 'text-2xl xl:text-3xl',
+              )}
+              style={{ color: c.textDim }}
+            >
               {slide.body}
             </p>
           )}
@@ -1098,47 +1115,67 @@ function ContentSlideView({ slide }: { slide: ContentSlide }) {
       )}
 
       {/* ── Bullets template ─────────────────────────────── */}
-      {slide.template === 'bullets' && (
-        <div className={cn(
-          'relative z-10 flex h-full flex-col justify-center py-14',
-          hasRefImg ? 'w-[58%] pl-16 pr-4' : 'w-full px-16',
-        )}>
-          {slide.title && (
-            <h2 className="mb-8 text-3xl font-bold tracking-tight xl:text-4xl" style={{ color: c.text }}>
-              {slide.title}
-            </h2>
-          )}
-          <ul className="space-y-5">
-            {bullets.length > 0
-              ? bullets.map((b, i) => (
-                  <motion.li
-                    key={i}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: i * 0.1, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-                    className="flex items-start gap-5"
-                  >
-                    <span
-                      className="mt-2.5 size-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: c.accent }}
-                    />
-                    <span
-                      className="min-w-0 flex-1 break-words text-xl font-medium leading-relaxed xl:text-2xl"
-                      style={{ color: c.text }}
+      {slide.template === 'bullets' && (() => {
+        const totalLen = slide.body.length
+        const bCount   = bullets.length
+        // Font + spacing tiers — same philosophy as the quote template
+        const textCls =
+          totalLen > 600 || bCount > 5 ? 'text-sm xl:text-base leading-snug'
+          : totalLen > 350 || bCount > 3 ? 'text-base xl:text-lg leading-snug'
+          : totalLen > 180 ? 'text-lg xl:text-xl leading-relaxed'
+          : 'text-xl xl:text-2xl leading-relaxed'
+        const spacingCls =
+          totalLen > 600 || bCount > 5 ? 'space-y-2'
+          : totalLen > 350 || bCount > 3 ? 'space-y-3'
+          : 'space-y-5'
+        const titleTextCls =
+          totalLen > 350 || bCount > 3 ? 'text-2xl xl:text-3xl'
+          : 'text-3xl xl:text-4xl'
+        const dotCls =
+          totalLen > 350 || bCount > 3 ? 'mt-1.5 size-2 shrink-0 rounded-full'
+          : 'mt-2.5 size-2.5 shrink-0 rounded-full'
+        return (
+          <div className={cn(
+            'relative z-10 flex h-full flex-col justify-center py-14',
+            hasRefImg ? 'w-[58%] pl-16 pr-4' : 'w-full px-16',
+          )}>
+            {slide.title && (
+              <h2
+                className={cn('mb-6 font-bold tracking-tight', titleTextCls)}
+                style={{ color: c.text }}
+              >
+                {slide.title}
+              </h2>
+            )}
+            <ul className={cn('w-full', spacingCls)}>
+              {bullets.length > 0
+                ? bullets.map((b, i) => (
+                    <motion.li
+                      key={i}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: i * 0.1, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+                      className="flex w-full items-start gap-4"
                     >
-                      {b}
-                    </span>
-                  </motion.li>
-                ))
-              : (
-                <p className="text-xl" style={{ color: c.textDim }}>
-                  Add bullet points in the editor…
-                </p>
-              )
-            }
-          </ul>
-        </div>
-      )}
+                      <span className={dotCls} style={{ backgroundColor: c.accent }} />
+                      <span
+                        className={cn('min-w-0 flex-1 break-words font-medium', textCls)}
+                        style={{ color: c.text }}
+                      >
+                        {b}
+                      </span>
+                    </motion.li>
+                  ))
+                : (
+                  <p className="text-xl" style={{ color: c.textDim }}>
+                    Add bullet points in the editor…
+                  </p>
+                )
+              }
+            </ul>
+          </div>
+        )
+      })()}
 
       {/* ── Quote template ────────────────────────────────── */}
       {slide.template === 'quote' && (() => {
