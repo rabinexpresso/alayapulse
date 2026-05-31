@@ -826,8 +826,13 @@ export default function Create() {
     // Start from whichever slide is currently selected in the panel
     const startSlide = Math.max(0, slides.findIndex(s => s.id === selectedId))
     try {
-      const code = await createSession(deckTitle, slides)
-      navigate(`/present/${code}`, { state: { slides, deckTitle, sessionCode: code, startSlide, deckId: currentDeckId } })
+      // Upload any base64 images (PDF/question/content/canvas) to Cloudinary FIRST.
+      // The session doc has a hard 1 MB Firestore limit, so we must store short
+      // https:// URLs — never raw base64 — or large images silently break.
+      const cloudSlides = await toCloudinarySlides(slides)
+      setSlides(cloudSlides) // lock cloud URLs into the editor so we don't re-upload
+      const code = await createSession(deckTitle, cloudSlides)
+      navigate(`/present/${code}`, { state: { slides: cloudSlides, deckTitle, sessionCode: code, startSlide, deckId: currentDeckId } })
     } catch (err) {
       console.error('Failed to start session:', err)
       const msg = err instanceof Error ? err.message : 'Unknown error'
@@ -846,10 +851,13 @@ export default function Create() {
     setSessionError(null)
     const startSlide = Math.max(0, slides.findIndex(s => s.id === selectedId))
     try {
+      // Upload base64 images to Cloudinary first (1 MB Firestore doc limit).
+      const cloudSlides = await toCloudinarySlides(slides)
+      setSlides(cloudSlides)
       // Resync slides first so audience index matches presenter's deck
-      await updateSessionSlides(resumeCode, slides)
+      await updateSessionSlides(resumeCode, cloudSlides)
       await updateSessionState(resumeCode, startSlide, 'question')
-      navigate(`/present/${resumeCode}`, { state: { slides, deckTitle, sessionCode: resumeCode, startSlide, deckId: currentDeckId } })
+      navigate(`/present/${resumeCode}`, { state: { slides: cloudSlides, deckTitle, sessionCode: resumeCode, startSlide, deckId: currentDeckId } })
     } catch (err) {
       console.error('Failed to resume session:', err)
       const msg = err instanceof Error ? err.message : 'Unknown error'
