@@ -1021,8 +1021,26 @@ function qColors(theme?: string): QColorSet {
 function ContentSlideView({ slide }: { slide: ContentSlide }) {
   const c         = contentColors(slide.theme)
   const bullets   = slide.body.split('\n').filter(b => b.trim())
-  // True when the reference/right image panel is visible (takes rightmost 42% of slide)
+  // True when the reference/right image panel is visible (takes the right edge of the slide)
   const hasRefImg = !!(slide.imgUrl && (slide.imgLayout === 'reference' || slide.imgLayout === 'right'))
+
+  // Detect the image's aspect ratio so the panel hugs the image instead of
+  // leaving empty space beside a portrait image. Same trick as question slides.
+  const [imgAspect, setImgAspect] = useState<number | null>(null)
+  useEffect(() => {
+    if (!slide.imgUrl || !hasRefImg) { setImgAspect(null); return }
+    const img = new Image()
+    img.onload = () => setImgAspect(img.naturalWidth / img.naturalHeight)
+    img.src = slide.imgUrl
+  }, [slide.imgUrl, hasRefImg])
+
+  // Panel width tracks the image: narrow for portrait, wide for landscape.
+  // Clamped to [26%, 48%]. Text fills whatever is left.
+  const imgPanelPct = hasRefImg
+    ? (imgAspect ? Math.min(48, Math.max(26, Math.round(52 * imgAspect))) : 42)
+    : 0
+  const textPct     = hasRefImg ? 100 - imgPanelPct : 100
+  const textStyle   = hasRefImg ? { width: `${textPct}%` } : undefined
 
   return (
     <div
@@ -1048,19 +1066,20 @@ function ContentSlideView({ slide }: { slide: ContentSlide }) {
         </>
       )}
 
-      {/* Reference layout — image on right, object-contain so nothing is cropped.
-          No vertical padding so portrait images touch top-to-bottom like question slides. */}
-      {slide.imgUrl && (slide.imgLayout === 'reference' || slide.imgLayout === 'right') && (
+      {/* Reference layout — image on right, panel width tracks the image aspect
+          ratio so there's no empty gap beside a portrait image. */}
+      {hasRefImg && (
         <motion.div
           initial={{ opacity: 0, x: 30 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
-          className="absolute right-0 top-0 z-20 h-full w-[42%] overflow-hidden"
+          className="absolute right-0 top-0 z-20 h-full overflow-hidden"
+          style={{ width: `${imgPanelPct}%` }}
         >
           <img
             src={slide.imgUrl}
             alt=""
-            className="absolute inset-0 h-full w-full object-contain object-right pl-3"
+            className="absolute inset-0 h-full w-full object-contain object-right"
           />
         </motion.div>
       )}
@@ -1079,18 +1098,20 @@ function ContentSlideView({ slide }: { slide: ContentSlide }) {
 
       {/* ── Heading template ─────────────────────────────── */}
       {slide.template === 'heading' && (
-        <div className={cn(
-          'relative z-10 flex h-full flex-col items-center justify-center text-center',
-          hasRefImg ? 'w-[58%] pl-16 pr-4' : 'w-full px-16',
-        )}>
+        <div
+          className={cn(
+            'relative z-10 flex h-full flex-col items-center justify-center text-center',
+            hasRefImg ? 'pl-16 pr-4' : 'w-full px-20',
+          )}
+          style={textStyle}
+        >
           <h1
             className={cn(
               'w-full break-words font-bold leading-tight tracking-tight',
-              !hasRefImg && 'max-w-5xl',
-              (slide.title?.length ?? 0) > 100 ? 'text-2xl xl:text-3xl 2xl:text-4xl'
-                : (slide.title?.length ?? 0) > 60 ? 'text-3xl xl:text-4xl 2xl:text-5xl'
-                : (slide.title?.length ?? 0) > 30 ? 'text-4xl xl:text-5xl 2xl:text-6xl'
-                : 'text-5xl xl:text-6xl 2xl:text-7xl',
+              (slide.title?.length ?? 0) > 100 ? 'text-3xl xl:text-4xl 2xl:text-5xl'
+                : (slide.title?.length ?? 0) > 60 ? 'text-4xl xl:text-5xl 2xl:text-6xl'
+                : (slide.title?.length ?? 0) > 30 ? 'text-5xl xl:text-6xl 2xl:text-7xl'
+                : 'text-6xl xl:text-7xl 2xl:text-8xl',
             )}
             style={{ color: c.text }}
           >
@@ -1099,12 +1120,11 @@ function ContentSlideView({ slide }: { slide: ContentSlide }) {
           {slide.body && (
             <p
               className={cn(
-                'mt-6 w-full break-words font-light leading-relaxed text-justify',
-                !hasRefImg && 'max-w-3xl',
-                (slide.body?.length ?? 0) > 400 ? 'text-base xl:text-lg'
-                  : (slide.body?.length ?? 0) > 200 ? 'text-lg xl:text-xl'
-                  : (slide.body?.length ?? 0) > 80  ? 'text-xl xl:text-2xl'
-                  : 'text-2xl xl:text-3xl',
+                'mt-6 w-full break-words font-light leading-relaxed [text-align:justify] [text-align-last:center]',
+                (slide.body?.length ?? 0) > 400 ? 'text-lg xl:text-xl'
+                  : (slide.body?.length ?? 0) > 200 ? 'text-xl xl:text-2xl'
+                  : (slide.body?.length ?? 0) > 80  ? 'text-2xl xl:text-3xl'
+                  : 'text-3xl xl:text-4xl',
               )}
               style={{ color: c.textDim }}
             >
@@ -1141,11 +1161,14 @@ function ContentSlideView({ slide }: { slide: ContentSlide }) {
           totalLen > 350 || bCount > 3 ? 'mt-1.5 size-2 shrink-0 rounded-full'
           : 'mt-2.5 size-2.5 shrink-0 rounded-full'
         return (
-          <div className={cn(
-            // overflow-x-hidden clips any text that reaches the image panel edge
-            'relative z-10 flex h-full flex-col justify-center overflow-x-hidden py-14',
-            hasRefImg ? 'w-[58%] pl-16 pr-4' : 'w-full px-16',
-          )}>
+          <div
+            className={cn(
+              // overflow-x-hidden clips any text that reaches the image panel edge
+              'relative z-10 flex h-full flex-col justify-center overflow-x-hidden py-14',
+              hasRefImg ? 'pl-16 pr-6' : 'w-full px-16',
+            )}
+            style={textStyle}
+          >
             {slide.title && (
               <h2
                 className={cn('mb-6 font-bold tracking-tight', titleTextCls)}
@@ -1188,10 +1211,13 @@ function ContentSlideView({ slide }: { slide: ContentSlide }) {
       {slide.template === 'quote' && (() => {
         const bodyLen = (slide.body ?? '').length
         return (
-          <div className={cn(
-            'relative z-10 flex h-full flex-col items-center justify-center text-center',
-            hasRefImg ? 'w-[58%] pl-20 pr-4' : 'w-full px-20',
-          )}>
+          <div
+            className={cn(
+              'relative z-10 flex h-full flex-col items-center justify-center text-center',
+              hasRefImg ? 'pl-20 pr-6' : 'w-full px-20',
+            )}
+            style={textStyle}
+          >
             {/* Big decorative " */}
             <div
               className="pointer-events-none absolute left-10 top-6 select-none font-serif text-[11rem] leading-none"
