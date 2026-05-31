@@ -2786,6 +2786,14 @@ function ContentSlidePreview({ slide }: { slide: ContentSlide }) {
   const bullets = slide.body.split('\n').filter(b => b.trim())
   const hasContent = !!(slide.title || slide.body || slide.attribution)
 
+  // Mirror the slideshow's image layouts so the editor preview is faithful.
+  const layout    = slide.imgLayout ?? 'reference'
+  const hasBgImg  = !!(slide.imgUrl && layout === 'background')
+  const hasRefImg = !!(slide.imgUrl && (layout === 'reference' || layout === 'right'))
+  const hasTopImg = !!(slide.imgUrl && (layout === 'top' || (!slide.imgLayout && slide.imgUrl)))
+  // Reserve the right ~42% for the reference image; text fills the left side.
+  const padX = hasRefImg ? 'pl-8 pr-[44%]' : 'px-8'
+
   return (
     <div
       className="relative aspect-video w-full overflow-hidden rounded-xl"
@@ -2802,23 +2810,45 @@ function ContentSlidePreview({ slide }: { slide: ContentSlide }) {
         />
       )}
 
+      {/* Background image — full-bleed with colour wash */}
+      {hasBgImg && (
+        <>
+          <img src={slide.imgUrl} alt="" className="absolute inset-0 z-0 h-full w-full object-cover" />
+          {slide.theme !== 'transparent' && (
+            <div className="absolute inset-0 z-0" style={{ backgroundColor: `${c.bg}cc` }} />
+          )}
+        </>
+      )}
+
+      {/* Reference image — right panel, object-contain (matches slideshow) */}
+      {hasRefImg && (
+        <div className="absolute right-0 top-0 z-20 h-full w-[42%] overflow-hidden">
+          <img src={slide.imgUrl} alt="" className="absolute inset-0 h-full w-full object-contain object-right" />
+        </div>
+      )}
+
+      {/* Top image — small floated corner thumbnail */}
+      {hasTopImg && (
+        <img src={slide.imgUrl} alt="" className="absolute right-2 top-2 z-20 h-12 max-w-[40%] rounded-lg object-cover shadow" />
+      )}
+
       {!hasContent ? (
         <div className="flex h-full items-center justify-center">
           <p className="text-xs" style={{ color: c.textDim }}>Preview appears here…</p>
         </div>
       ) : slide.template === 'heading' ? (
-        <div className="flex h-full flex-col items-center justify-center px-8 text-center">
-          <p className="text-lg font-bold leading-tight line-clamp-2" style={{ color: c.text }}>
+        <div className={cn('relative z-10 flex h-full flex-col items-center justify-center text-center', padX)}>
+          <p className="text-lg font-bold leading-tight line-clamp-3" style={{ color: c.text }}>
             {slide.title || <span style={{ opacity: 0.35 }}>Untitled</span>}
           </p>
           {slide.body && (
-            <p className="mt-2 text-sm font-light line-clamp-2" style={{ color: c.textDim }}>
+            <p className="mt-2 text-sm font-light line-clamp-3" style={{ color: c.textDim }}>
               {slide.body}
             </p>
           )}
         </div>
       ) : slide.template === 'bullets' ? (
-        <div className="flex h-full flex-col justify-center px-8 py-5">
+        <div className={cn('relative z-10 flex h-full flex-col justify-center py-5', padX)}>
           {slide.title && (
             <p className="mb-2.5 text-sm font-bold line-clamp-1" style={{ color: c.text }}>{slide.title}</p>
           )}
@@ -2826,7 +2856,7 @@ function ContentSlidePreview({ slide }: { slide: ContentSlide }) {
             {bullets.slice(0, 5).map((b, i) => (
               <li key={i} className="flex items-start gap-2">
                 <span className="mt-1.5 size-1.5 shrink-0 rounded-full" style={{ backgroundColor: c.accent }} />
-                <span className="text-[11px] leading-snug line-clamp-1" style={{ color: c.text }}>{b}</span>
+                <span className="text-[11px] leading-snug line-clamp-2" style={{ color: c.text }}>{b}</span>
               </li>
             ))}
             {bullets.length > 5 && (
@@ -2835,7 +2865,7 @@ function ContentSlidePreview({ slide }: { slide: ContentSlide }) {
           </ul>
         </div>
       ) : (
-        <div className="flex h-full flex-col items-center justify-center px-8 text-center">
+        <div className={cn('relative z-10 flex h-full flex-col items-center justify-center text-center', padX)}>
           <div
             className="pointer-events-none absolute left-3 top-1 select-none font-serif text-5xl leading-none"
             style={{ color: c.quoteMark }}
@@ -2848,7 +2878,7 @@ function ContentSlidePreview({ slide }: { slide: ContentSlide }) {
               {slide.title}
             </p>
           )}
-          <p className="relative z-10 text-xs leading-relaxed line-clamp-3" style={{ color: c.text }}>
+          <p className="relative z-10 text-xs leading-relaxed line-clamp-4" style={{ color: c.text }}>
             {slide.body || <span style={{ opacity: 0.35 }}>Quote text…</span>}
           </p>
           {slide.attribution && (
@@ -2858,7 +2888,7 @@ function ContentSlidePreview({ slide }: { slide: ContentSlide }) {
       )}
 
       {/* Watermark */}
-      <div className="absolute bottom-2 right-2.5">
+      <div className="absolute bottom-2 right-2.5 z-30">
         <span className="text-[8px] font-bold tracking-tight" style={{ color: c.textDim, opacity: 0.45 }}>
           alaya <span style={{ color: c.accent }}>pulse</span>
         </span>
