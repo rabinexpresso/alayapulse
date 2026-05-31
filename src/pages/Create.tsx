@@ -86,6 +86,30 @@ async function toCloudinarySlides(slides: Slide[]): Promise<Slide[]> {
       if (slide.type === 'video') {
         return { ...slide, videoUrl: '' }
       }
+      // Canvas (custom) slides — each image element stores a base64 imgUrl.
+      // Walk every element and upload any data URLs to Cloudinary.
+      if (slide.type === 'canvas') {
+        const cs = slide as CanvasSlide
+        const newElements = await Promise.all(
+          cs.elements.map(async el => {
+            if (el.kind === 'image' && el.imgUrl.startsWith('data:')) {
+              const cloudUrl = await uploadToCloudinary(el.imgUrl)
+              return { ...el, imgUrl: cloudUrl }
+            }
+            return el
+          }),
+        )
+        return { ...cs, elements: newElements } as CanvasSlide
+      }
+      // Question slides + content slides — may have a reference/background imgUrl.
+      // If it's still a base64 data URL (not yet uploaded), push it to Cloudinary now
+      // so we store a short https:// URL in Firestore rather than a huge blob.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const s = slide as any
+      if (s.imgUrl && typeof s.imgUrl === 'string' && s.imgUrl.startsWith('data:')) {
+        const cloudUrl = await uploadToCloudinary(s.imgUrl)
+        return { ...slide, imgUrl: cloudUrl }
+      }
       return slide
     }),
   )
@@ -185,7 +209,7 @@ interface ContentSlide {
   attribution: string  // quote attribution only
   theme: string
   imgUrl?:    string
-  imgLayout?: 'top' | 'right' | 'background'
+  imgLayout?: 'top' | 'right' | 'background' | 'reference'
 }
 /* ── Canvas slide types ───────────────────────────────────────────── */
 type CanvasBgType = 'color' | 'gradient'
@@ -2869,22 +2893,23 @@ function ContentEditor({ slide, onUpdate }: {
               <label className="mb-2 block text-[11px] font-semibold text-midnight-sky-600">
                 Slide image <span className="font-light">(optional)</span>
               </label>
-              <SlideImagePicker imgUrl={slide.imgUrl} onChange={url => onUpdate({ imgUrl: url, imgLayout: url ? (slide.imgLayout ?? 'right') : undefined })} />
+              <SlideImagePicker imgUrl={slide.imgUrl} onChange={url => onUpdate({ imgUrl: url, imgLayout: url ? (slide.imgLayout ?? 'reference') : undefined })} />
               {slide.imgUrl && (
                 <div className="mt-3 flex items-center gap-1">
-                  <span className="mr-1 text-[10px] font-medium text-midnight-sky-400">Position:</span>
-                  {(['right', 'top', 'background'] as const).map(layout => (
+                  <span className="mr-1 text-[10px] font-medium text-midnight-sky-400">Display:</span>
+                  {(['reference', 'background'] as const).map(opt => (
                     <button
-                      key={layout}
-                      onClick={() => onUpdate({ imgLayout: layout })}
+                      key={opt}
+                      onClick={() => onUpdate({ imgLayout: opt })}
                       className={cn(
                         'rounded-md px-2.5 py-1 text-[10px] font-medium transition-all',
-                        (slide.imgLayout ?? 'right') === layout
+                        // treat legacy 'top'/'right' as 'reference' for highlight purposes
+                        (['reference', 'top', 'right'].includes(slide.imgLayout ?? 'reference') ? 'reference' : slide.imgLayout) === opt
                           ? 'bg-midnight-sky-900 text-white'
                           : 'bg-midnight-sky-100 text-midnight-sky-500 hover:bg-midnight-sky-200',
                       )}
                     >
-                      {layout === 'right' ? 'Side' : layout === 'top' ? 'Above' : 'Background'}
+                      {opt === 'reference' ? 'Reference' : 'Background'}
                     </button>
                   ))}
                 </div>

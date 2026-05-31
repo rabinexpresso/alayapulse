@@ -54,7 +54,7 @@ interface ContentSlide {
   attribution: string
   theme:       string
   imgUrl?:     string
-  imgLayout?:  'top' | 'right' | 'background'
+  imgLayout?:  'top' | 'right' | 'background' | 'reference'
 }
 
 interface ImageSlide {
@@ -404,6 +404,7 @@ export default function Present() {
     return () => window.removeEventListener('keydown', h)
   }, [goNext, goPrev, navigate])
 
+
   const canGoPrev     = !(current === 0 && !(isQuestion && phase === 'results'))
   const canGoNext     = !(current === deck.length - 1 && (!isQuestion || phase === 'results'))
   const responseCount = responses.length
@@ -449,7 +450,7 @@ export default function Present() {
   }, [currentHtmlGroupKey, mountedHtmlGroups])
 
   return (
-    <div className="relative h-screen overflow-hidden bg-midnight-sky-900 text-white">
+    <div className="fixed inset-0 overflow-hidden bg-midnight-sky-900 text-white">
 
       {/* Gradient orbs */}
       <div aria-hidden className="pointer-events-none fixed inset-0 z-0">
@@ -1045,20 +1046,24 @@ function ContentSlideView({ slide }: { slide: ContentSlide }) {
         </>
       )}
 
-      {/* Side layout — image on right (absolute, fills right 40%) */}
-      {slide.imgUrl && slide.imgLayout === 'right' && (
-        <motion.img
-          src={slide.imgUrl}
-          alt=""
+      {/* Reference layout — image on right, object-contain so nothing is cropped.
+          No vertical padding so portrait images touch top-to-bottom like question slides. */}
+      {slide.imgUrl && (slide.imgLayout === 'reference' || slide.imgLayout === 'right') && (
+        <motion.div
           initial={{ opacity: 0, x: 30 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
-          className="absolute right-0 top-0 z-20 h-full w-[40%] object-cover"
-          style={{ borderRadius: '0 0 0 2rem' }}
-        />
+          className="absolute right-0 top-0 z-20 h-full w-[42%] overflow-hidden"
+        >
+          <img
+            src={slide.imgUrl}
+            alt=""
+            className="absolute inset-0 h-full w-full object-contain object-right pl-3"
+          />
+        </motion.div>
       )}
 
-      {/* Top layout — image floated top-right corner */}
+      {/* Top layout — image floated top-right corner (legacy) */}
       {slide.imgUrl && (!slide.imgLayout || slide.imgLayout === 'top') && (
         <motion.img
           src={slide.imgUrl}
@@ -1074,7 +1079,7 @@ function ContentSlideView({ slide }: { slide: ContentSlide }) {
       {slide.template === 'heading' && (
         <div className={cn(
           'relative z-10 flex h-full w-full flex-col items-center justify-center text-center',
-          slide.imgUrl && slide.imgLayout === 'right' ? 'px-16 pr-[44%]' : 'px-16',
+          slide.imgUrl && (slide.imgLayout === 'right' || slide.imgLayout === 'reference') ? 'pl-16 pr-[43%]' : 'px-16',
         )}>
           <h1
             className="max-w-5xl text-5xl font-bold leading-tight tracking-tight xl:text-6xl 2xl:text-7xl"
@@ -1094,7 +1099,7 @@ function ContentSlideView({ slide }: { slide: ContentSlide }) {
       {slide.template === 'bullets' && (
         <div className={cn(
           'relative z-10 flex h-full w-full flex-col justify-center py-14',
-          slide.imgUrl && slide.imgLayout === 'right' ? 'px-16 pr-[44%]' : 'px-16',
+          slide.imgUrl && (slide.imgLayout === 'right' || slide.imgLayout === 'reference') ? 'pl-16 pr-[43%]' : 'px-16',
         )}>
           {slide.title && (
             <h2 className="mb-8 text-3xl font-bold tracking-tight xl:text-4xl" style={{ color: c.text }}>
@@ -1116,7 +1121,7 @@ function ContentSlideView({ slide }: { slide: ContentSlide }) {
                       style={{ backgroundColor: c.accent }}
                     />
                     <span
-                      className="text-xl font-medium leading-relaxed xl:text-2xl"
+                      className="min-w-0 flex-1 break-words text-xl font-medium leading-relaxed xl:text-2xl"
                       style={{ color: c.text }}
                     >
                       {b}
@@ -1134,39 +1139,55 @@ function ContentSlideView({ slide }: { slide: ContentSlide }) {
       )}
 
       {/* ── Quote template ────────────────────────────────── */}
-      {slide.template === 'quote' && (
-        <div className="relative z-10 flex h-full w-full flex-col items-center justify-center px-20 text-center">
-          {/* Big decorative " */}
-          <div
-            className="pointer-events-none absolute left-10 top-6 select-none font-serif text-[11rem] leading-none"
-            style={{ color: c.quoteMark }}
-            aria-hidden
-          >
-            &#8220;
-          </div>
-          {slide.title && (
-            <p
-              className="mb-6 text-xs font-bold uppercase tracking-[0.2em]"
-              style={{ color: c.accent }}
+      {slide.template === 'quote' && (() => {
+        const hasRefImg = !!(slide.imgUrl && (slide.imgLayout === 'right' || slide.imgLayout === 'reference'))
+        const bodyLen   = (slide.body ?? '').length
+        return (
+          <div className={cn(
+            'relative z-10 flex h-full w-full flex-col items-center justify-center text-center',
+            hasRefImg ? 'pl-20 pr-[43%]' : 'px-20',
+          )}>
+            {/* Big decorative " */}
+            <div
+              className="pointer-events-none absolute left-10 top-6 select-none font-serif text-[11rem] leading-none"
+              style={{ color: c.quoteMark }}
+              aria-hidden
             >
-              {slide.title}
-            </p>
-          )}
-          <blockquote
-            className="relative z-10 max-w-4xl text-3xl font-light leading-relaxed xl:text-4xl"
-            style={{ color: c.text }}
-          >
-            {slide.body || (
-              <span style={{ opacity: 0.28 }}>Quote text appears here…</span>
+              &#8220;
+            </div>
+            {slide.title && (
+              <p
+                className="mb-6 text-xs font-bold uppercase tracking-[0.2em]"
+                style={{ color: c.accent }}
+              >
+                {slide.title}
+              </p>
             )}
-          </blockquote>
-          {slide.attribution && (
-            <p className="mt-8 text-lg tracking-wide" style={{ color: c.textDim }}>
-              &mdash;&nbsp;{slide.attribution}
-            </p>
-          )}
-        </div>
-      )}
+            {/* w-full fills the padded area; overflowWrap:anywhere breaks long URLs;
+                font shrinks automatically for longer quotes */}
+            <blockquote
+              className={cn(
+                'relative z-10 font-light leading-relaxed',
+                hasRefImg ? 'w-full' : 'max-w-4xl',
+                bodyLen > 400 ? 'text-lg xl:text-xl'
+                  : bodyLen > 200 ? 'text-xl xl:text-2xl'
+                  : bodyLen > 100 ? 'text-2xl xl:text-3xl'
+                  : 'text-3xl xl:text-4xl',
+              )}
+              style={{ color: c.text, overflowWrap: 'anywhere' }}
+            >
+              {slide.body || (
+                <span style={{ opacity: 0.28 }}>Quote text appears here…</span>
+              )}
+            </blockquote>
+            {slide.attribution && (
+              <p className="mt-8 text-lg tracking-wide" style={{ color: c.textDim }}>
+                &mdash;&nbsp;{slide.attribution}
+              </p>
+            )}
+          </div>
+        )
+      })()}
 
       {/* Subtle branding watermark */}
       <div className="absolute bottom-4 right-5 z-10">
@@ -1460,7 +1481,7 @@ function QuestionSlideView({
             </motion.span>
             <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
-              className={cn('mt-6 max-h-[22vh] overflow-y-auto font-semibold leading-snug tracking-tight', slide.question.length > 400 ? 'text-base md:text-lg' : slide.question.length > 200 ? 'text-lg md:text-xl' : slide.question.length > 80 ? 'text-xl md:text-2xl' : 'text-2xl md:text-3xl')}
+              className={cn('mt-6 font-semibold leading-snug tracking-tight', slide.question.length > 600 ? 'text-sm md:text-base' : slide.question.length > 400 ? 'text-base md:text-lg' : slide.question.length > 200 ? 'text-lg md:text-xl' : slide.question.length > 80 ? 'text-xl md:text-2xl' : 'text-2xl md:text-3xl')}
               style={{ color: c.fg }}
             >
               {slide.question}
@@ -1501,7 +1522,7 @@ function QuestionSlideView({
             </motion.span>
             <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
-              className={cn('mt-5 max-h-[22vh] overflow-y-auto font-semibold leading-snug tracking-tight', slide.question.length > 400 ? 'text-sm md:text-base' : slide.question.length > 200 ? 'text-base md:text-lg' : slide.question.length > 80 ? 'text-lg md:text-xl' : 'text-xl md:text-2xl')}
+              className={cn('mt-5 font-semibold leading-snug tracking-tight', slide.question.length > 600 ? 'text-xs md:text-sm' : slide.question.length > 400 ? 'text-sm md:text-base' : slide.question.length > 200 ? 'text-base md:text-lg' : slide.question.length > 80 ? 'text-lg md:text-xl' : 'text-xl md:text-2xl')}
               style={{ color: c.fg }}
             >
               {slide.question}
@@ -1542,7 +1563,7 @@ function QuestionSlideView({
         </motion.span>
         <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
-          className={cn('mt-6 max-h-[22vh] overflow-y-auto font-semibold leading-snug tracking-tight', slide.question.length > 400 ? 'text-base md:text-lg' : slide.question.length > 200 ? 'text-lg md:text-xl' : slide.question.length > 80 ? 'text-xl md:text-2xl' : 'text-2xl md:text-3xl')}
+          className={cn('mt-6 font-semibold leading-snug tracking-tight', slide.question.length > 600 ? 'text-sm md:text-base' : slide.question.length > 400 ? 'text-base md:text-lg' : slide.question.length > 200 ? 'text-lg md:text-xl' : slide.question.length > 80 ? 'text-xl md:text-2xl' : 'text-2xl md:text-3xl')}
           style={{ color: c.fg }}
         >
           {slide.question}
@@ -1589,7 +1610,7 @@ function ResultsSlideView({
   // Word cloud is exempt — it floats directly on the slide bg with its own palette.
   const needsDarkPanel = (slide.theme ?? 'navy') !== 'navy' && slide.type !== 'wordcloud'
 
-  const vizWrap = needsDarkPanel && slide.type !== 'openended'
+  const vizWrap = needsDarkPanel && slide.type !== 'openended' && slide.type !== 'rating'
     ? 'mt-6 flex-1 overflow-y-auto rounded-2xl bg-midnight-sky-900/95 px-8 py-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
     : slide.type === 'wordcloud'
       ? 'mt-2 flex-1 min-h-0 overflow-hidden'
@@ -1609,7 +1630,7 @@ function ResultsSlideView({
           Results live
         </span>
         <h2
-          className={cn('flex-1 font-semibold', slide.question.length > 400 ? 'text-xs md:text-sm' : slide.question.length > 200 ? 'text-sm md:text-base' : slide.question.length > 80 ? 'text-base md:text-lg' : 'text-xl md:text-2xl')}
+          className={cn('flex-1 font-semibold', slide.question.length > 600 ? 'text-[11px] md:text-xs' : slide.question.length > 400 ? 'text-xs md:text-sm' : slide.question.length > 200 ? 'text-sm md:text-base' : slide.question.length > 80 ? 'text-base md:text-lg' : 'text-xl md:text-2xl')}
           style={{ color: c.fg }}
         >
           {slide.question}
@@ -1664,6 +1685,7 @@ function ResultsSlideView({
               ratingMax={ratingMax}
               leftLabels={lefts}
               rightLabels={rights}
+              darkBg={needsDarkPanel}
             />
           )
         })()}
@@ -1704,9 +1726,11 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
   const total = respondentCount ?? votes.reduce((s, v) => s + v, 0)
   const maxV  = Math.max(...votes, 1)
   const corrSet = new Set(correctAnswers ?? [])
+  // Compact layout when there are many options so all fit without scrolling
+  const dense = options.length >= 5
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className={cn('flex flex-col', dense ? 'gap-2' : 'gap-5')}>
       {options.map((opt, i) => {
         const v          = votes[i] ?? 0
         const pct        = total > 0 ? Math.round((v / total) * 100) : 0
@@ -1719,32 +1743,35 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: isWrong ? 0.28 : 1, x: 0 }}
             transition={{ delay: i * 0.08, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-            className="flex flex-col gap-2"
+            className={cn('flex flex-col', dense ? 'gap-1' : 'gap-2')}
           >
             {/* Row 1: badge + full-width label + percentage */}
-            <div className="flex items-start gap-4">
+            <div className={cn('flex items-center', dense ? 'gap-3' : 'gap-4')}>
               <span className={cn(
-                'flex size-10 shrink-0 items-center justify-center rounded-xl text-sm font-bold',
+                'flex shrink-0 items-center justify-center rounded-xl font-bold',
+                dense ? 'size-8 text-xs' : 'size-10 text-sm',
                 isCorrect ? 'bg-fresh-green text-white' : isWinner ? 'bg-hot-pink text-white' : 'bg-white/10 text-white/50',
               )}>
-                {isCorrect ? <Check className="size-5" strokeWidth={2.5} /> : String.fromCharCode(65 + i)}
+                {isCorrect ? <Check className={dense ? 'size-4' : 'size-5'} strokeWidth={2.5} /> : String.fromCharCode(65 + i)}
               </span>
               <span className={cn(
-                'min-w-0 flex-1 break-words text-base font-medium leading-snug',
+                'min-w-0 flex-1 break-words font-medium leading-snug',
+                dense ? 'text-sm' : 'text-base',
                 isCorrect ? 'text-fresh-green' : isWinner ? 'text-white' : 'text-white/65',
               )}>
                 {opt}
               </span>
               <span className={cn(
-                'shrink-0 text-right text-2xl font-bold tabular-nums',
+                'shrink-0 text-right font-bold tabular-nums',
+                dense ? 'text-xl' : 'text-2xl',
                 isCorrect ? 'text-fresh-green' : isWinner ? 'text-hot-pink' : 'text-white/50',
               )}>
                 {pct}%
               </span>
             </div>
             {/* Row 2: bar indented to align under the label text */}
-            <div className="pl-14">
-              <div className="relative h-7 overflow-hidden rounded-xl bg-white/10">
+            <div className={dense ? 'pl-11' : 'pl-14'}>
+              <div className={cn('relative overflow-hidden rounded-xl bg-white/10', dense ? 'h-[10px]' : 'h-7')}>
                 <motion.div
                   className={cn(
                     'absolute inset-y-0 left-0 rounded-xl',
@@ -2073,27 +2100,37 @@ function layoutWordCloud(
     // Starting at r=0 (centre) for every word produces a compact cloud where
     // each word fills the nearest open slot, radiating outward — like Mentimeter.
     // Golden-angle direction offset (idx × 137.5°) distributes words evenly.
-    const { w, h } = measureWord(word.text, size, weight)
+    // If placement fails at the original size, retry with progressively smaller
+    // font until the word fits or drops below minF.
     const gap = 10
 
-    for (let step = 0; step < 3000; step++) {
-      const t  = step * 0.25 + idx * 2.39996   // golden-angle direction per word
-      const r  = 0.30 * step                    // slow expansion → dense, compact cloud
-      const x  = cx + r * Math.cos(t)
-      const y  = cy + r * Math.sin(t) * 0.75   // slight vertical flatten
-      const x1 = x - w / 2, y1 = y - h / 2
-      const x2 = x + w / 2, y2 = y + h / 2
+    for (let attempt = 0; attempt <= 4; attempt++) {
+      const s = Math.max(minF, size - attempt * 6)
+      const { w, h } = measureWord(word.text, s, weight)
+      let placed_ = false
 
-      if (x1 < 16 || y1 < 16 || x2 > cw - 16 || y2 > ch - 16) continue
+      for (let step = 0; step < 3000; step++) {
+        const t  = step * 0.25 + idx * 2.39996   // golden-angle direction per word
+        const r  = 0.30 * step                    // slow expansion → dense, compact cloud
+        const x  = cx + r * Math.cos(t)
+        const y  = cy + r * Math.sin(t) * 0.75   // slight vertical flatten
+        const x1 = x - w / 2, y1 = y - h / 2
+        const x2 = x + w / 2, y2 = y + h / 2
 
-      if (placed.some(p =>
-        x2 + gap > p.x1 && x1 - gap < p.x2 &&
-        y2 + gap > p.y1 && y1 - gap < p.y2,
-      )) continue
+        if (x1 < 16 || y1 < 16 || x2 > cw - 16 || y2 > ch - 16) continue
 
-      placed.push({ x1, y1, x2, y2 })
-      result.push({ text: word.text, x, y, fontSize: size, fontWeight: weight, color, isTop })
-      return
+        if (placed.some(p =>
+          x2 + gap > p.x1 && x1 - gap < p.x2 &&
+          y2 + gap > p.y1 && y1 - gap < p.y2,
+        )) continue
+
+        placed.push({ x1, y1, x2, y2 })
+        result.push({ text: word.text, x, y, fontSize: s, fontWeight: weight, color, isTop })
+        placed_ = true
+        break
+      }
+      if (placed_) break
+      if (s <= minF) break   // already at minimum — give up
     }
   })
 
@@ -2310,13 +2347,14 @@ function rankOrdinal(rank: number): string {
 }
 const RANK_BADGE_STYLE = { bg: 'bg-golden-sun/25', text: 'text-golden-sun', border: 'border-golden-sun/40' }
 
-function RatingResults({ params, avgs, distributions, ratingMax = 5, leftLabels = [], rightLabels = [] }: {
+function RatingResults({ params, avgs, distributions, ratingMax = 5, leftLabels = [], rightLabels = [], darkBg = false }: {
   params:        string[]
   avgs:          number[]
   distributions: number[][]
   ratingMax?:    number
   leftLabels?:   string[]
   rightLabels?:  string[]
+  darkBg?:       boolean
 }) {
   const dense = params.length >= 4
 
@@ -2324,7 +2362,7 @@ function RatingResults({ params, avgs, distributions, ratingMax = 5, leftLabels 
   const order = params.map((_, i) => i).sort((a, b) => (avgs[b] ?? 0) - (avgs[a] ?? 0))
 
   return (
-    <div className={cn('flex flex-col', dense ? 'gap-2.5' : 'gap-3.5')}>
+    <div className={cn('flex flex-col', dense ? 'gap-1' : 'gap-3.5')}>
       {order.map((idx, rank) => (
         <RatingRow
           key={idx}
@@ -2333,6 +2371,7 @@ function RatingResults({ params, avgs, distributions, ratingMax = 5, leftLabels 
           dist={distributions[idx] ?? Array(ratingMax + 1).fill(0)}
           ratingMax={ratingMax}
           dense={dense}
+          darkBg={darkBg}
           leftLabel ={leftLabels[idx]  ?? ''}
           rightLabel={rightLabels[idx] ?? ''}
           delay={rank * 0.13}
@@ -2355,16 +2394,17 @@ function ratingBarColor(bucketIdx: number, total: number): string {
   return 'rgba(255,255,255,0.20)'
 }
 
-function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, leftLabel, rightLabel, delay, rank }: {
+function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, darkBg = false, leftLabel, rightLabel, delay, rank }: {
   label: string; avg: number; dist: number[]; ratingMax?: number
   dense?: boolean
+  darkBg?: boolean
   leftLabel?: string; rightLabel?: string
   delay: number
   rank?: number
 }) {
   const displayed  = useCountUp(Math.round(avg * 10), 950) / 10
   const maxCount   = Math.max(...dist, 1)
-  const BAR_MAX_PX = dense ? 26 : 36
+  const BAR_MAX_PX = dense ? 12 : 36
   const hasEndLabels = !!leftLabel || !!rightLabel
   const badge = rank !== undefined ? { ...RANK_BADGE_STYLE, label: rankOrdinal(rank) } : null
 
@@ -2375,35 +2415,38 @@ function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, leftLabel, 
       transition={{ duration: 0.5, delay, ease: [0.16, 1, 0.3, 1] }}
       className={cn(
         'rounded-2xl border backdrop-blur-sm',
-        rank === 0 ? 'border-golden-sun/30 bg-golden-sun/5' : 'border-white/10 bg-white/5',
-        dense ? 'px-5 py-3' : 'px-6 py-4',
+        darkBg
+          ? (rank === 0 ? 'border-golden-sun/30 bg-midnight-sky-900/75' : 'border-midnight-sky-700/60 bg-midnight-sky-900/65')
+          : (rank === 0 ? 'border-golden-sun/30 bg-golden-sun/5'        : 'border-white/10 bg-white/5'),
+        dense ? 'px-3 py-1.5' : 'px-6 py-4',
       )}
     >
       {/* Top row: rank badge + parameter label + animated average */}
-      <div className={cn('flex items-center justify-between gap-4', dense ? 'mb-2.5' : 'mb-3')}>
-        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+      <div className={cn('flex items-center justify-between gap-3', dense ? 'mb-1' : 'mb-3')}>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           {badge && (
             <span className={cn(
-              'shrink-0 rounded-lg border px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide',
+              'shrink-0 rounded-md border font-bold uppercase tracking-wide',
+              dense ? 'px-1.5 py-px text-[10px]' : 'px-2 py-0.5 text-[11px]',
               badge.bg, badge.text, badge.border,
             )}>
               {badge.label}
             </span>
           )}
-          <span className={cn('min-w-0 truncate font-semibold text-white', dense ? 'text-lg md:text-xl' : 'text-xl md:text-2xl')}>
+          <span className={cn('min-w-0 truncate font-semibold text-white', dense ? 'text-sm' : 'text-xl md:text-2xl')}>
             {label}
           </span>
         </div>
-        <div className="flex items-baseline gap-1">
+        <div className="flex items-baseline gap-0.5">
           <span className={cn(
             'font-extrabold tabular-nums text-hot-pink',
-            dense ? 'text-3xl md:text-4xl' : 'text-4xl md:text-5xl',
+            dense ? 'text-xl' : 'text-4xl md:text-5xl',
           )}>
             {displayed.toFixed(1)}
           </span>
           <span className={cn(
             'font-semibold text-white/70',
-            dense ? 'text-base md:text-lg' : 'text-xl md:text-2xl',
+            dense ? 'text-xs' : 'text-xl md:text-2xl',
           )}>/{ratingMax}</span>
         </div>
       </div>
@@ -2411,7 +2454,7 @@ function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, leftLabel, 
       {/* Distribution mini-histogram — one bar per scale value (0..N).
           Each bar carries an explicit count label above so the presenter
           can see "2 voted 10, 1 voted 0" at a glance. */}
-      <div className="flex items-end gap-1" style={{ height: BAR_MAX_PX + 30 }}>
+      <div className="flex items-end gap-1" style={{ height: BAR_MAX_PX + (dense ? 18 : 30) }}>
         {dist.map((count, bucketIdx) => {
           const barH = count > 0 ? Math.max((count / maxCount) * BAR_MAX_PX, 3) : 0
           return (
@@ -2423,7 +2466,7 @@ function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, leftLabel, 
                 initial={{ opacity: 0, y: -4 }}
                 animate={{ opacity: count > 0 ? 1 : 0, y: 0 }}
                 transition={{ duration: 0.25, delay: delay + bucketIdx * 0.04 + 0.5 }}
-                className={cn('text-[11px] font-bold tabular-nums', count > 0 ? 'text-white' : 'text-transparent')}
+                className={cn('font-bold tabular-nums', dense ? 'text-[9px]' : 'text-[11px]', count > 0 ? 'text-white' : 'text-transparent')}
               >
                 {count > 0 ? count : ''}
               </motion.span>
@@ -2436,7 +2479,7 @@ function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, leftLabel, 
                   transition={{ duration: 0.7, delay: delay + bucketIdx * 0.04, ease: [0.16, 1, 0.3, 1] }}
                 />
               </div>
-              <span className={cn('text-[10px] font-medium tabular-nums', count > 0 ? 'text-white/75' : 'text-white/40')}>{bucketIdx}</span>
+              <span className={cn('font-medium tabular-nums', dense ? 'text-[9px]' : 'text-[10px]', count > 0 ? 'text-white/75' : 'text-white/40')}>{bucketIdx}</span>
             </div>
           )
         })}
@@ -2444,7 +2487,7 @@ function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, leftLabel, 
 
       {/* Anchor labels at the ends of the scale (Mentimeter-style) */}
       {hasEndLabels && (
-        <div className="mt-1 flex justify-between text-[10px] font-semibold uppercase tracking-wider text-white/55">
+        <div className={cn('flex justify-between font-semibold uppercase tracking-wider text-white/55', dense ? 'mt-0.5 text-[9px]' : 'mt-1 text-[10px]')}>
           <span className="truncate pr-2">{leftLabel}</span>
           <span className="truncate pl-2 text-right">{rightLabel}</span>
         </div>
