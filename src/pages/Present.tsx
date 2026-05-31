@@ -1882,10 +1882,14 @@ interface PlacedWord {
  *  (2) Chromium's canvas metrics under-report variable-font widths.
  *  Generous padding keeps words visually separated even at high browser zoom. */
 function measureWord(text: string, size: number, weight: string): { w: number; h: number } {
-  const canvas = document.createElement('canvas')
-  const ctx    = canvas.getContext('2d')!
-  ctx.font     = `${weight} ${size}px Inter, system-ui, sans-serif`
-  return { w: ctx.measureText(text).width + size * 1.0, h: size * 1.6 }
+  // Character-count formula — more reliable than canvas.measureText (which falls back
+  // to a narrow system font). Inter avg char width ≈ 0.60–0.65× font size.
+  // +1.0× size adds half-char padding on each side for breathing room.
+  const wFactor = parseInt(weight, 10) >= 700 ? 0.65 : 0.60
+  return {
+    w: text.length * size * wFactor + size * 1.0,
+    h: size * 1.5,
+  }
 }
 
 /**
@@ -1904,40 +1908,69 @@ function layoutWordCloud(
 
   const maxC    = Math.max(...words.map(w => w.count))
   const n       = words.length
-  const minF    = 13
-  // Scale max font down as word count grows — prevents all-unique-word clouds from overlapping.
-  // With n=1 → full 88 px. n=4 → ~57 px. n=10 → ~40 px. n=20 → ~29 px.
-  const rawMaxF = Math.min(88, ch * 0.22)
-  const maxF    = Math.min(rawMaxF, Math.max(22, rawMaxF / Math.sqrt(n * 0.45 + 0.55)))
+  const minF    = 14
+
+  // The top word (idx=0, highest count) must always fit centered.
+  // If its bounding box is wider than the container, the spiral boundary check fails at
+  // r=0 and the word gets pushed off-center. We cap rawMaxF so that never happens.
+  // formula: w = text.length × size × wFactor + size  →  size ≤ (cw-40) / (len×wFactor+1)
+  const topWordLen    = words[0]?.text.length ?? 1
+  const maxFForCenter = (cw - 40) / Math.max(1, topWordLen * 0.65 + 1.0)
+  const rawMaxF       = Math.min(96, ch * 0.25, Math.max(minF + 8, maxFForCenter))
+
+  // Two-mode max-font strategy:
+  //   • All words unique (maxC = 1): n-based reduction so many same-size words don't overflow.
+  //   • Dominant word exists (maxC > 1): let it be large — power curve makes single-count
+  //     words small so the dominant word stands out 3-4×.
+  const maxF = maxC <= 1
+    ? Math.min(rawMaxF, Math.max(22, rawMaxF / Math.sqrt(n * 0.35 + 0.65)))
+    : Math.min(88, rawMaxF)
 
   const placed: Array<{ x1: number; y1: number; x2: number; y2: number }> = []
-  const result: PlacedWord[]  = []
-  const cx = cw / 2, cy = ch / 2
+  const result: PlacedWord[] = []
+  const cx = cw / 2
+  const cy = ch / 2
 
   words.forEach((word, idx) => {
-    const freqRatio  = maxC > 0 ? word.count / maxC : 1
-    // Rank-based decay: even same-count words get progressively smaller so the top word
-    // is always visually dominant (1.0 → 0.5 across the word list).
-    const rankFactor = 1 - (idx / Math.max(1, n)) * 0.5
-    const ratio      = Math.max(0.25, freqRatio * rankFactor)
-    const size       = Math.round(minF + ratio * (maxF - minF))
-    const weight     = ratio >= 0.75 ? '800' : ratio >= 0.55 ? '700' : ratio >= 0.35 ? '600' : '500'
-    const { w, h }   = measureWord(word.text, size, weight)
-    const color      = palette[idx % palette.length]
-    const isTop      = idx === 0
+    const freqRatio = maxC > 0 ? word.count / maxC : 1
+    const ratio     = Math.max(0.18, Math.pow(freqRatio, 2.5))
+    const size      = Math.round(minF + ratio * (maxF - minF))
+    const weight    = ratio >= 0.75 ? '800' : ratio >= 0.50 ? '700' : ratio >= 0.30 ? '600' : '500'
+    const color     = palette[idx % palette.length]
+    const isTop     = idx === 0
 
-    // Archimedean spiral — golden-angle offset per word distributes directions evenly
-    for (let step = 0; step < 1200; step++) {
-      const t  = step * 0.26 + idx * 2.39996  // golden angle ≈ 137.5°
-      const r  = 0.46 * step
+    // ── Dominant word: guaranteed dead-centre placement ────────────────────
+    // Skip the spiral entirely — force to (cx, cy) and shrink font only if
+    // the bounding box genuinely overflows the container edges.
+    if (idx === 0) {
+      let s    = size
+      let dims = measureWord(word.text, s, weight)
+      while (s > minF && (
+        cx - dims.w / 2 < 16 || cx + dims.w / 2 > cw - 16 ||
+        cy - dims.h / 2 < 16 || cy + dims.h / 2 > ch - 16
+      )) { s -= 2; dims = measureWord(word.text, s, weight) }
+      placed.push({ x1: cx - dims.w / 2, y1: cy - dims.h / 2, x2: cx + dims.w / 2, y2: cy + dims.h / 2 })
+      result.push({ text: word.text, x: cx, y: cy, fontSize: s, fontWeight: weight, color, isTop: true })
+      return
+    }
+
+    // ── All other words: Archimedean spiral from centre ────────────────────
+    // Starting at r=0 (centre) for every word produces a compact cloud where
+    // each word fills the nearest open slot, radiating outward — like Mentimeter.
+    // Golden-angle direction offset (idx × 137.5°) distributes words evenly.
+    const { w, h } = measureWord(word.text, size, weight)
+    const gap = 10
+
+    for (let step = 0; step < 3000; step++) {
+      const t  = step * 0.25 + idx * 2.39996   // golden-angle direction per word
+      const r  = 0.30 * step                    // slow expansion → dense, compact cloud
       const x  = cx + r * Math.cos(t)
-      const y  = cy + r * Math.sin(t) * 0.56   // flatten vertically
+      const y  = cy + r * Math.sin(t) * 0.75   // slight vertical flatten
       const x1 = x - w / 2, y1 = y - h / 2
       const x2 = x + w / 2, y2 = y + h / 2
 
-      if (x1 < 6 || y1 < 6 || x2 > cw - 6 || y2 > ch - 6) continue
+      if (x1 < 16 || y1 < 16 || x2 > cw - 16 || y2 > ch - 16) continue
 
-      const gap = 12
       if (placed.some(p =>
         x2 + gap > p.x1 && x1 - gap < p.x2 &&
         y2 + gap > p.y1 && y1 - gap < p.y2,
@@ -1954,8 +1987,14 @@ function layoutWordCloud(
 
 /**
  * Word cloud rendered directly on the slide background — no inner box.
- * An elliptical CSS mask softly fades words near the edges so the cloud
- * has organic boundaries instead of a hard rectangle.
+ *
+ * Animation model (Mentimeter-style):
+ *   • NEW word arriving  → pops in from scale 0 with spring bounce
+ *   • EXISTING words that moved to make room → smoothly slide to new positions (Framer Motion `layout`)
+ *   • REPEATED word that grew → same spring-in at new size; surrounding words slide outward
+ *
+ * We track which texts were in the previous layout so we can distinguish
+ * "new arrival" from "repositioned existing word" on every update.
  */
 function WordCloudResults({
   words,
@@ -1965,7 +2004,9 @@ function WordCloudResults({
   slideTheme?: string
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [layout, setLayout] = useState<PlacedWord[]>([])
+  const [layout, setLayout]   = useState<PlacedWord[]>([])
+  // Texts from the PREVIOUS render — used to decide which words are brand-new
+  const prevTextsRef = useRef(new Set<string>())
 
   const palette = CLOUD_THEME_PALETTES[slideTheme ?? 'navy'] ?? CLOUD_THEME_PALETTES.navy
 
@@ -1984,6 +2025,11 @@ function WordCloudResults({
   // palette changes whenever slideTheme changes — include it in deps
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [words, slideTheme])
+
+  // After each layout update, remember which texts are now placed — used next render
+  useEffect(() => {
+    prevTextsRef.current = new Set(layout.map(w => w.text))
+  }, [layout])
 
   // Soft elliptical mask — words near edges fade into the slide background.
   // This gives a natural cloud-like boundary without any hard rectangle.
@@ -2009,26 +2055,49 @@ function WordCloudResults({
       )}
 
       {/* Placed words */}
-      {layout.map((item, i) => (
-        <motion.span
-          key={item.text}
-          initial={{ opacity: 0, scale: 0.1 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ type: 'spring', stiffness: 320, damping: 26, delay: i * 0.04 }}
-          className="absolute select-none leading-none"
-          style={{
-            left:       item.x,
-            top:        item.y,
-            fontSize:   item.fontSize,
-            fontWeight: item.fontWeight,
-            color:      item.color,
-            transform:  'translate(-50%, -50%)',
-            textShadow: item.isTop ? `0 0 48px ${item.color}bb` : undefined,
-          }}
-        >
-          {item.text}
-        </motion.span>
-      ))}
+      {layout.map((item) => {
+        // Is this word appearing for the first time in this render?
+        const isNew = !prevTextsRef.current.has(item.text)
+        // Outer div handles positioning only — no Framer Motion so the centering
+        // transform: translate(-50%,-50%) is never overridden by Framer's own transform.
+        // Inner motion.span handles the pop-in animation (opacity + scale spring).
+        return (
+          <div
+            key={item.text}
+            className="absolute"
+            style={{
+              left: item.x,
+              top: item.y,
+              transform: 'translate(-50%, -50%)',
+              // Existing words glide to new positions; new words skip transition
+              // so they appear at their target spot (the pop-in handles their entrance).
+              transition: isNew ? undefined : 'left 0.55s cubic-bezier(0.16,1,0.3,1), top 0.55s cubic-bezier(0.16,1,0.3,1)',
+            }}
+          >
+            <motion.span
+              initial={isNew ? { opacity: 0, scale: 0 } : { opacity: 1, scale: 1 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={isNew
+                ? {
+                    opacity: { duration: 0.2, delay: 0.1 },
+                    scale:   { type: 'spring', stiffness: 380, damping: 22, delay: 0.06 },
+                  }
+                : { duration: 0 }
+              }
+              className="select-none leading-none whitespace-nowrap"
+              style={{
+                display:    'block',
+                fontSize:   item.fontSize,
+                fontWeight: item.fontWeight,
+                color:      item.color,
+                textShadow: item.isTop ? `0 0 48px ${item.color}bb` : undefined,
+              }}
+            >
+              {item.text}
+            </motion.span>
+          </div>
+        )
+      })}
     </div>
   )
 }

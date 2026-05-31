@@ -108,68 +108,70 @@
 - Export results to CSV
 - Per-deck custom branding
 
-## 8. Current state — where we left off (2026-05-16)
+## 8. Current state — where we left off (2026-05-31)
 
-- ✅ All interview rounds complete; product decisions locked
-- ✅ Tech stack decided
-- ✅ User has 21st.dev API key
-- ✅ Project directory created (empty — only this HANDOFF.md inside)
-- ❌ Node.js was NOT installed on the Windows PC — that was the immediate blocker
-- ❌ 21st.dev Magic MCP install attempted but failed (npx not found because Node missing)
-- ❌ Project skeleton not yet scaffolded
-- ❌ No Firebase project created yet
-- ❌ No Vercel account set up yet
-- ❌ No code written yet
+### What's built and live
 
-## 9. Immediate next steps on the MacBook
+The app is **fully scaffolded and deployed** at **https://alaya-pulse.web.app** (Firebase Hosting).
 
-### Step A — Verify Node.js
-Open Terminal on Mac and run:
+**Hosting note:** The app is deployed on Firebase Hosting (not Vercel as originally planned — Firebase was already in use for the database so hosting was added there instead).
+
+**Infrastructure:**
+- ✅ React + TypeScript + Vite + Tailwind CSS + Framer Motion — all installed and running
+- ✅ Firebase Firestore (realtime vote sync) + Firebase Hosting (deployment)
+- ✅ GitHub repo connected; `firebase deploy` pushes a new live build
+
+**Question types — all working:**
+- ✅ **MCQ** — multiple choice with live bar chart results, correct-answer reveal support in schema
+- ✅ **Word Cloud** — dominant word centred, other words spiral outward (Mentimeter-style), animated pop-in for new words, smooth slide for repositioned words, profanity filter, duplicate-word block per person, max-submissions enforcement
+- ✅ **Open Ended / Short Answer** — audience types free text; responses appear on presenter screen
+- ✅ **Rating / Scoring** — 1–5 or 1–10 scale; live average displayed
+
+**Session flow — working end to end:**
+- ✅ Presenter creates a deck (drag-drop PDF import or manual slide builder)
+- ✅ Audience joins via QR code + 6-char code shown on presenter screen
+- ✅ Presenter advances slides; audience votes on their phone
+- ✅ Live results update on presenter screen in real time
+- ✅ Timer countdown visible on presenter screen (audience phone timer — not yet built)
+- ✅ Results export to CSV and PDF
+
+**Slide types beyond questions:**
+- ✅ Content slides (text + optional image)
+- ✅ Canvas slides (uploaded image fills full screen)
+- ✅ Transparent background option on question/content/canvas slides
+
+**Word cloud — detailed state (most recent work, 2026-05-31):**
+- `measureWord()` uses character-count formula (not `canvas.measureText` which falls back to a narrow system font)
+- Dominant word (idx=0, highest count) is placed at dead-centre — no spiral — with font shrink fallback if it overflows
+- Other words: Archimedean spiral from r=0, step=0.25 angular / r=0.30 radial, gap=10px
+- Framer Motion + CSS `transform` conflict fixed by splitting into outer `div` (positions with left/top + translate(-50%,-50%)) and inner `motion.span` (animates scale/opacity only)
+- `prevTextsRef` tracks which words existed in previous render to distinguish new vs repositioned
+- Duplicate word block: `submittedWords[]` stored in sessionStorage, checked before submit
+- Progress dots: flex-wrap layout, narrower dots when maxSubmissions > 7
+
+**CSV / PDF export — recent fixes (2026-05-31):**
+- Newlines in question text collapsed before CSV export (prevents broken rows in Excel/Sheets)
+- PDF export: adaptive font size for long question titles; subtitle positioned below last wrapped line; MCQ table option text normalised; better column widths
+
+### Remaining backlog (not yet built)
+
+1. **MCQ correct answer reveal** — presenter triggers reveal that highlights the correct answer on results screen
+2. **Open Ended response pinning / auto-scroll** — pin notable responses; auto-scroll as new ones arrive
+3. **Rating ranked results display** — show results sorted/ranked rather than raw counts
+4. **Timer countdown on audience phone** — currently countdown only visible on presenter screen
+
+## 9. Next steps (continuing on same machine)
+
+The project is already scaffolded and running — no setup needed. To continue:
+
+1. Open Claude Code in `C:\Users\rabin.r_homeloanexpe\Desktop\Apps\Claude\Alaya Pulse Check`
+2. Share this HANDOFF.md as the first message if starting a new session
+3. Pick up the backlog items in Section 8 above
+
+To deploy after any change:
 ```bash
-node --version
-npm --version
+npm run build && firebase deploy
 ```
-- If both return version numbers → Node is installed, skip to Step B
-- If "command not found" → install Node.js. Easiest: download LTS installer from **https://nodejs.org** (click "Get Node.js®" button). Or via Homebrew: `brew install node`
-
-### Step B — Install 21st.dev Magic MCP
-Once Node is confirmed working, the user needs their 21st.dev API key. **The key is NOT in this document by design — never commit API keys to a public repo.** The user should:
-1. Open https://21st.dev/magic/console
-2. Copy their existing API key (or generate a new one — they may have rotated it after PC→Mac transfer)
-3. Paste the key into Claude Code chat when asked
-
-Then install command:
-```bash
-npx @21st-dev/cli@latest install claude
-```
-The CLI will prompt for the API key. After install, the user must **restart Claude Code** for the MCP to load.
-
-### Step C — Create the working folder
-```bash
-mkdir -p ~/Desktop/Apps/Claude/"Alaya Pulse Check"
-cd ~/Desktop/Apps/Claude/"Alaya Pulse Check"
-```
-(Or use the user's preferred location — confirm with them.)
-
-### Step D — Save HANDOFF.md to the new folder
-Transfer this file (via iCloud / AirDrop / email / paste contents into a new file on Mac).
-
-### Step E — Re-create memory on Mac
-Claude Code's memory files are local per machine. Recreate the project memory on Mac by writing a new file at:
-```
-~/.claude/projects/<encoded-path>/memory/project_alaya_pulse.md
-```
-The content should mirror what was on PC (key facts from this handoff). Also create a MEMORY.md index pointing to it.
-
-### Step F — Scaffold the project
-Run (from inside the working folder):
-```bash
-npm create vite@latest . -- --template react-ts
-npm install
-```
-Then install all dependencies (full list in Section 4 above).
-
-### Step G — Resume the build from MVP step 2 onward (Section 6)
 
 ## 10. Important constraints / gotchas
 

@@ -37,6 +37,14 @@ export default function Vote() {
       return stored ? JSON.parse(stored) as Record<string, number> : {}
     } catch { return {} }
   })
+  // Track the actual words each person submitted per slide — used to block duplicates
+  const wcWordsStorageKey = `alaya-wc-words-${sessionCode ?? ''}`
+  const [wcWords, setWcWords] = useState<Record<string, string[]>>(() => {
+    try {
+      const stored = sessionStorage.getItem(`alaya-wc-words-${sessionCode ?? ''}`)
+      return stored ? JSON.parse(stored) as Record<string, string[]> : {}
+    } catch { return {} }
+  })
   const [submitting,      setSubmitting]      = useState(false)
   const [submitError,     setSubmitError]     = useState<string | null>(null)
   const [showLeaveModal,  setShowLeaveModal]  = useState(false)
@@ -143,6 +151,10 @@ export default function Vote() {
         const updated  = { ...wcSubmissions, [slideData.id]: newCount }
         setWcSubmissions(updated)
         try { sessionStorage.setItem(wcStorageKey, JSON.stringify(updated)) } catch {}
+        // Record the actual word so duplicates can be blocked
+        const updatedWords = { ...wcWords, [slideData.id]: [...(wcWords[slideData.id] ?? []), value.toLowerCase()] }
+        setWcWords(updatedWords)
+        try { sessionStorage.setItem(wcWordsStorageKey, JSON.stringify(updatedWords)) } catch {}
         // Only lock when the max is reached
         if (newCount >= maxSubs) {
           setSubmittedSlides(prev => {
@@ -359,6 +371,7 @@ export default function Vote() {
                     submitting={submitting}
                     submissionsUsed={wcSubmissions[slideId] ?? 0}
                     maxSubmissions={(slideData as { wcMaxSubmissions?: number }).wcMaxSubmissions ?? 3}
+                    submittedWords={wcWords[slideId] ?? []}
                     onSubmit={word => handleSubmit(word)}
                   />
                 )}
@@ -731,12 +744,13 @@ function containsProfanity(text: string): boolean {
 }
 
 function WordCloudQuestion({
-  submitting, onSubmit, submissionsUsed, maxSubmissions,
+  submitting, onSubmit, submissionsUsed, maxSubmissions, submittedWords,
 }: {
   submitting:       boolean
   onSubmit:         (word: string) => void
   submissionsUsed:  number
   maxSubmissions:   number
+  submittedWords:   string[]
 }) {
   const [input,        setInput]        = useState('')
   // Toast stores the word AND the remaining-after count captured at submit time,
@@ -759,6 +773,11 @@ function WordCloudQuestion({
     if (!trimmed || submitting || tooMany || allUsed) return
     if (containsProfanity(trimmed)) {
       setInputError('Please keep it appropriate — try a different word.')
+      return
+    }
+    // Block duplicate submissions — same word/phrase cannot be submitted twice
+    if (submittedWords.includes(trimmed.toLowerCase())) {
+      setInputError('You\'ve already added this — try something different!')
       return
     }
     setInputError(null)
@@ -793,19 +812,20 @@ function WordCloudQuestion({
   return (
     <div className="flex flex-1 flex-col gap-4">
 
-      {/* Progress indicator */}
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-midnight-sky-700">
+      {/* Progress indicator — flex-wrap keeps text on one line; dots drop below if no room */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <p className="whitespace-nowrap text-sm font-medium text-midnight-sky-700">
           {submissionsUsed === 0
             ? `You can add up to ${maxSubmissions} word${maxSubmissions !== 1 ? 's' : ''}`
             : `${submissionsUsed} of ${maxSubmissions} word${maxSubmissions !== 1 ? 's' : ''} added`}
         </p>
-        <div className="flex gap-1">
+        <div className="flex flex-wrap gap-1">
           {Array.from({ length: maxSubmissions }, (_, i) => (
             <span
               key={i}
               className={cn(
-                'h-2 w-5 rounded-full transition-all',
+                'h-2 rounded-full transition-all',
+                maxSubmissions > 7 ? 'w-3' : 'w-5',   // narrower dots when there are many
                 i < submissionsUsed ? 'bg-fresh-green' : 'bg-midnight-sky-200',
               )}
             />

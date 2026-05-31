@@ -149,8 +149,11 @@ export default function Results() {
     if (!results || !deck) return
     setDownloadingCsv(true)
     try {
+      // Collapse newlines + extra whitespace to a single space so multi-paragraph
+      // question text doesn't break Excel/Sheets CSV row parsing.
+      const cleanCell = (s: string) => String(s).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()
       const csvRow = (...cells: string[]) =>
-        cells.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')
+        cells.map(c => `"${cleanCell(c).replace(/"/g, '""')}"`).join(',')
 
       const lines: string[] = []
 
@@ -831,15 +834,34 @@ function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckRes
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(13)
     doc.setTextColor(0, 0, 121)
-    doc.text(`Q${idx + 1}. ${q.question || '(Untitled question)'}`, margin, 60, { maxWidth: pageW - margin * 2 })
+
+    // Full question text — strip internal newlines so it wraps cleanly.
+    // Adaptive font: 13pt for short questions, steps down to 9pt for very long ones
+    // so the full text always fits without truncation.
+    const cleanQuestion = (q.question || '(Untitled question)').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()
+    const titlePrefix   = `Q${idx + 1}. `
+
+    let titleFontSize = 13
+    doc.setFontSize(13)
+    let titleLines: string[] = doc.splitTextToSize(titlePrefix + cleanQuestion, pageW - margin * 2)
+    if (titleLines.length > 5) { titleFontSize = 11; doc.setFontSize(11); titleLines = doc.splitTextToSize(titlePrefix + cleanQuestion, pageW - margin * 2) }
+    if (titleLines.length > 9) { titleFontSize = 9;  doc.setFontSize(9);  titleLines = doc.splitTextToSize(titlePrefix + cleanQuestion, pageW - margin * 2) }
+    void titleFontSize   // used for font selection above
+
+    doc.text(titleLines, margin, 60)
+
+    // Position subtitle BELOW the last wrapped title line — no more overlap
+    const lineH    = doc.getFontSize() >= 12 ? 17 : doc.getFontSize() >= 10 ? 14 : 12
+    const subtitleY = 60 + titleLines.length * lineH + 8
+
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(10)
     doc.setTextColor(120)
     doc.text(
       `${TYPE_LABELS[q.type] ?? q.type}   ·   ${q.responseCount} responses`,
-      margin, 80,
+      margin, subtitleY,
     )
-    let cursorY = 100
+    let cursorY = subtitleY + 22
 
     if (q.type === 'mcq') {
       const votes = Array(q.options.length).fill(0)
@@ -848,17 +870,21 @@ function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckRes
         if (!isNaN(i) && i >= 0 && i < q.options.length) votes[i]++
       })
       const total = votes.reduce((s, v) => s + v, 0) || q.responseCount
+      // Normalise option text — strip newlines so long options wrap cleanly in the table cell
       const body = q.options.map((opt, i) => {
         const pct = total > 0 ? Math.round((votes[i] / total) * 100) : 0
-        return [String.fromCharCode(65 + i), opt || '-', String(votes[i]), `${pct}%`]
+        const cleanOpt = (opt || '-').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()
+        return [String.fromCharCode(65 + i), cleanOpt, String(votes[i]), `${pct}%`]
       })
       autoTable(doc, {
         startY: cursorY,
         head:   [['', 'Option', 'Votes', '%']],
         body,
         theme:  'striped',
-        headStyles: { fillColor: [0, 0, 121] },
-        styles: { fontSize: 10, cellPadding: 6 },
+        headStyles:   { fillColor: [0, 0, 121] },
+        styles:       { fontSize: 10, cellPadding: 6, overflow: 'linebreak' },
+        // Col 0 = letter (A/B…), Col 2 = Votes (needs ≥44pt so header doesn't wrap), Col 3 = %
+        columnStyles: { 0: { cellWidth: 18 }, 2: { cellWidth: 44, halign: 'center' }, 3: { cellWidth: 36, halign: 'center' } },
         margin: { left: margin, right: margin },
       })
       cursorY = (doc as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? cursorY + 50
