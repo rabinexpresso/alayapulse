@@ -47,6 +47,8 @@ export interface StoredContentSlide {
   body:        string
   attribution: string
   theme:       string
+  imgUrl?:     string
+  imgLayout?:  string
 }
 
 export interface QuestionSlide {
@@ -217,6 +219,10 @@ export async function createSession(title: string, rawSlides: any[]): Promise<st
         body:        s.body ?? '',
         attribution: s.attribution ?? '',
         theme:       s.theme ?? 'navy',
+        // Include image so the audience phone shows the same slide picture.
+        // imgUrl is a Cloudinary URL after a deck save (short, well under 1 MB).
+        ...(s.imgUrl    ? { imgUrl:    String(s.imgUrl)    } : {}),
+        ...(s.imgLayout ? { imgLayout: String(s.imgLayout) } : {}),
       }
     }
     if (s.type === 'canvas') {
@@ -346,6 +352,9 @@ export async function updateSessionSlides(code: string, rawSlides: any[]): Promi
         body:        s.body        ?? '',
         attribution: s.attribution ?? '',
         theme:       s.theme       ?? 'navy',
+        // Include image so the audience phone shows the same slide picture.
+        ...(s.imgUrl    ? { imgUrl:    String(s.imgUrl)    } : {}),
+        ...(s.imgLayout ? { imgLayout: String(s.imgLayout) } : {}),
       }
     if (s.type === 'canvas') {
       return {
