@@ -1375,7 +1375,7 @@ function QuestionSlideView({
     return (
       <div className="mt-6 max-w-4xl">
         <p className="mb-3 text-sm font-medium" style={{ color: c.fgDim }}>Rate each on a 0–{rmax} scale</p>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="flex flex-col gap-2">
           {slide.options.map((opt, i) => {
             const left  = lefts[i]  ?? ''
             const right = rights[i] ?? ''
@@ -1457,7 +1457,7 @@ function QuestionSlideView({
             </motion.span>
             <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
-              className={cn('mt-6 font-semibold leading-tight tracking-tight', slide.question.length > 160 ? 'text-2xl md:text-3xl' : slide.question.length > 80 ? 'text-3xl md:text-4xl' : 'text-4xl md:text-5xl lg:text-[3.2rem]')}
+              className={cn('mt-6 max-h-[42vh] overflow-y-auto font-semibold leading-snug tracking-tight', slide.question.length > 400 ? 'text-sm md:text-base' : slide.question.length > 200 ? 'text-base md:text-lg' : slide.question.length > 80 ? 'text-lg md:text-xl' : 'text-xl md:text-2xl')}
               style={{ color: c.fg }}
             >
               {slide.question}
@@ -1498,7 +1498,7 @@ function QuestionSlideView({
             </motion.span>
             <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
-              className={cn('mt-5 font-semibold leading-tight tracking-tight', slide.question.length > 160 ? 'text-xl md:text-2xl' : slide.question.length > 80 ? 'text-2xl md:text-3xl' : 'text-3xl md:text-4xl lg:text-[2.6rem]')}
+              className={cn('mt-5 max-h-[42vh] overflow-y-auto font-semibold leading-snug tracking-tight', slide.question.length > 400 ? 'text-xs md:text-sm' : slide.question.length > 200 ? 'text-sm md:text-base' : slide.question.length > 80 ? 'text-base md:text-lg' : 'text-lg md:text-xl')}
               style={{ color: c.fg }}
             >
               {slide.question}
@@ -1605,7 +1605,7 @@ function ResultsSlideView({
           Results live
         </span>
         <h2
-          className={cn('flex-1 font-semibold', slide.question.length > 160 ? 'text-base md:text-lg' : slide.question.length > 80 ? 'text-lg md:text-xl' : 'text-2xl md:text-3xl')}
+          className={cn('flex-1 font-semibold', slide.question.length > 400 ? 'text-xs md:text-sm' : slide.question.length > 200 ? 'text-sm md:text-base' : slide.question.length > 80 ? 'text-base md:text-lg' : 'text-xl md:text-2xl')}
           style={{ color: c.fg }}
         >
           {slide.question}
@@ -2284,11 +2284,12 @@ function OpenEndedResults({
    ───────────────────────────────────────────────────────────────────────── */
 
 // Rank badge styles: index 0 = 1st (gold), 1 = 2nd (silver), 2 = 3rd (bronze)
-const RANK_BADGES = [
-  { label: '1st', bg: 'bg-golden-sun/25', text: 'text-golden-sun', border: 'border-golden-sun/40' },
-  { label: '2nd', bg: 'bg-white/12',      text: 'text-white/65',   border: 'border-white/20'      },
-  { label: '3rd', bg: 'bg-amber-700/25',  text: 'text-amber-300',  border: 'border-amber-600/40'  },
-]
+// All ranks use the same gold style — 1st, 2nd, 3rd, 4th, …
+function rankOrdinal(rank: number): string {
+  const n = rank + 1
+  return `${n}${n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'}`
+}
+const RANK_BADGE_STYLE = { bg: 'bg-golden-sun/25', text: 'text-golden-sun', border: 'border-golden-sun/40' }
 
 function RatingResults({ params, avgs, distributions, ratingMax = 5, leftLabels = [], rightLabels = [] }: {
   params:        string[]
@@ -2346,7 +2347,7 @@ function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, leftLabel, 
   const maxCount   = Math.max(...dist, 1)
   const BAR_MAX_PX = dense ? 26 : 36
   const hasEndLabels = !!leftLabel || !!rightLabel
-  const badge = rank !== undefined && rank < 3 ? RANK_BADGES[rank] : null
+  const badge = rank !== undefined ? { ...RANK_BADGE_STYLE, label: rankOrdinal(rank) } : null
 
   return (
     <motion.div

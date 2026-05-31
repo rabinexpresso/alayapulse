@@ -584,11 +584,12 @@ function OpenEndedVisual({ q }: { q: ResultQuestion }) {
 }
 
 // Rank badge styles for the Results page (light theme)
-const RESULTS_RANK_BADGES = [
-  { label: '1st', bg: 'bg-golden-sun/15',       text: 'text-amber-700',        border: 'border-amber-400/40'   },
-  { label: '2nd', bg: 'bg-midnight-sky-100',     text: 'text-midnight-sky-500', border: 'border-midnight-sky-200' },
-  { label: '3rd', bg: 'bg-amber-100',            text: 'text-amber-700',        border: 'border-amber-300/50'   },
-]
+// All ranks use the same gold style
+function rankOrdinal(rank: number): string {
+  const n = rank + 1
+  return `${n}${n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'}`
+}
+const RESULTS_RANK_BADGE_STYLE = { bg: 'bg-golden-sun/15', text: 'text-amber-700', border: 'border-amber-400/40' }
 
 function RatingVisual({ q }: { q: ResultQuestion }) {
   const ratingMax = q.ratingMax === 10 ? 10 : 5
@@ -636,7 +637,7 @@ function RatingVisual({ q }: { q: ResultQuestion }) {
         const maxBucket = Math.max(...paramDist, 1)
         const left      = lefts[i]  ?? ''
         const right     = rights[i] ?? ''
-        const badge     = rank < 3 ? RESULTS_RANK_BADGES[rank] : null
+        const badge     = { ...RESULTS_RANK_BADGE_STYLE, label: rankOrdinal(rank) }
         return (
           <div key={i} className={cn(
             'rounded-xl border p-4',

@@ -209,7 +209,8 @@ export default function Vote() {
   const isWaiting      = !slideData || !INTERACTIVE_TYPES.has((slideData as { type: string }).type)
   const isResultsPhase = session.currentPhase === 'results'
   const timerDuration  = session.timerDuration ?? null
-  const timerExpired   = timerSecsLeft === 0 && !isResultsPhase
+  // Timer expired = locked, even if presenter has moved to the results phase on same slide
+  const timerExpired   = timerSecsLeft === 0
 
   // Total slides (question slides only) for progress bar
   const questionSlides = session.slides.filter(s => INTERACTIVE_TYPES.has((s as { type: string }).type))
