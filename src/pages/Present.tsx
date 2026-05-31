@@ -1019,8 +1019,10 @@ function qColors(theme?: string): QColorSet {
 }
 
 function ContentSlideView({ slide }: { slide: ContentSlide }) {
-  const c       = contentColors(slide.theme)
-  const bullets = slide.body.split('\n').filter(b => b.trim())
+  const c         = contentColors(slide.theme)
+  const bullets   = slide.body.split('\n').filter(b => b.trim())
+  // True when the reference/right image panel is visible (takes rightmost 42% of slide)
+  const hasRefImg = !!(slide.imgUrl && (slide.imgLayout === 'reference' || slide.imgLayout === 'right'))
 
   return (
     <div
@@ -1078,8 +1080,8 @@ function ContentSlideView({ slide }: { slide: ContentSlide }) {
       {/* ── Heading template ─────────────────────────────── */}
       {slide.template === 'heading' && (
         <div className={cn(
-          'relative z-10 flex h-full w-full flex-col items-center justify-center text-center',
-          slide.imgUrl && (slide.imgLayout === 'right' || slide.imgLayout === 'reference') ? 'pl-16 pr-[43%]' : 'px-16',
+          'relative z-10 flex h-full flex-col items-center justify-center text-center',
+          hasRefImg ? 'w-[58%] pl-16 pr-4' : 'w-full px-16',
         )}>
           <h1
             className="max-w-5xl text-5xl font-bold leading-tight tracking-tight xl:text-6xl 2xl:text-7xl"
@@ -1098,8 +1100,8 @@ function ContentSlideView({ slide }: { slide: ContentSlide }) {
       {/* ── Bullets template ─────────────────────────────── */}
       {slide.template === 'bullets' && (
         <div className={cn(
-          'relative z-10 flex h-full w-full flex-col justify-center py-14',
-          slide.imgUrl && (slide.imgLayout === 'right' || slide.imgLayout === 'reference') ? 'pl-16 pr-[43%]' : 'px-16',
+          'relative z-10 flex h-full flex-col justify-center py-14',
+          hasRefImg ? 'w-[58%] pl-16 pr-4' : 'w-full px-16',
         )}>
           {slide.title && (
             <h2 className="mb-8 text-3xl font-bold tracking-tight xl:text-4xl" style={{ color: c.text }}>
@@ -1140,12 +1142,11 @@ function ContentSlideView({ slide }: { slide: ContentSlide }) {
 
       {/* ── Quote template ────────────────────────────────── */}
       {slide.template === 'quote' && (() => {
-        const hasRefImg = !!(slide.imgUrl && (slide.imgLayout === 'right' || slide.imgLayout === 'reference'))
-        const bodyLen   = (slide.body ?? '').length
+        const bodyLen = (slide.body ?? '').length
         return (
           <div className={cn(
-            'relative z-10 flex h-full w-full flex-col items-center justify-center text-center',
-            hasRefImg ? 'pl-20 pr-[43%]' : 'px-20',
+            'relative z-10 flex h-full flex-col items-center justify-center text-center',
+            hasRefImg ? 'w-[58%] pl-20 pr-4' : 'w-full px-20',
           )}>
             {/* Big decorative " */}
             <div
@@ -1163,12 +1164,12 @@ function ContentSlideView({ slide }: { slide: ContentSlide }) {
                 {slide.title}
               </p>
             )}
-            {/* w-full fills the padded area; overflowWrap:anywhere breaks long URLs;
-                font shrinks automatically for longer quotes */}
+            {/* w-full fills the explicit w-[58%] container; overflowWrap:anywhere
+                breaks long URLs; font shrinks automatically for longer quotes */}
             <blockquote
               className={cn(
-                'relative z-10 font-light leading-relaxed',
-                hasRefImg ? 'w-full' : 'max-w-4xl',
+                'relative z-10 w-full font-light leading-relaxed',
+                !hasRefImg && 'max-w-4xl',
                 bodyLen > 400 ? 'text-lg xl:text-xl'
                   : bodyLen > 200 ? 'text-xl xl:text-2xl'
                   : bodyLen > 100 ? 'text-2xl xl:text-3xl'
