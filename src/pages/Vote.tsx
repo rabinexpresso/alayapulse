@@ -348,7 +348,7 @@ export default function Vote() {
             className="flex flex-1 flex-col"
           >
             {isWaiting ? (
-              <WaitingState sessionCode={sessionCode} slide={slideData as any} />
+              <WaitingState sessionCode={sessionCode} />
             ) : timerExpired ? (
               <TimesUpState />
             ) : alreadySubmitted ? (
@@ -477,110 +477,10 @@ export default function Vote() {
    Waiting state — shown when the current slide is a PDF / transition slide
    ───────────────────────────────────────────────────────────────────────── */
 
-// Content-slide theme palette — mirrors CONTENT_COLORS in Present.tsx so the
-// audience phone shows the same coloured slide as the projector screen.
-const VOTE_CONTENT_COLORS: Record<string, { bg: string; text: string; textDim: string; accent: string; quoteMark: string }> = {
-  navy:        { bg: '#000079', text: '#ffffff', textDim: 'rgba(255,255,255,0.62)', accent: '#ff0065', quoteMark: 'rgba(255,0,101,0.22)' },
-  pink:        { bg: '#ff0065', text: '#ffffff', textDim: 'rgba(255,255,255,0.78)', accent: '#ffffff', quoteMark: 'rgba(255,255,255,0.22)' },
-  sky:         { bg: '#00b0ff', text: '#000079', textDim: 'rgba(0,0,121,0.68)',     accent: '#000079', quoteMark: 'rgba(0,0,121,0.18)' },
-  green:       { bg: '#42db66', text: '#000079', textDim: 'rgba(0,0,121,0.68)',     accent: '#000079', quoteMark: 'rgba(0,0,121,0.18)' },
-  golden:      { bg: '#ffc709', text: '#000079', textDim: 'rgba(0,0,121,0.68)',     accent: '#000079', quoteMark: 'rgba(0,0,121,0.18)' },
-  white:       { bg: '#f4f4f9', text: '#000079', textDim: 'rgba(0,0,121,0.58)',     accent: '#ff0065', quoteMark: 'rgba(255,0,101,0.14)' },
-  transparent: { bg: '#000079', text: '#ffffff', textDim: 'rgba(255,255,255,0.62)', accent: '#ff0065', quoteMark: 'rgba(255,0,101,0.22)' },
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function WaitingState({ sessionCode, slide }: { sessionCode?: string; slide?: any }) {
-  // Content slides (heading / bullets / quote) — render a themed card that
-  // mirrors the projector slide so the audience sees the same thing.
-  if (slide?.type === 'content') {
-    const template: string    = slide.template ?? 'heading'
-    const title: string       = slide.title ?? ''
-    const body: string        = slide.body ?? ''
-    const attribution: string = slide.attribution ?? ''
-    const imgUrl: string | undefined = slide.imgUrl
-    const imgLayout: string   = slide.imgLayout ?? 'top'
-    const bullets = body.split('\n').filter((b: string) => b.trim())
-    const col     = VOTE_CONTENT_COLORS[slide.theme as string] ?? VOTE_CONTENT_COLORS.navy
-    const isBg    = !!imgUrl && imgLayout === 'background'
-
-    return (
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-        className="relative flex flex-1 flex-col overflow-hidden rounded-3xl shadow-lg"
-        style={{ backgroundColor: col.bg }}
-      >
-        {/* Background image — full-bleed behind a colour wash */}
-        {isBg && (
-          <>
-            <img src={imgUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
-            <div className="absolute inset-0" style={{ backgroundColor: `${col.bg}cc` }} />
-          </>
-        )}
-
-        <div className="relative z-10 flex flex-1 flex-col gap-4 p-6">
-          {/* Reference image — top of the card */}
-          {imgUrl && !isBg && (
-            <div className="w-full overflow-hidden rounded-2xl bg-black/10">
-              <img src={imgUrl} alt="" className="w-full object-contain" style={{ maxHeight: '34vh' }} />
-            </div>
-          )}
-
-          {/* Quote attribution above the quote */}
-          {template === 'quote' && attribution && (
-            <p className="text-[11px] font-bold uppercase tracking-[0.18em]" style={{ color: col.accent }}>
-              {attribution}
-            </p>
-          )}
-
-          {/* Title */}
-          {title && template !== 'quote' && (
-            <h2 className="text-2xl font-bold leading-tight tracking-tight" style={{ color: col.text }}>
-              {title}
-            </h2>
-          )}
-
-          {/* Body — bullets */}
-          {template === 'bullets' && bullets.length > 0 && (
-            <ul className="space-y-2.5">
-              {bullets.map((b: string, i: number) => (
-                <li key={i} className="flex items-start gap-3">
-                  <span className="mt-2 size-2 shrink-0 rounded-full" style={{ backgroundColor: col.accent }} />
-                  <span className="text-base font-medium leading-relaxed" style={{ color: col.text, overflowWrap: 'anywhere' }}>{b}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {/* Body — heading subtitle */}
-          {template === 'heading' && body && (
-            <p className="text-base font-light leading-relaxed" style={{ color: col.textDim }}>{body}</p>
-          )}
-
-          {/* Body — quote */}
-          {template === 'quote' && (
-            <div className="relative">
-              <span className="pointer-events-none absolute -left-1 -top-6 select-none font-serif text-6xl leading-none" style={{ color: col.quoteMark }} aria-hidden>&#8220;</span>
-              <p className="relative text-lg font-light italic leading-relaxed" style={{ color: col.text, overflowWrap: 'anywhere' }}>
-                {body}
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* Branding watermark — matches the projector slide */}
-        <div className="relative z-10 px-6 pb-3 text-right">
-          <span className="text-[11px] font-bold tracking-tight" style={{ color: col.textDim }}>
-            alaya <span style={{ color: col.accent }}>pulse</span>
-          </span>
-        </div>
-      </motion.div>
-    )
-  }
-
-  // All other non-interactive slides (pdf, image, video, canvas, html)
+function WaitingState({ sessionCode }: { sessionCode?: string }) {
+  // The audience device only ever votes on questions. For every
+  // non-interactive slide (content/pdf/image/video/canvas/html) we show a
+  // neutral "hang tight" screen — the presenter screen owns the visuals.
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.96 }}
