@@ -1373,28 +1373,29 @@ function QuestionSlideView({
     const rmax   = slide.ratingMax === 10 ? 10 : 5
     const lefts  = slide.leftLabels  ?? slide.options.map(() => slide.leftLabel  ?? '')
     const rights = slide.rightLabels ?? slide.options.map(() => slide.rightLabel ?? '')
+    const cols = slide.options.length <= 2 ? 'grid-cols-2' : 'grid-cols-3'
     return (
-      <div className="mt-6 max-w-4xl">
-        <p className="mb-3 text-sm font-medium" style={{ color: c.fgDim }}>Rate each on a 0–{rmax} scale</p>
-        <div className="flex flex-col gap-2">
+      <div className="mt-4">
+        <p className="mb-2 text-xs font-medium" style={{ color: c.fgDim }}>Rate each on a 0–{rmax} scale</p>
+        <div className={cn('grid gap-2', cols)}>
           {slide.options.map((opt, i) => {
             const left  = lefts[i]  ?? ''
             const right = rights[i] ?? ''
             const hasLabels = !!(left || right)
             return (
-              <motion.div key={i} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.12 + i * 0.07, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-                className="rounded-2xl px-4 py-3.5 backdrop-blur-sm"
+              <motion.div key={i} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 + i * 0.05, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                className="rounded-xl px-3 py-2 backdrop-blur-sm"
                 style={{ border: `1px solid ${c.cardBorder}`, backgroundColor: c.cardBg }}
               >
-                <div className="flex items-center gap-3">
-                  <span className="flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold" style={{ backgroundColor: c.fg, color: c.bg }}>{i + 1}</span>
-                  <span className="text-sm font-medium leading-snug" style={{ color: c.fg }}>{opt}</span>
+                <div className="flex items-center gap-2">
+                  <span className="flex size-5 shrink-0 items-center justify-center rounded-md text-[10px] font-bold" style={{ backgroundColor: c.fg, color: c.bg }}>{i + 1}</span>
+                  <span className="min-w-0 truncate text-xs font-medium" style={{ color: c.fg }}>{opt}</span>
                 </div>
                 {hasLabels && (
-                  <div className="mt-2 flex justify-between pl-9 text-[10px] font-semibold uppercase tracking-wider" style={{ color: c.fgDim }}>
-                    <span className="truncate pr-2">{left}</span>
-                    <span className="truncate pl-2 text-right">{right}</span>
+                  <div className="mt-1 flex justify-between pl-7 text-[9px] font-semibold uppercase tracking-wider" style={{ color: c.fgDim }}>
+                    <span className="truncate pr-1">{left}</span>
+                    <span className="truncate pl-1 text-right">{right}</span>
                   </div>
                 )}
               </motion.div>
@@ -1458,7 +1459,7 @@ function QuestionSlideView({
             </motion.span>
             <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
-              className={cn('mt-6 max-h-[42vh] overflow-y-auto font-semibold leading-snug tracking-tight', slide.question.length > 400 ? 'text-sm md:text-base' : slide.question.length > 200 ? 'text-base md:text-lg' : slide.question.length > 80 ? 'text-lg md:text-xl' : 'text-xl md:text-2xl')}
+              className={cn('mt-6 max-h-[22vh] overflow-y-auto font-semibold leading-snug tracking-tight', slide.question.length > 400 ? 'text-base md:text-lg' : slide.question.length > 200 ? 'text-lg md:text-xl' : slide.question.length > 80 ? 'text-xl md:text-2xl' : 'text-2xl md:text-3xl')}
               style={{ color: c.fg }}
             >
               {slide.question}
@@ -1499,7 +1500,7 @@ function QuestionSlideView({
             </motion.span>
             <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
-              className={cn('mt-5 max-h-[42vh] overflow-y-auto font-semibold leading-snug tracking-tight', slide.question.length > 400 ? 'text-xs md:text-sm' : slide.question.length > 200 ? 'text-sm md:text-base' : slide.question.length > 80 ? 'text-base md:text-lg' : 'text-lg md:text-xl')}
+              className={cn('mt-5 max-h-[22vh] overflow-y-auto font-semibold leading-snug tracking-tight', slide.question.length > 400 ? 'text-sm md:text-base' : slide.question.length > 200 ? 'text-base md:text-lg' : slide.question.length > 80 ? 'text-lg md:text-xl' : 'text-xl md:text-2xl')}
               style={{ color: c.fg }}
             >
               {slide.question}
@@ -1540,7 +1541,7 @@ function QuestionSlideView({
         </motion.span>
         <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
-          className={cn('mt-6 max-h-[42vh] overflow-y-auto font-semibold leading-snug tracking-tight', slide.question.length > 400 ? 'text-sm md:text-base' : slide.question.length > 200 ? 'text-base md:text-lg' : slide.question.length > 80 ? 'text-lg md:text-xl' : 'text-xl md:text-2xl')}
+          className={cn('mt-6 max-h-[22vh] overflow-y-auto font-semibold leading-snug tracking-tight', slide.question.length > 400 ? 'text-base md:text-lg' : slide.question.length > 200 ? 'text-lg md:text-xl' : slide.question.length > 80 ? 'text-xl md:text-2xl' : 'text-2xl md:text-3xl')}
           style={{ color: c.fg }}
         >
           {slide.question}
@@ -1587,7 +1588,7 @@ function ResultsSlideView({
   // Word cloud is exempt — it floats directly on the slide bg with its own palette.
   const needsDarkPanel = (slide.theme ?? 'navy') !== 'navy' && slide.type !== 'wordcloud'
 
-  const vizWrap = needsDarkPanel
+  const vizWrap = needsDarkPanel && slide.type !== 'openended'
     ? 'mt-6 flex-1 overflow-y-auto rounded-2xl bg-midnight-sky-900/95 px-8 py-6'
     : slide.type === 'wordcloud'
       ? 'mt-2 flex-1 min-h-0 overflow-hidden'
@@ -1648,6 +1649,7 @@ function ResultsSlideView({
             answers={openAnswers}
             pinnedKeys={pinnedKeys}
             onTogglePin={togglePin}
+            slideTheme={slide.theme}
           />
         )}
         {slide.type === 'rating'    && (() => {
@@ -2216,12 +2218,15 @@ function WordCloudResults({
    ───────────────────────────────────────────────────────────────────────── */
 
 function OpenEndedResults({
-  answers, pinnedKeys, onTogglePin,
+  answers, pinnedKeys, onTogglePin, slideTheme,
 }: {
   answers:      { name: string; text: string }[]
   pinnedKeys:   Set<string>
   onTogglePin:  (key: string) => void
+  slideTheme?:  string
 }) {
+  const c = qColors(slideTheme)
+
   // Newest-first key — first 60 chars of text is unique enough per response
   const pinKey = (ans: { text: string }) => ans.text.slice(0, 60)
 
@@ -2233,7 +2238,7 @@ function OpenEndedResults({
 
   if (answers.length === 0) {
     return (
-      <div className="flex min-h-[150px] items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-sm text-white/35">
+      <div className="flex min-h-[120px] items-center justify-center rounded-2xl text-sm" style={{ color: c.fgFaint }}>
         Waiting for responses…
       </div>
     )
@@ -2246,40 +2251,39 @@ function OpenEndedResults({
   ]
 
   return (
-    <div className="grid auto-rows-min gap-3 md:grid-cols-2 lg:grid-cols-3">
+    <div className="grid auto-rows-min gap-2 md:grid-cols-2 lg:grid-cols-3">
       <AnimatePresence>
         {sorted.map((ans, i) => {
-          const key     = pinKey(ans)
+          const key      = pinKey(ans)
           const isPinned = pinnedKeys.has(key)
           return (
             <motion.div
               ref={i === 0 ? topRef : undefined}
               key={`${ans.name}-${ans.text.slice(0, 20)}`}
-              initial={{ opacity: 0, y: 16, scale: 0.96 }}
+              initial={{ opacity: 0, y: 12, scale: 0.97 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-              className={cn(
-                'relative rounded-2xl border p-5 backdrop-blur-sm',
-                isPinned
-                  ? 'border-hot-pink/50 bg-hot-pink/8'
-                  : 'border-white/10 bg-white/5',
-              )}
+              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              className="relative rounded-2xl p-3.5 backdrop-blur-sm"
+              style={isPinned
+                ? { backgroundColor: 'rgba(255,0,101,0.12)', border: '1px solid rgba(255,0,101,0.35)' }
+                : { backgroundColor: c.cardBg,               border: `1px solid ${c.cardBorder}` }
+              }
             >
-              {/* Pin button — always visible so it's clickable on touch screens */}
+              {/* Pin button — always visible so it's tappable on touch screens */}
               <button
                 onClick={() => onTogglePin(key)}
                 title={isPinned ? 'Unpin' : 'Pin to top'}
-                className={cn(
-                  'absolute right-3 top-3 rounded-lg p-1.5 transition-all',
-                  isPinned
-                    ? 'text-hot-pink'
-                    : 'text-white/30 hover:text-white/70',
-                )}
+                className="absolute right-2.5 top-2.5 rounded-lg p-1 transition-all"
+                style={{ color: isPinned ? '#ff0065' : c.fgFaint }}
               >
-                <Pin className={cn('size-3.5', isPinned && 'fill-current')} />
+                <Pin className={cn('size-3', isPinned && 'fill-current')} />
               </button>
-              <p className="pr-6 text-base font-light leading-relaxed text-white/90">"{ans.text}"</p>
-              <p className="mt-3 text-xs font-medium text-white/35">— {ans.name}</p>
+              <p className="pr-5 text-sm font-light leading-relaxed" style={{ color: c.fg }}>
+                "{ans.text}"
+              </p>
+              <p className="mt-2 text-[11px] font-medium" style={{ color: c.fgDim }}>
+                — {ans.name}
+              </p>
             </motion.div>
           )
         })}
