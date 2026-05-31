@@ -1350,20 +1350,21 @@ function QuestionSlideView({
   // JSX variables are plain React elements; React reconciles them in-place.
 
   const mcqOptions = slide.type === 'mcq' ? (
-    <div className="mt-6 flex flex-col items-start gap-3">
+    // 5+ options → 2-col grid so they all fit without scrolling; ≤4 → single column
+    <div className={cn('mt-4 gap-2', slide.options.length >= 5 ? 'grid grid-cols-2' : 'flex flex-col')}>
       {slide.options.map((opt, i) => (
         <motion.div
           key={i}
-          initial={{ opacity: 0, y: 10 }}
+          initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.12 + i * 0.07, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-          className="flex min-w-0 max-w-full items-start gap-3 rounded-2xl px-4 py-3.5 text-left backdrop-blur-sm"
+          transition={{ delay: 0.10 + i * 0.05, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+          className="flex min-w-0 items-center gap-2.5 rounded-xl px-3 py-2 text-left backdrop-blur-sm"
           style={{ border: `1px solid ${c.cardBorder}`, backgroundColor: c.cardBg }}
         >
-          <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold" style={{ backgroundColor: c.fg, color: c.bg }}>
+          <span className="flex size-6 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold" style={{ backgroundColor: c.fg, color: c.bg }}>
             {String.fromCharCode(65 + i)}
           </span>
-          <span className="min-w-0 break-words text-base font-medium leading-snug" style={{ color: c.fg }}>{opt}</span>
+          <span className="min-w-0 break-words text-sm font-medium leading-snug" style={{ color: c.fg }}>{opt}</span>
         </motion.div>
       ))}
     </div>
@@ -1449,7 +1450,7 @@ function QuestionSlideView({
         )}
         {/* Scrollable content: badge + question + options */}
         <div className="relative z-10 flex flex-1 flex-col overflow-hidden px-14 pt-12">
-          <div className="flex-1 overflow-y-auto overflow-x-hidden pb-4">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden pb-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <motion.span initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
               className="w-fit rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
@@ -1490,7 +1491,7 @@ function QuestionSlideView({
         {/* Left: question content + BottomBar — pb-24 keeps content above the HUD */}
         <div className="flex flex-1 flex-col overflow-hidden px-12 pt-12 pb-24">
           {/* Scrollable: badge + question + options */}
-          <div className="flex-1 overflow-y-auto overflow-x-hidden pb-4">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden pb-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <motion.span initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
               className="w-fit rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
@@ -1531,7 +1532,7 @@ function QuestionSlideView({
   return (
     <div className="absolute inset-0 flex flex-col overflow-hidden px-14 pt-12 pb-24" style={{ backgroundColor: slide.theme === 'transparent' ? 'transparent' : c.bg }}>
       {/* Scrollable: badge + question + options — grows to fill space, scrolls if needed */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden pb-4">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden pb-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <motion.span initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
           className="w-fit rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider"
@@ -1589,10 +1590,10 @@ function ResultsSlideView({
   const needsDarkPanel = (slide.theme ?? 'navy') !== 'navy' && slide.type !== 'wordcloud'
 
   const vizWrap = needsDarkPanel && slide.type !== 'openended'
-    ? 'mt-6 flex-1 overflow-y-auto rounded-2xl bg-midnight-sky-900/95 px-8 py-6'
+    ? 'mt-6 flex-1 overflow-y-auto rounded-2xl bg-midnight-sky-900/95 px-8 py-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
     : slide.type === 'wordcloud'
       ? 'mt-2 flex-1 min-h-0 overflow-hidden'
-      : 'mt-6 flex-1 overflow-y-auto'
+      : 'mt-6 flex-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
 
   return (
     <div
@@ -1686,8 +1687,8 @@ function MCQResults({ options, votes, respondentCount, vizType = 'bar', correctA
   correctAnswers?:  number[]
   revealed?:        boolean
 }) {
-  if (vizType === 'pie')   return <MCQPieChart   options={options} votes={votes} correctAnswers={correctAnswers} revealed={revealed} />
-  if (vizType === 'donut') return <MCQDonutChart options={options} votes={votes} correctAnswers={correctAnswers} revealed={revealed} />
+  if (vizType === 'pie')   return <MCQPieChart   options={options} votes={votes} respondentCount={respondentCount} correctAnswers={correctAnswers} revealed={revealed} />
+  if (vizType === 'donut') return <MCQDonutChart options={options} votes={votes} respondentCount={respondentCount} correctAnswers={correctAnswers} revealed={revealed} />
   return <MCQBarChart options={options} votes={votes} respondentCount={respondentCount} correctAnswers={correctAnswers} revealed={revealed} />
 }
 
@@ -1791,16 +1792,17 @@ function describeArc(cx: number, cy: number, r: number, startAngle: number, endA
 
 /* ── Legend shared by pie / donut ─────────────────────────────────────── */
 
-function VizLegend({ options, votes, total, maxV, correctAnswers, revealed }: {
-  options: string[]; votes: number[]; total: number; maxV: number
+function VizLegend({ options, votes, total, legendTotal, maxV, correctAnswers, revealed }: {
+  options: string[]; votes: number[]; total: number; legendTotal?: number; maxV: number
   correctAnswers?: number[]; revealed?: boolean
 }) {
-  const corrSet = new Set(correctAnswers ?? [])
+  const corrSet   = new Set(correctAnswers ?? [])
+  const pctDenom  = legendTotal ?? total   // use respondentCount when provided
   return (
     <div className="flex min-w-0 flex-1 flex-col justify-center gap-3">
       {options.map((opt, i) => {
         const v         = votes[i] ?? 0
-        const pct       = total > 0 ? Math.round((v / total) * 100) : 0
+        const pct       = pctDenom > 0 ? Math.round((v / pctDenom) * 100) : 0
         const isWinner  = v > 0 && v === maxV
         const isCorrect = revealed && corrSet.has(i)
         const isWrong   = revealed && corrSet.size > 0 && !corrSet.has(i)
@@ -1837,12 +1839,14 @@ function VizLegend({ options, votes, total, maxV, correctAnswers, revealed }: {
 
 /* ── Donut chart ──────────────────────────────────────────────────────── */
 
-function MCQDonutChart({ options, votes, correctAnswers, revealed }: {
+function MCQDonutChart({ options, votes, respondentCount, correctAnswers, revealed }: {
   options: string[]; votes: number[]
+  respondentCount?: number
   correctAnswers?: number[]; revealed?: boolean
 }) {
-  const corrSet = new Set(correctAnswers ?? [])
-  const total  = votes.reduce((s, v) => s + v, 0)
+  const corrSet    = new Set(correctAnswers ?? [])
+  const total      = votes.reduce((s, v) => s + v, 0)
+  const legendTotal = respondentCount ?? total   // % of respondents for multi-select
   const maxV   = Math.max(...votes, 1)
   const winner = votes.indexOf(Math.max(...votes))
 
@@ -1895,7 +1899,7 @@ function MCQDonutChart({ options, votes, correctAnswers, revealed }: {
             <>
               <span className="text-3xl font-bold tabular-nums"
                 style={{ color: revealed && corrSet.has(winner) ? '#42db66' : VIZ_COLORS[winner % VIZ_COLORS.length] }}>
-                {Math.round((votes[winner] / total) * 100)}%
+                {Math.round((votes[winner] / legendTotal) * 100)}%
               </span>
               <span className="mt-0.5 max-w-[80px] text-xs font-medium leading-tight text-white/55">
                 {options[winner]}
@@ -1906,18 +1910,20 @@ function MCQDonutChart({ options, votes, correctAnswers, revealed }: {
           )}
         </div>
       </div>
-      <VizLegend options={options} votes={votes} total={total} maxV={maxV} correctAnswers={correctAnswers} revealed={revealed} />
+      <VizLegend options={options} votes={votes} total={total} legendTotal={legendTotal} maxV={maxV} correctAnswers={correctAnswers} revealed={revealed} />
     </div>
   )
 }
 
 /* ── Pie chart ────────────────────────────────────────────────────────── */
 
-function MCQPieChart({ options, votes, correctAnswers, revealed }: {
+function MCQPieChart({ options, votes, respondentCount, correctAnswers, revealed }: {
   options: string[]; votes: number[]
+  respondentCount?: number
   correctAnswers?: number[]; revealed?: boolean
 }) {
-  const total   = votes.reduce((s, v) => s + v, 0)
+  const total      = votes.reduce((s, v) => s + v, 0)
+  const legendTotal = respondentCount ?? total
   const maxV    = Math.max(...votes, 1)
   const corrSet = new Set(correctAnswers ?? [])
 
@@ -1952,7 +1958,7 @@ function MCQPieChart({ options, votes, correctAnswers, revealed }: {
           })
         )}
       </svg>
-      <VizLegend options={options} votes={votes} total={total} maxV={maxV} correctAnswers={correctAnswers} revealed={revealed} />
+      <VizLegend options={options} votes={votes} total={total} legendTotal={legendTotal} maxV={maxV} correctAnswers={correctAnswers} revealed={revealed} />
     </div>
   )
 }
