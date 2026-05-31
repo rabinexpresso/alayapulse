@@ -876,6 +876,7 @@ function SlideContent({
     <ResultsSlideView
       slide={slide}
       mcqVotes={mcqVotes}
+      respondentCount={responseCount}
       cloudWords={cloudWords}
       openAnswers={openAnswers}
       ratingAvgs={ratingAvgs}
@@ -1539,7 +1540,7 @@ function QuestionSlideView({
         </motion.span>
         <motion.h1 initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.45, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
-          className="mt-6 text-4xl font-semibold leading-tight tracking-tight md:text-5xl lg:text-[3.2rem]"
+          className={cn('mt-6 max-h-[42vh] overflow-y-auto font-semibold leading-snug tracking-tight', slide.question.length > 400 ? 'text-sm md:text-base' : slide.question.length > 200 ? 'text-base md:text-lg' : slide.question.length > 80 ? 'text-lg md:text-xl' : 'text-xl md:text-2xl')}
           style={{ color: c.fg }}
         >
           {slide.question}
@@ -1557,14 +1558,15 @@ function QuestionSlideView({
    ───────────────────────────────────────────────────────────────────────── */
 
 function ResultsSlideView({
-  slide, mcqVotes, cloudWords, openAnswers, ratingAvgs, ratingDist,
+  slide, mcqVotes, respondentCount, cloudWords, openAnswers, ratingAvgs, ratingDist,
 }: {
-  slide:       QSlide
-  mcqVotes:    number[]
-  cloudWords:  { text: string; count: number }[]
-  openAnswers: { name: string; text: string }[]
-  ratingAvgs:  number[]
-  ratingDist:  number[][]
+  slide:           QSlide
+  mcqVotes:        number[]
+  respondentCount: number
+  cloudWords:      { text: string; count: number }[]
+  openAnswers:     { name: string; text: string }[]
+  ratingAvgs:      number[]
+  ratingDist:      number[][]
 }) {
   const c         = qColors(slide.theme)
   const ratingMax = slide.ratingMax === 10 ? 10 : 5
@@ -1634,6 +1636,7 @@ function ResultsSlideView({
           <MCQResults
             options={slide.options}
             votes={mcqVotes}
+            respondentCount={respondentCount}
             vizType={slide.vizType ?? 'bar'}
             correctAnswers={slide.correctAnswers}
             revealed={answerRevealed}
@@ -1673,25 +1676,29 @@ function ResultsSlideView({
 // Shared palette for pie / donut segments
 const VIZ_COLORS = ['#ff0065', '#00b0ff', '#42db66', '#ffc709', '#a855f7', '#f97316']
 
-function MCQResults({ options, votes, vizType = 'bar', correctAnswers, revealed }: {
-  options:        string[]
-  votes:          number[]
-  vizType?:       'bar' | 'pie' | 'donut'
-  correctAnswers?: number[]
-  revealed?:      boolean
+function MCQResults({ options, votes, respondentCount, vizType = 'bar', correctAnswers, revealed }: {
+  options:          string[]
+  votes:            number[]
+  respondentCount?: number
+  vizType?:         'bar' | 'pie' | 'donut'
+  correctAnswers?:  number[]
+  revealed?:        boolean
 }) {
   if (vizType === 'pie')   return <MCQPieChart   options={options} votes={votes} correctAnswers={correctAnswers} revealed={revealed} />
   if (vizType === 'donut') return <MCQDonutChart options={options} votes={votes} correctAnswers={correctAnswers} revealed={revealed} />
-  return <MCQBarChart options={options} votes={votes} correctAnswers={correctAnswers} revealed={revealed} />
+  return <MCQBarChart options={options} votes={votes} respondentCount={respondentCount} correctAnswers={correctAnswers} revealed={revealed} />
 }
 
 /* ── Bar chart — stacked layout: full-width label on top, bar below ───── */
 
-function MCQBarChart({ options, votes, correctAnswers, revealed }: {
+function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed }: {
   options: string[]; votes: number[]
+  respondentCount?: number
   correctAnswers?: number[]; revealed?: boolean
 }) {
-  const total = votes.reduce((s, v) => s + v, 0)
+  // For single-select, respondentCount === sum(votes). For multi-select, use respondentCount
+  // so bars show "% of people who chose this" rather than "% of all selections".
+  const total = respondentCount ?? votes.reduce((s, v) => s + v, 0)
   const maxV  = Math.max(...votes, 1)
   const corrSet = new Set(correctAnswers ?? [])
 
@@ -2171,7 +2178,7 @@ function WordCloudResults({
               transform: 'translate(-50%, -50%)',
               // Existing words glide to new positions; new words skip transition
               // so they appear at their target spot (the pop-in handles their entrance).
-              transition: isNew ? undefined : 'left 0.55s cubic-bezier(0.16,1,0.3,1), top 0.55s cubic-bezier(0.16,1,0.3,1)',
+              transition: isNew ? undefined : 'left 1.4s cubic-bezier(0.16,1,0.3,1), top 1.4s cubic-bezier(0.16,1,0.3,1)',
             }}
           >
             <motion.span
@@ -2179,8 +2186,8 @@ function WordCloudResults({
               animate={{ opacity: 1, scale: 1 }}
               transition={isNew
                 ? {
-                    opacity: { duration: 0.2, delay: 0.1 },
-                    scale:   { type: 'spring', stiffness: 380, damping: 22, delay: 0.06 },
+                    opacity: { duration: 0.35, delay: 0.1 },
+                    scale:   { type: 'spring', stiffness: 160, damping: 20, delay: 0.08 },
                   }
                 : { duration: 0 }
               }
@@ -2191,6 +2198,8 @@ function WordCloudResults({
                 fontWeight: item.fontWeight,
                 color:      item.color,
                 textShadow: item.isTop ? `0 0 48px ${item.color}bb` : undefined,
+                // Smooth size changes when a word grows as it gets more votes
+                transition: isNew ? undefined : 'font-size 1.0s cubic-bezier(0.16,1,0.3,1)',
               }}
             >
               {item.text}
