@@ -11,7 +11,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import { cn } from '@/lib/utils'
 import {
   updateSessionState, endSession, subscribeToSlideResponses, subscribeToViewerCount,
-  fetchAllSessionResponses, startTimer, clearTimer, resetSlideVotes, updateQuestionMeta,
+  fetchAllSessionResponses, getSessionByCode, startTimer, clearTimer, resetSlideVotes, updateQuestionMeta,
   type Response as FirestoreResponse,
 } from '@/lib/session'
 import type {
@@ -2818,6 +2818,13 @@ function calculateQuizLeaderboard(
       const name = r.respondentName || 'Anonymous'
       // Ensure every respondent appears on the leaderboard even if they score 0
       if (!(name in totals)) totals[name] = 0
+      // Prefer stored quiz points (calculated on the audience device at submission time).
+      // Fall back to recalculation from timestamps for older sessions that lack quizPoints.
+      if (r.quizPoints !== undefined) {
+        totals[name] += r.quizPoints.answer + r.quizPoints.speed
+        continue
+      }
+      // Legacy fallback: recalculate from timestamps
       let selected: number[]
       try {
         const p = JSON.parse(r.value)
@@ -2864,9 +2871,15 @@ function LeaderboardSlideView({
       ])
       return
     }
-    fetchAllSessionResponses(sessionCode)
-      .then(responses => {
-        const board = calculateQuizLeaderboard(responses, deck, questionMeta)
+    Promise.all([
+      fetchAllSessionResponses(sessionCode),
+      getSessionByCode(sessionCode),
+    ])
+      .then(([responses, sessionData]) => {
+        // Prefer Firestore's questionMeta (server-authoritative) over the local ref,
+        // so speed-point timestamps match the Firestore response timestamps exactly.
+        const meta = (sessionData?.questionMeta ?? questionMeta) as Record<string, { openedAt: number; duration: number | null }>
+        const board = calculateQuizLeaderboard(responses, deck, meta)
         setLeaderboard(board.slice(0, 10))
       })
       .catch(console.error)

@@ -152,6 +152,7 @@ export interface Response {
   value:         string
   respondentName?: string
   submittedAt:   Timestamp
+  quizPoints?:   { answer: number; speed: number }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -443,10 +444,11 @@ export async function updateQuestionMeta(
    ───────────────────────────────────────────────────────────────────────── */
 
 export interface SubmitPayload {
-  slideId:        string
-  type:           QType
-  value:          string
+  slideId:         string
+  type:            QType
+  value:           string
   respondentName?: string
+  quizPoints?:     { answer: number; speed: number }
 }
 
 export async function submitResponse(

@@ -208,6 +208,36 @@ export default function Vote() {
     }
     setSubmitting(true)
     setSubmitError(null)
+
+    // Calculate quiz points BEFORE submitting so they're stored in the response doc.
+    // This avoids cross-clock issues between presenter's Date.now() and Firestore serverTimestamp().
+    let quizPoints: { answer: number; speed: number } | undefined
+    let quizFeedback: { isCorrect: boolean; answerPts: number; speedPts: number; correctAnswer: string } | undefined
+    if (session.isQuiz && slideData.type === 'mcq') {
+      const qs = slideData as { options: string[]; correctAnswers?: number[] }
+      if (qs.correctAnswers?.length) {
+        const corrSet = new Set(qs.correctAnswers)
+        let selected: number[]
+        try {
+          const p = JSON.parse(value)
+          selected = Array.isArray(p) ? p : [parseInt(value, 10)]
+        } catch { selected = [parseInt(value, 10)] }
+        const isCorrect = selected.length === corrSet.size && selected.every(i => corrSet.has(i))
+        const answerPts = isCorrect ? 100 : 0
+        let speedPts = 0
+        // Use live timerEndsAt subscribed from Firestore — same reference used by the
+        // on-screen countdown, so this is the most accurate remaining-time value available.
+        const timerEndsAt   = session.timerEndsAt   ?? null
+        const timerDuration = session.timerDuration ?? null
+        if (isCorrect && timerEndsAt && timerDuration) {
+          const remaining = Math.max(0, timerEndsAt - Date.now())
+          speedPts = Math.round((remaining / (timerDuration * 1000)) * 100)
+        }
+        quizPoints = { answer: answerPts, speed: speedPts }
+        quizFeedback = { isCorrect, answerPts, speedPts, correctAnswer: qs.correctAnswers.map(i => String.fromCharCode(65 + i)).join(', ') }
+      }
+    }
+
     try {
       const effectiveName = quizName || attendeeName || 'Anonymous'
       await submitResponse(sessionCode!, {
@@ -215,34 +245,13 @@ export default function Vote() {
         type:    slideData.type as QType,
         value,
         respondentName: effectiveName,
+        ...(quizPoints ? { quizPoints } : {}),
       })
 
-      // Quiz feedback — MCQ with correct answers set only
-      if (session.isQuiz && slideData.type === 'mcq') {
-        const qs = slideData as { options: string[]; correctAnswers?: number[] }
-        // Skip unscored questions (no correct answer configured)
-        if (qs.correctAnswers?.length) {
-          const corrSet = new Set(qs.correctAnswers)
-          let selected: number[]
-          try {
-            const p = JSON.parse(value)
-            selected = Array.isArray(p) ? p : [parseInt(value, 10)]
-          } catch { selected = [parseInt(value, 10)] }
-          const isCorrect = selected.length === corrSet.size && selected.every(i => corrSet.has(i))
-          const answerPts = isCorrect ? 100 : 0
-          let speedPts = 0
-          // Use the session's live timer values — already subscribed for the audience countdown,
-          // so no extra Firestore read and no race condition with questionMeta writes.
-          const timerEndsAt   = session.timerEndsAt   ?? null
-          const timerDuration = session.timerDuration ?? null
-          if (isCorrect && timerEndsAt && timerDuration) {
-            const remaining = Math.max(0, timerEndsAt - Date.now())
-            speedPts = Math.round((remaining / (timerDuration * 1000)) * 100)
-          }
-          const correctAnswer = qs.correctAnswers.map(i => String.fromCharCode(65 + i)).join(', ')
-          setQuizScore(prev => prev + answerPts + speedPts)
-          setLastQuizResult({ isCorrect, answerPts, speedPts, correctAnswer, slideId: slideData.id })
-        }
+      // Apply quiz feedback to local UI state
+      if (quizFeedback) {
+        setQuizScore(prev => prev + quizFeedback!.answerPts + quizFeedback!.speedPts)
+        setLastQuizResult({ ...quizFeedback, slideId: slideData.id })
       }
 
       if (slideData.type === 'wordcloud') {
@@ -435,10 +444,10 @@ export default function Vote() {
           >
             {isWaiting ? (
               <WaitingState sessionCode={sessionCode} />
-            ) : timerExpired ? (
-              <TimesUpState />
             ) : alreadySubmitted && session.isQuiz && lastQuizResult && lastQuizResult.slideId === slideId ? (
               <QuizFeedbackState result={lastQuizResult} totalScore={quizScore} />
+            ) : timerExpired ? (
+              <TimesUpState />
             ) : alreadySubmitted ? (
               <SubmittedState />
             ) : (
