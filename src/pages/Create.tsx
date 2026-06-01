@@ -12,11 +12,11 @@ import {
   useSortable, arrayMove, sortableKeyboardCoordinates,
 } from '@dnd-kit/sortable'
 import {
-  Plus, Trash2, GripVertical, FileText, Copy,
+  Plus, Minus, Trash2, GripVertical, FileText, Copy,
   Cloud, AlignLeft, AlignCenter, AlignRight, Star, Upload, Play,
   LayoutList, Bookmark, BookmarkCheck, Monitor, LayoutGrid,
   Video, Type, List, Quote, Users, BarChart2, PieChart,
-  Layers, X, Table2, Download, Check, Undo2, Redo2, Trophy,
+  Layers, X, Table2, Download, Check, Undo2, Redo2, Trophy, ImageIcon,
 } from 'lucide-react'
 import * as pdfjsLib from 'pdfjs-dist'
 import { AlayaMark } from '@/components/AlayaMark'
@@ -212,7 +212,7 @@ interface ContentSlide {
   imgLayout?: 'top' | 'right' | 'background' | 'reference'
 }
 /* ── Canvas slide types ───────────────────────────────────────────── */
-type CanvasBgType = 'color' | 'gradient'
+type CanvasBgType = 'color' | 'gradient' | 'image'
 interface CanvasBg { type: CanvasBgType; value: string }
 interface CanvasBaseEl { id: string; kind: 'text' | 'table' | 'image'; x: number; y: number; w: number; h: number }
 interface CanvasTextEl extends CanvasBaseEl {
@@ -3435,6 +3435,7 @@ function SaveStorageModal({ onBrowser, onCloud, onCancel, saving }: {
 /* ── Background panel ──────────────────────────────────────────────────── */
 
 function BgPanel({ bg, onChange }: { bg: CanvasBg; onChange: (bg: CanvasBg) => void }) {
+  const bgImgRef = useRef<HTMLInputElement>(null)
   return (
     <div className="mb-3 overflow-hidden rounded-xl border border-midnight-sky-150 bg-white p-4 shadow-sm">
       <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-midnight-sky-400">Solid colour</p>
@@ -3446,7 +3447,7 @@ function BgPanel({ bg, onChange }: { bg: CanvasBg; onChange: (bg: CanvasBg) => v
             title={c.label}
             className={cn(
               'size-8 rounded-full transition-all ring-offset-2 hover:scale-110',
-              bg.value === c.value ? 'ring-2 ring-midnight-sky-700' : 'opacity-80',
+              bg.type === 'color' && bg.value === c.value ? 'ring-2 ring-midnight-sky-700' : 'opacity-80',
             )}
             style={{ backgroundColor: c.value, border: c.value === '#f4f4f9' ? '1px solid #e8e8f1' : undefined }}
           />
@@ -3461,7 +3462,7 @@ function BgPanel({ bg, onChange }: { bg: CanvasBg; onChange: (bg: CanvasBg) => v
             title={g.label}
             className={cn(
               'h-8 w-16 rounded-lg text-[9px] font-semibold text-white transition-all hover:scale-105',
-              bg.value === g.value ? 'ring-2 ring-midnight-sky-700 ring-offset-2' : 'opacity-80',
+              bg.type === 'gradient' && bg.value === g.value ? 'ring-2 ring-midnight-sky-700 ring-offset-2' : 'opacity-80',
             )}
             style={{ background: g.value }}
           >
@@ -3469,6 +3470,44 @@ function BgPanel({ bg, onChange }: { bg: CanvasBg; onChange: (bg: CanvasBg) => v
           </button>
         ))}
       </div>
+      <p className="mb-2 mt-4 text-[11px] font-semibold uppercase tracking-wider text-midnight-sky-400">Image</p>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => bgImgRef.current?.click()}
+          className={cn(
+            'flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition-all',
+            bg.type === 'image'
+              ? 'border-sky-blue bg-sky-blue/10 text-sky-blue'
+              : 'border-midnight-sky-200 text-midnight-sky-600 hover:border-midnight-sky-400',
+          )}
+        >
+          <ImageIcon className="size-3.5" />
+          {bg.type === 'image' ? 'Change image' : 'Upload image'}
+        </button>
+        {bg.type === 'image' && (
+          <button
+            onClick={() => onChange({ type: 'color', value: '#000079' })}
+            className="text-xs text-red-400 hover:text-red-600 transition"
+          >
+            Remove
+          </button>
+        )}
+        {bg.type === 'image' && (
+          <span className="truncate text-xs text-midnight-sky-400">Image set — cover fill</span>
+        )}
+      </div>
+      <input
+        ref={bgImgRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={e => {
+          const f = e.target.files?.[0]
+          if (!f) return
+          fileToImageDataUrl(f).then(url => onChange({ type: 'image', value: url })).catch(console.error)
+          e.target.value = ''
+        }}
+      />
     </div>
   )
 }
@@ -3603,11 +3642,14 @@ function TextFormatBar({ el, onUpdate }: { el: CanvasTextEl; onUpdate: (p: Parti
 
 /* ── Individual table cell ─────────────────────────────────────────────── */
 
-function TableCell({ value, isEditable, isHeader, onChange }: {
+function TableCell({ value, isEditable, isHeader, onChange, onTabNext, onTabPrev, autoFocus }: {
   value:      string
   isEditable: boolean
   isHeader:   boolean
   onChange:   (v: string) => void
+  onTabNext:  () => void
+  onTabPrev:  () => void
+  autoFocus?: boolean
 }) {
   const ref = useRef<HTMLTableCellElement>(null)
 
@@ -3617,24 +3659,47 @@ function TableCell({ value, isEditable, isHeader, onChange }: {
     }
   }, [value, isEditable])
 
+  // Focus this cell when autoFocus is set (Tab navigation)
+  useEffect(() => {
+    if (autoFocus && isEditable && ref.current) {
+      ref.current.focus()
+      const range = document.createRange()
+      range.selectNodeContents(ref.current)
+      range.collapse(false)
+      const sel = window.getSelection()
+      sel?.removeAllRanges()
+      sel?.addRange(range)
+    }
+  }, [autoFocus, isEditable])
+
   return (
     <td
       ref={ref}
       contentEditable={isEditable || undefined}
       suppressContentEditableWarning
       onBlur={e => onChange(e.currentTarget.innerText)}
+      onKeyDown={e => {
+        if (!isEditable) return
+        if (e.key === 'Tab') {
+          e.preventDefault()
+          onChange(ref.current?.innerText ?? '')
+          if (e.shiftKey) onTabPrev(); else onTabNext()
+        }
+      }}
       style={{
-        border: '1px solid rgba(255,255,255,0.22)',
-        padding: '4px 8px',
+        border: '1px solid rgba(255,255,255,0.25)',
+        padding: '6px 10px',
         fontSize: 13,
         color: '#ffffff',
-        backgroundColor: isHeader ? 'rgba(0,0,121,0.65)' : 'rgba(255,255,255,0.05)',
+        backgroundColor: isHeader ? 'rgba(0,0,121,0.55)' : 'rgba(255,255,255,0.04)',
         fontWeight: isHeader ? 600 : 400,
         outline: 'none',
         verticalAlign: 'middle',
         overflow: 'hidden',
-        whiteSpace: 'nowrap',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
         cursor: isEditable ? 'text' : 'default',
+        transition: 'background 0.15s',
       }}
     />
   )
@@ -3642,23 +3707,38 @@ function TableCell({ value, isEditable, isHeader, onChange }: {
 
 /* ── Canvas text element view ──────────────────────────────────────────── */
 
-function CanvasTextView({ el, isSelected, onUpdate }: {
-  el:         CanvasTextEl
-  isSelected: boolean
-  onUpdate:   (p: Partial<CanvasTextEl>) => void
+function CanvasTextView({ el, isEditing, onUpdate }: {
+  el:        CanvasTextEl
+  isEditing: boolean
+  onUpdate:  (p: Partial<CanvasTextEl>) => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
 
+  // Only rewrite DOM when the element is first mounted, not on every keystroke
   useEffect(() => {
     if (ref.current && document.activeElement !== ref.current) {
       ref.current.innerHTML = el.html
     }
-  }, [el.id]) // Only rewrite DOM on element mount, not every keystroke
+  }, [el.id])
+
+  // Auto-focus when entering edit mode
+  useEffect(() => {
+    if (isEditing && ref.current) {
+      ref.current.focus()
+      // Place cursor at end
+      const range = document.createRange()
+      range.selectNodeContents(ref.current)
+      range.collapse(false)
+      const sel = window.getSelection()
+      sel?.removeAllRanges()
+      sel?.addRange(range)
+    }
+  }, [isEditing])
 
   return (
     <div
       ref={ref}
-      contentEditable={isSelected || undefined}
+      contentEditable={isEditing || undefined}
       suppressContentEditableWarning
       onBlur={e => onUpdate({ html: e.currentTarget.innerHTML })}
       style={{
@@ -3672,8 +3752,9 @@ function CanvasTextView({ el, isSelected, onUpdate }: {
         overflow: 'hidden',
         lineHeight: 1.4,
         wordBreak: 'break-word',
-        cursor: isSelected ? 'text' : 'default',
-        userSelect: isSelected ? 'text' : 'none',
+        // Crosshair when just selected (ready to move), text cursor when editing
+        cursor: isEditing ? 'text' : 'default',
+        userSelect: isEditing ? 'text' : 'none',
         boxSizing: 'border-box',
       }}
     />
@@ -3687,6 +3768,8 @@ function CanvasTableView({ el, isSelected, onUpdate }: {
   isSelected: boolean
   onUpdate:   (p: Partial<CanvasTableEl>) => void
 }) {
+  const [focusedCell, setFocusedCell] = useState<[number, number] | null>(null)
+
   function updateCell(r: number, c: number, text: string) {
     const cells = el.cells.map((row, ri) =>
       row.map((cell, ci) => (ri === r && ci === c ? text : cell)),
@@ -3694,9 +3777,67 @@ function CanvasTableView({ el, isSelected, onUpdate }: {
     onUpdate({ cells })
   }
 
+  function addRow() {
+    const newRow = Array(el.cols).fill('')
+    onUpdate({ cells: [...el.cells, newRow], rows: el.rows + 1 })
+  }
+  function removeRow() {
+    if (el.rows <= 1) return
+    onUpdate({ cells: el.cells.slice(0, -1), rows: el.rows - 1 })
+  }
+  function addCol() {
+    onUpdate({
+      cells: el.cells.map(row => [...row, '']),
+      cols: el.cols + 1,
+    })
+  }
+  function removeCol() {
+    if (el.cols <= 1) return
+    onUpdate({
+      cells: el.cells.map(row => row.slice(0, -1)),
+      cols: el.cols - 1,
+    })
+  }
+
+  const totalCells = el.rows * el.cols
+  function tabNext(ri: number, ci: number) {
+    const idx = ri * el.cols + ci
+    const next = (idx + 1) % totalCells
+    setFocusedCell([Math.floor(next / el.cols), next % el.cols])
+  }
+  function tabPrev(ri: number, ci: number) {
+    const idx = ri * el.cols + ci
+    const prev = (idx - 1 + totalCells) % totalCells
+    setFocusedCell([Math.floor(prev / el.cols), prev % el.cols])
+  }
+
   return (
-    <div style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
-      <table style={{ width: '100%', height: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Row / col controls — only shown when table is selected */}
+      {isSelected && (
+        <div
+          onPointerDown={e => e.stopPropagation()}
+          style={{ display: 'flex', gap: 4, padding: '3px 4px', background: 'rgba(0,0,0,0.55)', flexShrink: 0, flexWrap: 'wrap' }}
+        >
+          <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', fontWeight: 600, display: 'flex', alignItems: 'center', paddingRight: 4 }}>ROWS</span>
+          <CtrlBtn onClick={addRow}    title="Add row">    <Plus  className="size-2.5" /></CtrlBtn>
+          <CtrlBtn onClick={removeRow} title="Remove last row" disabled={el.rows <= 1}><Minus className="size-2.5" /></CtrlBtn>
+          <span style={{ width: 1, background: 'rgba(255,255,255,0.15)', margin: '0 2px' }} />
+          <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', fontWeight: 600, display: 'flex', alignItems: 'center', paddingRight: 4 }}>COLS</span>
+          <CtrlBtn onClick={addCol}    title="Add column">   <Plus  className="size-2.5" /></CtrlBtn>
+          <CtrlBtn onClick={removeCol} title="Remove last column" disabled={el.cols <= 1}><Minus className="size-2.5" /></CtrlBtn>
+          <span style={{ width: 1, background: 'rgba(255,255,255,0.15)', margin: '0 2px' }} />
+          <CtrlBtn
+            onClick={() => onUpdate({ hasHeader: !el.hasHeader })}
+            title={el.hasHeader ? 'Remove header row' : 'Add header row'}
+            active={el.hasHeader}
+          >
+            <span style={{ fontSize: 8, fontWeight: 700 }}>H</span>
+          </CtrlBtn>
+          <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)', display: 'flex', alignItems: 'center', marginLeft: 2 }}>Tab to navigate</span>
+        </div>
+      )}
+      <table style={{ width: '100%', flex: 1, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
         <tbody>
           {el.cells.map((row, ri) => (
             <tr key={ri}>
@@ -3706,7 +3847,10 @@ function CanvasTableView({ el, isSelected, onUpdate }: {
                   value={cell}
                   isEditable={isSelected}
                   isHeader={el.hasHeader && ri === 0}
-                  onChange={text => updateCell(ri, ci, text)}
+                  autoFocus={isSelected && !!focusedCell && focusedCell[0] === ri && focusedCell[1] === ci}
+                  onChange={text => { updateCell(ri, ci, text); setFocusedCell(null) }}
+                  onTabNext={() => tabNext(ri, ci)}
+                  onTabPrev={() => tabPrev(ri, ci)}
                 />
               ))}
             </tr>
@@ -3717,27 +3861,64 @@ function CanvasTableView({ el, isSelected, onUpdate }: {
   )
 }
 
+/* Tiny control button used in the table toolbar */
+function CtrlBtn({ onClick, title, disabled, active, children }: {
+  onClick:   () => void
+  title?:    string
+  disabled?: boolean
+  active?:   boolean
+  children:  React.ReactNode
+}) {
+  return (
+    <button
+      onPointerDown={e => e.stopPropagation()}
+      onClick={e => { e.stopPropagation(); onClick() }}
+      disabled={disabled}
+      title={title}
+      style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        width: 18, height: 18, borderRadius: 3, border: 'none', cursor: disabled ? 'not-allowed' : 'pointer',
+        background: active ? 'rgba(0,176,255,0.5)' : 'rgba(255,255,255,0.15)',
+        color: disabled ? 'rgba(255,255,255,0.25)' : 'white',
+        padding: 0, flexShrink: 0,
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
 /* ── Single positioned element (drag + resize wrapper) ─────────────────── */
 
-const RESIZE_CORNERS = [
-  { id: 'nw' as const, style: { top: -5, left: -5,   cursor: 'nw-resize' } },
-  { id: 'ne' as const, style: { top: -5, right: -5,  cursor: 'ne-resize' } },
-  { id: 'se' as const, style: { bottom: -5, right: -5, cursor: 'se-resize' } },
-  { id: 'sw' as const, style: { bottom: -5, left: -5, cursor: 'sw-resize' } },
+const RESIZE_HANDLES: { id: ResizeHandle; style: React.CSSProperties }[] = [
+  { id: 'nw', style: { top: -5,  left: -5,                            cursor: 'nw-resize' } },
+  { id: 'n',  style: { top: -5,  left: 'calc(50% - 5px)',             cursor: 'n-resize'  } },
+  { id: 'ne', style: { top: -5,  right: -5,                           cursor: 'ne-resize' } },
+  { id: 'e',  style: { top: 'calc(50% - 5px)', right: -5,             cursor: 'e-resize'  } },
+  { id: 'se', style: { bottom: -5, right: -5,                         cursor: 'se-resize' } },
+  { id: 's',  style: { bottom: -5, left: 'calc(50% - 5px)',           cursor: 's-resize'  } },
+  { id: 'sw', style: { bottom: -5, left: -5,                          cursor: 'sw-resize' } },
+  { id: 'w',  style: { top: 'calc(50% - 5px)', left: -5,              cursor: 'w-resize'  } },
 ]
 
-function CanvasElView({ el, isSelected, onSelect, onMoveStart, onResizeStart, onUpdate, onDelete }: {
+function CanvasElView({ el, isSelected, isEditing, onSelect, onDoubleClick, onMoveStart, onResizeStart, onUpdate, onDelete }: {
   el:            CanvasEl
   isSelected:    boolean
+  isEditing:     boolean
   onSelect:      (e: React.MouseEvent) => void
+  onDoubleClick: () => void
   onMoveStart:   (e: React.PointerEvent) => void
-  onResizeStart: (e: React.PointerEvent, corner: 'nw' | 'ne' | 'se' | 'sw') => void
+  onResizeStart: (e: React.PointerEvent, handle: ResizeHandle) => void
   onUpdate:      (p: Partial<CanvasEl>) => void
   onDelete:      () => void
 }) {
+  // Border: blue when selected, green when actively editing text
+  const borderColor = isEditing ? '#42db66' : '#00b0ff'
+
   return (
     <div
       onClick={onSelect}
+      onDoubleClick={e => { e.stopPropagation(); onDoubleClick() }}
       style={{
         position: 'absolute',
         left: `${el.x}%`,
@@ -3745,7 +3926,7 @@ function CanvasElView({ el, isSelected, onSelect, onMoveStart, onResizeStart, on
         width: `${el.w}%`,
         height: `${el.h}%`,
         boxSizing: 'border-box',
-        border: isSelected ? '2px solid #00b0ff' : '1px dashed rgba(255,255,255,0.0)',
+        border: isSelected ? `2px solid ${borderColor}` : '1px dashed rgba(255,255,255,0.0)',
         borderRadius: 4,
         overflow: 'visible',
       }}
@@ -3761,7 +3942,7 @@ function CanvasElView({ el, isSelected, onSelect, onMoveStart, onResizeStart, on
             right: 0,
             height: 20,
             cursor: 'move',
-            background: '#00b0ff',
+            background: borderColor,
             borderRadius: '4px 4px 0 0',
             display: 'flex',
             alignItems: 'center',
@@ -3773,7 +3954,9 @@ function CanvasElView({ el, isSelected, onSelect, onMoveStart, onResizeStart, on
         >
           <GripVertical className="size-3 text-white/80 shrink-0" />
           <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.85)', fontWeight: 600 }}>
-            {el.kind === 'text' ? 'Text' : el.kind === 'image' ? 'Image' : 'Table'}
+            {el.kind === 'text'
+              ? (isEditing ? 'Editing — click outside to finish' : 'Text · double-click to edit')
+              : el.kind === 'image' ? 'Image' : 'Table'}
           </span>
           <button
             onPointerDown={e => e.stopPropagation()}
@@ -3789,7 +3972,7 @@ function CanvasElView({ el, isSelected, onSelect, onMoveStart, onResizeStart, on
       {el.kind === 'text' ? (
         <CanvasTextView
           el={el as CanvasTextEl}
-          isSelected={isSelected}
+          isEditing={isEditing}
           onUpdate={p => onUpdate(p as Partial<CanvasEl>)}
         />
       ) : el.kind === 'image' ? (
@@ -3813,20 +3996,20 @@ function CanvasElView({ el, isSelected, onSelect, onMoveStart, onResizeStart, on
         />
       )}
 
-      {/* Resize handles */}
-      {isSelected && RESIZE_CORNERS.map(c => (
+      {/* 8 resize handles — corners + edge midpoints */}
+      {isSelected && RESIZE_HANDLES.map(h => (
         <div
-          key={c.id}
-          onPointerDown={e => { e.stopPropagation(); onResizeStart(e, c.id) }}
+          key={h.id}
+          onPointerDown={e => { e.stopPropagation(); onResizeStart(e, h.id) }}
           style={{
             position: 'absolute',
             width: 10,
             height: 10,
-            background: '#00b0ff',
+            background: borderColor,
             border: '2px solid white',
             borderRadius: 2,
             zIndex: 25,
-            ...c.style,
+            ...h.style,
           }}
         />
       ))}
@@ -3836,10 +4019,11 @@ function CanvasElView({ el, isSelected, onSelect, onMoveStart, onResizeStart, on
 
 /* ── Main CanvasEditor ─────────────────────────────────────────────────── */
 
+type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
 type CanvasDrag = {
   mode:    'move' | 'resize'
   elId:    string
-  corner?: 'nw' | 'ne' | 'se' | 'sw'
+  handle?: ResizeHandle
   px0:     number; py0: number
   ex0:     number; ey0: number; ew0: number; eh0: number
 } | null
@@ -3850,6 +4034,7 @@ function CanvasEditor({ slide, onUpdate }: {
   onUpdate: (p: any) => void
 }) {
   const [selectedId,   setSelectedId]   = useState<string | null>(null)
+  const [editingId,    setEditingId]    = useState<string | null>(null)
   const [showBg,       setShowBg]       = useState(false)
   const [showTableCfg, setShowTableCfg] = useState(false)
   const [drag,         setDrag]         = useState<CanvasDrag>(null)
@@ -3904,10 +4089,10 @@ function CanvasEditor({ slide, onUpdate }: {
     setDrag({ mode: 'move', elId, px0: e.clientX, py0: e.clientY, ex0: el.x, ey0: el.y, ew0: el.w, eh0: el.h })
   }
 
-  function startResize(e: React.PointerEvent, elId: string, corner: 'nw' | 'ne' | 'se' | 'sw') {
+  function startResize(e: React.PointerEvent, elId: string, handle: ResizeHandle) {
     e.stopPropagation()
     const el = slide.elements.find(x => x.id === elId)!
-    setDrag({ mode: 'resize', elId, corner, px0: e.clientX, py0: e.clientY, ex0: el.x, ey0: el.y, ew0: el.w, eh0: el.h })
+    setDrag({ mode: 'resize', elId, handle, px0: e.clientX, py0: e.clientY, ex0: el.x, ey0: el.y, ew0: el.w, eh0: el.h })
   }
 
   function onPtrMove(e: React.PointerEvent) {
@@ -3925,19 +4110,24 @@ function CanvasEditor({ slide, onUpdate }: {
         y: Math.max(0, Math.min(100 - el.h, drag.ey0 + dy)),
       })
     } else {
-      let { x, y, w, h } = { x: drag.ex0, y: drag.ey0, w: drag.ew0, h: drag.eh0 }
-      if      (drag.corner === 'se') { w = Math.max(MIN_W, drag.ew0 + dx); h = Math.max(MIN_H, drag.eh0 + dy) }
-      else if (drag.corner === 'sw') { const nw = Math.max(MIN_W, drag.ew0 - dx); x = drag.ex0 + drag.ew0 - nw; w = nw; h = Math.max(MIN_H, drag.eh0 + dy) }
-      else if (drag.corner === 'ne') { const nh = Math.max(MIN_H, drag.eh0 - dy); y = drag.ey0 + drag.eh0 - nh; w = Math.max(MIN_W, drag.ew0 + dx); h = nh }
-      else if (drag.corner === 'nw') { const nw = Math.max(MIN_W, drag.ew0 - dx); const nh = Math.max(MIN_H, drag.eh0 - dy); x = drag.ex0 + drag.ew0 - nw; y = drag.ey0 + drag.eh0 - nh; w = nw; h = nh }
-      updateEl(drag.elId, { x, y, w, h })
+      // Elegant 8-handle resize: use string-includes to determine which edges to move.
+      // 'n' in handle → top edge; 's' → bottom; 'e' → right; 'w' → left.
+      // Works for all combinations: 'ne', 'nw', 'se', 'sw', 'n', 's', 'e', 'w'.
+      const hnd = drag.handle ?? 'se'
+      let rx = drag.ex0, ry = drag.ey0, rw = drag.ew0, rh = drag.eh0
+      if (hnd.includes('e')) { rw = Math.max(MIN_W, drag.ew0 + dx) }
+      if (hnd.includes('w')) { const nw = Math.max(MIN_W, drag.ew0 - dx); rx = drag.ex0 + drag.ew0 - nw; rw = nw }
+      if (hnd.includes('s')) { rh = Math.max(MIN_H, drag.eh0 + dy) }
+      if (hnd.includes('n')) { const nh = Math.max(MIN_H, drag.eh0 - dy); ry = drag.ey0 + drag.eh0 - nh; rh = nh }
+      updateEl(drag.elId, { x: rx, y: ry, w: rw, h: rh })
     }
   }
 
   const selectedEl  = slide.elements.find(e => e.id === selectedId) ?? null
-  const bgStyle: React.CSSProperties = slide.bg.type === 'color'
-    ? { backgroundColor: slide.bg.value }
-    : { backgroundImage: slide.bg.value }
+  const bgStyle: React.CSSProperties =
+    slide.bg.type === 'color'    ? { backgroundColor: slide.bg.value } :
+    slide.bg.type === 'gradient' ? { backgroundImage: slide.bg.value } :
+    /* image */                    { backgroundImage: `url(${slide.bg.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
 
   return (
     <motion.div
@@ -4023,13 +4213,14 @@ function CanvasEditor({ slide, onUpdate }: {
         <TableConfigPanel onAdd={addTable} onCancel={() => setShowTableCfg(false)} />
       )}
 
-      {/* ── Text formatting toolbar ── */}
+      {/* ── Text formatting toolbar — shown when a text element is selected (editing or not) ── */}
       {selectedEl?.kind === 'text' && (
         <TextFormatBar
           el={selectedEl as CanvasTextEl}
           onUpdate={p => updateEl(selectedEl.id, p)}
         />
       )}
+
 
       {/* ── Canvas area ── */}
       <div
@@ -4042,7 +4233,12 @@ function CanvasEditor({ slide, onUpdate }: {
       >
         <div
           className="absolute inset-0 rounded-xl overflow-visible"
-          onClick={e => { if (e.target === e.currentTarget) setSelectedId(null) }}
+          onClick={e => {
+            if (e.target === e.currentTarget) {
+              setSelectedId(null)
+              setEditingId(null)
+            }
+          }}
         >
           {slide.elements.length === 0 && (
             <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-white/25 select-none pointer-events-none">
@@ -4055,9 +4251,11 @@ function CanvasEditor({ slide, onUpdate }: {
               key={el.id}
               el={el}
               isSelected={el.id === selectedId}
-              onSelect={e => { e.stopPropagation(); setSelectedId(el.id) }}
+              isEditing={el.id === editingId}
+              onSelect={e => { e.stopPropagation(); setSelectedId(el.id); if (editingId !== el.id) setEditingId(null) }}
+              onDoubleClick={() => { setSelectedId(el.id); if (el.kind === 'text') setEditingId(el.id) }}
               onMoveStart={e => startMove(e, el.id)}
-              onResizeStart={(e, corner) => startResize(e, el.id, corner)}
+              onResizeStart={(e, handle) => startResize(e, el.id, handle)}
               onUpdate={patch => updateEl(el.id, patch)}
               onDelete={() => deleteEl(el.id)}
             />
@@ -4066,7 +4264,7 @@ function CanvasEditor({ slide, onUpdate }: {
       </div>
 
       <p className="mt-2 text-[11px] text-midnight-sky-400">
-        Click to select · Drag the blue bar to move · Pull corners to resize · Click outside to deselect
+        Click to select · Double-click text to edit · Drag the bar to move · 8 handles to resize · Click outside to deselect
       </p>
     </motion.div>
   )

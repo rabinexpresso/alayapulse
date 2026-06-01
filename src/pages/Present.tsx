@@ -106,7 +106,7 @@ interface QSlide {
   oeMaxSubmissions?: number
 }
 
-interface CanvasBg     { type: 'color' | 'gradient'; value: string }
+interface CanvasBg     { type: 'color' | 'gradient' | 'image'; value: string }
 interface CanvasBaseEl { id: string; kind: 'text' | 'table' | 'image'; x: number; y: number; w: number; h: number }
 interface CanvasTextEl extends CanvasBaseEl { kind: 'text'; html: string; fontSize: number; align: 'left' | 'center' | 'right'; color: string }
 interface CanvasTableEl extends CanvasBaseEl { kind: 'table'; rows: number; cols: number; cells: string[][]; hasHeader: boolean }
@@ -1396,9 +1396,10 @@ function CanvasSlideView({ slide }: { slide: CanvasSlide }) {
   // Defensive defaults — protect against malformed data so canvas always renders
   const bg       = slide.bg ?? { type: 'color' as const, value: '#000079' }
   const elements = slide.elements ?? []
-  const bgStyle: React.CSSProperties = bg.type === 'color'
-    ? { backgroundColor: bg.value }
-    : { backgroundImage: bg.value }
+  const bgStyle: React.CSSProperties =
+    bg.type === 'color'    ? { backgroundColor: bg.value } :
+    bg.type === 'gradient' ? { backgroundImage: bg.value } :
+    /* image */              { backgroundImage: `url(${bg.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
 
   // Detect if bg is light so we know whether to use light or dark text for the empty hint
   const isLightBg = bg.type === 'color' && /^#(f|e|d|c)/i.test(bg.value)
