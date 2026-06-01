@@ -21,6 +21,7 @@ export interface Deck {
   slides:    unknown[]   // same shape as Create.tsx Slide[]
   createdAt: number      // unix ms
   updatedAt: number      // unix ms
+  isQuiz?:   boolean
 }
 
 /* ─────────────────────────────────────────────────────────────────────────

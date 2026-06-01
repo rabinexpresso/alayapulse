@@ -11,7 +11,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import { cn } from '@/lib/utils'
 import {
   updateSessionState, endSession, subscribeToSlideResponses, subscribeToViewerCount,
-  fetchAllSessionResponses, startTimer, clearTimer, resetSlideVotes,
+  fetchAllSessionResponses, startTimer, clearTimer, resetSlideVotes, updateQuestionMeta,
   type Response as FirestoreResponse,
 } from '@/lib/session'
 import type {
@@ -113,8 +113,9 @@ interface CanvasTableEl extends CanvasBaseEl { kind: 'table'; rows: number; cols
 interface CanvasImageEl extends CanvasBaseEl { kind: 'image'; imgUrl: string; objectFit: 'cover' | 'contain' }
 type CanvasEl = CanvasTextEl | CanvasTableEl | CanvasImageEl
 interface CanvasSlide  { id: string; type: 'canvas'; bg: CanvasBg; elements: CanvasEl[] }
+interface LeaderboardSlide { id: string; type: 'leaderboard' }
 
-type AnySlide = PdfSlide | ContentSlide | ImageSlide | VideoSlide | HtmlSlide | QSlide | CanvasSlide
+type AnySlide = PdfSlide | ContentSlide | ImageSlide | VideoSlide | HtmlSlide | QSlide | CanvasSlide | LeaderboardSlide
 
 // ── Demo deck — used when navigating directly to /present ─────────────────
 
@@ -257,6 +258,7 @@ export default function Present() {
   const stateDeckTitle: string | undefined  = locationState.deckTitle
   const stateDeckId: string | undefined     = locationState.deckId
   const isRealSession = !!stateSlides
+  const isQuiz: boolean = locationState.isQuiz ?? false
   const deck          = stateSlides ?? DEMO_DECK
   // Honour the slide selected in the editor when session starts
   const startSlide: number = Math.min(locationState.startSlide ?? 0, (stateSlides ?? DEMO_DECK).length - 1)
@@ -275,6 +277,7 @@ export default function Present() {
   // the session and hands it back to the editor for save.
   const peakViewerRef     = useRef(0)
   const sessionStartedAt  = useRef<number>(Date.now())
+  const questionMetaRef   = useRef<Record<string, { openedAt: number; duration: number | null }>>({})
 
   // ── Question timer ─────────────────────────────────────────────────────
   const [timerEndsAt,   setTimerEndsAt]   = useState<number | null>(null)
@@ -292,7 +295,7 @@ export default function Present() {
   const codeRef           = useRef('')              // dummy init — synced below
 
   const slide      = deck[current] as AnySlide
-  const isQuestion = slide.type !== 'pdf' && slide.type !== 'image' && slide.type !== 'video' && slide.type !== 'content' && slide.type !== 'canvas' && slide.type !== 'html'
+  const isQuestion = slide.type !== 'pdf' && slide.type !== 'image' && slide.type !== 'video' && slide.type !== 'content' && slide.type !== 'canvas' && slide.type !== 'html' && slide.type !== 'leaderboard'
   const code       = (sessionId ?? 'DEMO').slice(0, 6).toUpperCase()
   const joinUrl    = `${window.location.origin}/join?code=${code}`
 
@@ -306,6 +309,14 @@ export default function Present() {
   useEffect(() => {
     if (!isRealSession) return
     updateSessionState(code, current, phase).catch(console.error)
+    // Record when each quiz question opens so audience can calculate speed points
+    if (isQuiz && isQuestion && phase === 'question') {
+      const slideId  = (slide as QSlide).id
+      const openedAt = Date.now()
+      questionMetaRef.current[slideId] = { openedAt, duration: null }
+      updateQuestionMeta(code, slideId, openedAt, null).catch(console.error)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRealSession, code, current, phase])
 
   // ── Subscribe to live viewer count ────────────────────────────────────
@@ -365,7 +376,18 @@ export default function Present() {
     setTimerEndsAt(endsAt)
     setTimerDuration(seconds)
     setShowTimerMenu(false)
-    if (isRealSessionRef.current) startTimer(codeRef.current, seconds).catch(console.error)
+    if (isRealSessionRef.current) {
+      startTimer(codeRef.current, seconds).catch(console.error)
+      if (isQuestionRef.current) {
+        // Update questionMeta for the current question with the chosen timer duration
+        for (const [sid, meta] of Object.entries(questionMetaRef.current)) {
+          if (meta.duration === null) {
+            questionMetaRef.current[sid] = { ...meta, duration: seconds }
+            updateQuestionMeta(codeRef.current, sid, meta.openedAt, seconds).catch(console.error)
+          }
+        }
+      }
+    }
   }, [])
 
   // Clear all votes for the current slide and return to question phase so audience can vote again
@@ -527,6 +549,9 @@ export default function Present() {
               ratingAvgs={ratingAvgs}
               ratingDist={ratingDist}
               onReveal={() => { setTransType('phase'); setDirection(1); setPhase('results') }}
+              sessionCode={code}
+              deck={deck}
+              questionMeta={questionMetaRef.current}
             />
           </motion.div>
         </AnimatePresence>
@@ -728,7 +753,7 @@ export default function Present() {
                             <p className="px-3 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-white/35">
                               Timer
                             </p>
-                            {[15, 30, 60, 90].map(s => (
+                            {[15, 30, 45, 60, 90, 120].map(s => (
                               <button
                                 key={s}
                                 onClick={() => handleStartTimer(s)}
@@ -926,7 +951,7 @@ export default function Present() {
 function SlideContent({
   slide, phase, responseCount,
   mcqVotes, cloudWords, openAnswers, ratingAvgs, ratingDist,
-  onReveal,
+  onReveal, sessionCode, deck, questionMeta,
 }: {
   slide:          AnySlide
   phase:          SlidePhase
@@ -937,13 +962,17 @@ function SlideContent({
   ratingAvgs:     number[]
   ratingDist:     number[][]
   onReveal:       () => void
+  sessionCode:    string
+  deck:           AnySlide[]
+  questionMeta:   Record<string, { openedAt: number; duration: number | null }>
 }) {
-  if (slide.type === 'pdf')     return <PdfSlideView slide={slide} />
-  if (slide.type === 'image')   return <ImageSlideView slide={slide} />
-  if (slide.type === 'video')   return <VideoSlideView slide={slide} />
-  if (slide.type === 'html')    return null   // rendered by PersistentHtmlIframe layer
-  if (slide.type === 'content') return <ContentSlideView slide={slide as ContentSlide} />
-  if (slide.type === 'canvas')  return <CanvasSlideView slide={slide as CanvasSlide} />
+  if (slide.type === 'pdf')          return <PdfSlideView slide={slide} />
+  if (slide.type === 'image')        return <ImageSlideView slide={slide} />
+  if (slide.type === 'video')        return <VideoSlideView slide={slide} />
+  if (slide.type === 'html')         return null   // rendered by PersistentHtmlIframe layer
+  if (slide.type === 'content')      return <ContentSlideView slide={slide as ContentSlide} />
+  if (slide.type === 'canvas')       return <CanvasSlideView slide={slide as CanvasSlide} />
+  if (slide.type === 'leaderboard')  return <LeaderboardSlideView sessionCode={sessionCode} deck={deck} questionMeta={questionMeta} />
   if (phase === 'results')  return (
     <ResultsSlideView
       slide={slide}
@@ -2766,6 +2795,161 @@ function getTimerColors(
   if (secsLeft <= 10) return   { bar: '#ff0065',  text: '#ffffff',           pill: 'rgba(200,0,60,0.70)',   border: 'rgba(255,0,101,0.35)'   }
   if (secsLeft <= 30) return   { bar: '#ffc709',  text: '#3a2a00',           pill: 'rgba(200,155,0,0.65)',  border: 'rgba(255,199,9,0.35)'   }
   return                       { bar: '#00b0ff',  text: '#ffffff',           pill: 'rgba(0,100,180,0.60)',  border: 'rgba(0,176,255,0.30)'   }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Quiz leaderboard — scoring and display
+   ───────────────────────────────────────────────────────────────────────── */
+
+function calculateQuizLeaderboard(
+  responses: FirestoreResponse[],
+  slides: AnySlide[],
+  questionMeta: Record<string, { openedAt: number; duration: number | null }>,
+): { name: string; score: number }[] {
+  const totals: Record<string, number> = {}
+  for (const slide of slides) {
+    if (slide.type !== 'mcq') continue
+    const qs = slide as QSlide
+    if (!qs.correctAnswers?.length) continue
+    const corrSet = new Set(qs.correctAnswers)
+    const meta = questionMeta[qs.id]
+    const slideResponses = responses.filter(r => r.slideId === qs.id)
+    for (const r of slideResponses) {
+      const name = r.respondentName || 'Anonymous'
+      let selected: number[]
+      try {
+        const p = JSON.parse(r.value)
+        selected = Array.isArray(p) ? p : [parseInt(r.value, 10)]
+      } catch { selected = [parseInt(r.value, 10)] }
+      // All-or-nothing: must match exactly
+      const isCorrect = selected.length === corrSet.size && selected.every(i => corrSet.has(i))
+      if (!isCorrect) continue
+      let pts = 100
+      if (meta?.duration && meta.openedAt) {
+        const submittedMs = (r.submittedAt as unknown as { toMillis(): number }).toMillis?.() ?? Date.now()
+        const elapsed = submittedMs - meta.openedAt
+        const remaining = Math.max(0, meta.duration * 1000 - elapsed)
+        pts += Math.round((remaining / (meta.duration * 1000)) * 100)
+      }
+      totals[name] = (totals[name] ?? 0) + pts
+    }
+  }
+  return Object.entries(totals)
+    .map(([name, score]) => ({ name, score }))
+    .sort((a, b) => b.score - a.score)
+}
+
+const MEDAL_COLORS = ['#ffc709', '#c0c0c0', '#cd7f32']
+
+function LeaderboardSlideView({
+  sessionCode, deck, questionMeta,
+}: {
+  sessionCode:  string
+  deck:         AnySlide[]
+  questionMeta: Record<string, { openedAt: number; duration: number | null }>
+}) {
+  const [leaderboard, setLeaderboard] = useState<{ name: string; score: number }[]>([])
+  const [revealCount, setRevealCount] = useState(0)
+
+  useEffect(() => {
+    if (sessionCode === 'DEMO') {
+      setLeaderboard([
+        { name: 'Sarah M.',  score: 380 },
+        { name: 'James T.',  score: 340 },
+        { name: 'Priya K.',  score: 290 },
+        { name: 'Anonymous', score: 250 },
+        { name: 'Marcus L.', score: 210 },
+      ])
+      return
+    }
+    fetchAllSessionResponses(sessionCode)
+      .then(responses => {
+        const board = calculateQuizLeaderboard(responses, deck, questionMeta)
+        setLeaderboard(board.slice(0, 10))
+      })
+      .catch(console.error)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionCode])
+
+  // Reveal entries 10th → 1st, one per 700ms
+  useEffect(() => {
+    if (leaderboard.length === 0) return
+    const total = Math.min(leaderboard.length, 10)
+    if (revealCount >= total) return
+    const id = setTimeout(() => setRevealCount(c => c + 1), 700)
+    return () => clearTimeout(id)
+  }, [leaderboard, revealCount])
+
+  const top10 = leaderboard.slice(0, 10)
+  const maxScore = top10[0]?.score ?? 1
+  // Reveal from last (10th) to first (1st)
+  const revealedEntries = top10.slice(top10.length - revealCount)
+
+  return (
+    <div className="absolute inset-0 flex flex-col overflow-hidden bg-midnight-sky-900 px-14 pt-12 pb-24">
+      <motion.h1
+        initial={{ opacity: 0, y: -16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+        className="mb-8 text-center text-4xl font-bold tracking-tight text-white"
+      >
+        LEADERBOARD
+      </motion.h1>
+
+      {leaderboard.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center">
+          <p className="text-white/30">No scores yet — no quiz questions have been answered.</p>
+        </div>
+      ) : (
+        <div className="flex flex-1 flex-col gap-3 overflow-hidden">
+          {revealedEntries.map(entry => {
+            const rank = top10.indexOf(entry) + 1
+            const barPct = maxScore > 0 ? (entry.score / maxScore) * 100 : 0
+            const medalColor = rank <= 3 ? MEDAL_COLORS[rank - 1] : null
+            return (
+              <motion.div
+                key={entry.name}
+                initial={{ opacity: 0, x: -40 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+                className="flex items-center gap-4"
+              >
+                <span
+                  className="w-8 shrink-0 text-center text-lg font-bold tabular-nums"
+                  style={{ color: medalColor ?? 'rgba(255,255,255,0.4)' }}
+                >
+                  {rank}
+                </span>
+                <div className="flex flex-1 flex-col gap-1">
+                  <span
+                    className="text-sm font-semibold"
+                    style={{ color: medalColor ?? 'rgba(255,255,255,0.85)' }}
+                  >
+                    {entry.name}
+                  </span>
+                  <div className="relative h-2 overflow-hidden rounded-full bg-white/10">
+                    <motion.div
+                      className="absolute inset-y-0 left-0 rounded-full"
+                      style={{ backgroundColor: medalColor ?? '#ff0065' }}
+                      initial={{ width: '0%' }}
+                      animate={{ width: `${barPct}%` }}
+                      transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
+                    />
+                  </div>
+                </div>
+                <span
+                  className="w-20 shrink-0 text-right text-base font-bold tabular-nums"
+                  style={{ color: medalColor ?? 'rgba(255,255,255,0.7)' }}
+                >
+                  {entry.score.toLocaleString()} pts
+                </span>
+              </motion.div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
 }
 
 /**

@@ -56,6 +56,17 @@ export default function Vote() {
   const [submitting,      setSubmitting]      = useState(false)
   const [submitError,     setSubmitError]     = useState<string | null>(null)
   const [showLeaveModal,  setShowLeaveModal]  = useState(false)
+  // Quiz mode — name entry + per-question score feedback
+  const [quizName,        setQuizName]        = useState('')
+  const [quizNameInput,   setQuizNameInput]   = useState('')
+  const [quizScore,       setQuizScore]       = useState(0)
+  const [lastQuizResult,  setLastQuizResult]  = useState<{
+    isCorrect: boolean
+    answerPts: number
+    speedPts:  number
+    correctAnswer: string
+    slideId: string
+  } | null>(null)
   // Timer countdown — read from session.timerEndsAt, computed client-side
   const [timerSecsLeft,   setTimerSecsLeft]   = useState<number | null>(null)
   const timerIntervalRef  = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -107,6 +118,14 @@ export default function Vote() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [(session as Session | null)?.timerEndsAt])
 
+  // Clear quiz feedback when presenter advances to a new slide
+  useEffect(() => {
+    if (lastQuizResult && session && lastQuizResult.slideId !== (session.slides[session.currentSlide]?.id ?? '')) {
+      setLastQuizResult(null)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.currentSlide])
+
   // ── Loading ────────────────────────────────────────────────────────────
   if (session === undefined) {
     return <FullPageSpinner />
@@ -125,6 +144,40 @@ export default function Vote() {
   // ── Session ended ──────────────────────────────────────────────────────
   if (session.status === 'ended') {
     return <WrapState session={session} attendeeName={attendeeName} />
+  }
+
+  // ── Quiz name gate — must enter name before participating ───────────────
+  if (session.isQuiz && !attendeeName && !quizName) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center bg-white px-5">
+        <div className="w-full max-w-sm rounded-3xl border border-midnight-sky-100 bg-white p-8 shadow-[0_8px_40px_-8px_rgba(0,0,121,0.15)]">
+          <h2 className="text-xl font-semibold text-midnight-sky-900">Enter your name to join</h2>
+          <p className="mt-1.5 text-sm font-light text-midnight-sky-500">
+            Your name will appear on the leaderboard.
+          </p>
+          <input
+            autoFocus
+            value={quizNameInput}
+            onChange={e => setQuizNameInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && quizNameInput.trim()) setQuizName(quizNameInput.trim()) }}
+            placeholder="Your name"
+            className="mt-5 w-full rounded-xl border border-midnight-sky-200 px-4 py-3 text-base text-midnight-sky-900 outline-none transition-all focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/10"
+          />
+          <button
+            onClick={() => { if (quizNameInput.trim()) setQuizName(quizNameInput.trim()) }}
+            disabled={!quizNameInput.trim()}
+            className={cn(
+              'mt-4 w-full rounded-xl py-3 text-sm font-semibold text-white transition-all',
+              quizNameInput.trim()
+                ? 'bg-hot-pink shadow-[0_0_20px_-4px] shadow-hot-pink/40 hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/60'
+                : 'cursor-not-allowed bg-midnight-sky-200',
+            )}
+          >
+            Join Quiz
+          </button>
+        </div>
+      </main>
+    )
   }
 
   const slideData = session.slides[session.currentSlide]
@@ -156,12 +209,36 @@ export default function Vote() {
     setSubmitting(true)
     setSubmitError(null)
     try {
+      const effectiveName = quizName || attendeeName || 'Anonymous'
       await submitResponse(sessionCode!, {
         slideId: slideData.id,
         type:    slideData.type as QType,
         value,
-        respondentName: attendeeName || 'Anonymous',
+        respondentName: effectiveName,
       })
+
+      // Quiz feedback — MCQ only
+      if (session.isQuiz && slideData.type === 'mcq') {
+        const qs = slideData as { options: string[]; correctAnswers?: number[] }
+        const corrSet = new Set(qs.correctAnswers ?? [])
+        let selected: number[]
+        try {
+          const p = JSON.parse(value)
+          selected = Array.isArray(p) ? p : [parseInt(value, 10)]
+        } catch { selected = [parseInt(value, 10)] }
+        const isCorrect = corrSet.size > 0 && selected.length === corrSet.size && selected.every(i => corrSet.has(i))
+        const answerPts = isCorrect ? 100 : 0
+        let speedPts = 0
+        const meta = session.questionMeta?.[slideData.id]
+        if (isCorrect && meta?.duration && meta.openedAt) {
+          const elapsed = Date.now() - meta.openedAt
+          const remaining = Math.max(0, meta.duration * 1000 - elapsed)
+          speedPts = Math.round((remaining / (meta.duration * 1000)) * 100)
+        }
+        const correctAnswer = (qs.correctAnswers ?? []).map(i => String.fromCharCode(65 + i)).join(', ')
+        setQuizScore(prev => prev + answerPts + speedPts)
+        setLastQuizResult({ isCorrect, answerPts, speedPts, correctAnswer, slideId: slideData.id })
+      }
 
       if (slideData.type === 'wordcloud') {
         const maxSubs  = (slideData as { wcMaxSubmissions?: number }).wcMaxSubmissions ?? 3
@@ -209,8 +286,8 @@ export default function Vote() {
     }
   }
 
-  // ── Waiting state: non-interactive slides (pdf, image, video)
-  const isWaiting      = !slideData || !INTERACTIVE_TYPES.has((slideData as { type: string }).type)
+  // ── Waiting state: non-interactive slides (pdf, image, video, leaderboard)
+  const isWaiting      = !slideData || !INTERACTIVE_TYPES.has((slideData as { type: string }).type) || (slideData as { type: string }).type === 'leaderboard'
   const isResultsPhase = session.currentPhase === 'results'
   const timerDuration  = session.timerDuration ?? null
   // Timer expired = locked, even if presenter has moved to the results phase on same slide
@@ -355,6 +432,8 @@ export default function Vote() {
               <WaitingState sessionCode={sessionCode} />
             ) : timerExpired ? (
               <TimesUpState />
+            ) : alreadySubmitted && session.isQuiz && lastQuizResult && lastQuizResult.slideId === slideId ? (
+              <QuizFeedbackState result={lastQuizResult} totalScore={quizScore} />
             ) : alreadySubmitted ? (
               <SubmittedState />
             ) : (
@@ -1336,5 +1415,56 @@ function LoadingDots({ color = 'white' }: { color?: 'white' | 'pink' }) {
         />
       ))}
     </span>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Quiz feedback state — shown after answering an MCQ in quiz mode
+   ───────────────────────────────────────────────────────────────────────── */
+
+function QuizFeedbackState({ result, totalScore }: {
+  result: { isCorrect: boolean; answerPts: number; speedPts: number; correctAnswer: string }
+  totalScore: number
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+      className="flex flex-1 flex-col items-center justify-center gap-6 py-10"
+    >
+      <div className="w-full max-w-sm rounded-2xl border border-midnight-sky-100 bg-white p-6 shadow-[0_4px_24px_-4px_rgba(0,0,121,0.12)]">
+        <p className={cn(
+          'mb-5 text-center text-xl font-bold tracking-wide',
+          result.isCorrect ? 'text-fresh-green' : 'text-hot-pink',
+        )}>
+          {result.isCorrect ? 'CORRECT' : `INCORRECT${result.correctAnswer ? ` · The answer was ${result.correctAnswer}` : ''}`}
+        </p>
+        <div className="space-y-2 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-midnight-sky-500">Answer</span>
+            <span className={cn('font-bold tabular-nums', result.answerPts > 0 ? 'text-fresh-green' : 'text-midnight-sky-400')}>
+              +{result.answerPts}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-midnight-sky-500">Speed</span>
+            <span className={cn('font-bold tabular-nums', result.speedPts > 0 ? 'text-sky-blue' : 'text-midnight-sky-400')}>
+              +{result.speedPts}
+            </span>
+          </div>
+          <div className="my-1 border-t border-midnight-sky-100" />
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-midnight-sky-700">Total</span>
+            <span className="text-lg font-bold tabular-nums text-midnight-sky-900">
+              {totalScore.toLocaleString()} pts
+            </span>
+          </div>
+        </div>
+      </div>
+      <p className="text-sm font-light text-midnight-sky-500">
+        Waiting for the next question…
+      </p>
+    </motion.div>
   )
 }

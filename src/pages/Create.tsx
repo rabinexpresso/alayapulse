@@ -16,7 +16,7 @@ import {
   Cloud, AlignLeft, AlignCenter, AlignRight, Star, Upload, Play,
   LayoutList, Bookmark, BookmarkCheck, Monitor, LayoutGrid,
   Video, Type, List, Quote, Users, BarChart2, PieChart,
-  Layers, X, Table2, Download, Check,
+  Layers, X, Table2, Download, Check, Undo2, Redo2, Trophy,
 } from 'lucide-react'
 import * as pdfjsLib from 'pdfjs-dist'
 import { AlayaMark } from '@/components/AlayaMark'
@@ -226,8 +226,9 @@ interface CanvasImageEl extends CanvasBaseEl {
 }
 type CanvasEl = CanvasTextEl | CanvasTableEl | CanvasImageEl
 interface CanvasSlide { id: string; type: 'canvas'; bg: CanvasBg; elements: CanvasEl[] }
+interface LeaderboardSlide { id: string; type: 'leaderboard' }
 
-type Slide = PdfSlide | ImageSlide | VideoSlide | HtmlSlide | QuestionSlide | ContentSlide | CanvasSlide
+type Slide = PdfSlide | ImageSlide | VideoSlide | HtmlSlide | QuestionSlide | ContentSlide | CanvasSlide | LeaderboardSlide
 
 /* ─────────────────────────────────────────────────────────────────────────
    Constants
@@ -341,6 +342,7 @@ export default function Create() {
   const [currentDeckId, setCurrentDeckId] = useState<string | undefined>(
     deckFromState?.id ?? (returnState.deckId as string | undefined),
   )
+  const [isQuiz, setIsQuiz] = useState<boolean>(deckFromState?.isQuiz ?? false)
   // Last live-poll results, either passed back from Present.tsx on session
   // end OR pre-loaded from My Decks via the navigate state. Saved alongside
   // the deck so the Results page can show them later.
@@ -371,6 +373,79 @@ export default function Create() {
   const [largeHtmlToast, setLargeHtmlToast] = useState<{
     fileName: string; sizeKB: number
   } | null>(null)
+
+  /* ── Undo / Redo history ─────────────────────────────────────────────── */
+  type HistorySnap = { slides: Slide[]; selectedId: string | null }
+  const undoStackRef = useRef<HistorySnap[]>([])
+  const redoStackRef = useRef<HistorySnap[]>([])
+  const [canUndo, setCanUndo] = useState(false)
+  const [canRedo, setCanRedo] = useState(false)
+  // Refs so pushHistory (stable, [] deps) always reads the latest values.
+  const slidesRef     = useRef<Slide[]>(slides)
+  const selectedIdRef = useRef<string | null>(selectedId)
+  useEffect(() => { slidesRef.current = slides },         [slides])
+  useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
+
+  const pushHistory = useCallback(() => {
+    const MAX = 20
+    undoStackRef.current = [
+      ...undoStackRef.current.slice(-(MAX - 1)),
+      { slides: JSON.parse(JSON.stringify(slidesRef.current)), selectedId: selectedIdRef.current },
+    ]
+    // Any new action clears the redo stack
+    redoStackRef.current = []
+    setCanUndo(true)
+    setCanRedo(false)
+  }, [])
+
+  const undoSlides = useCallback(() => {
+    if (!undoStackRef.current.length) return
+    // Save current state to redo stack before reverting
+    redoStackRef.current = [
+      ...redoStackRef.current,
+      { slides: JSON.parse(JSON.stringify(slidesRef.current)), selectedId: selectedIdRef.current },
+    ]
+    const snap = undoStackRef.current[undoStackRef.current.length - 1]
+    undoStackRef.current = undoStackRef.current.slice(0, -1)
+    setCanUndo(undoStackRef.current.length > 0)
+    setCanRedo(true)
+    setSlides(snap.slides)
+    setSelectedId(snap.selectedId)
+  }, [])
+
+  const redoSlides = useCallback(() => {
+    if (!redoStackRef.current.length) return
+    // Save current state to undo stack before re-applying
+    undoStackRef.current = [
+      ...undoStackRef.current,
+      { slides: JSON.parse(JSON.stringify(slidesRef.current)), selectedId: selectedIdRef.current },
+    ]
+    const snap = redoStackRef.current[redoStackRef.current.length - 1]
+    redoStackRef.current = redoStackRef.current.slice(0, -1)
+    setCanUndo(true)
+    setCanRedo(redoStackRef.current.length > 0)
+    setSlides(snap.slides)
+    setSelectedId(snap.selectedId)
+  }, [])
+
+  // Ctrl/Cmd+Z → undo, Ctrl/Cmd+Shift+Z (or Ctrl+Y) → redo
+  // Only fires when focus is NOT inside a text field (those use native text undo).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      const target = e.target as HTMLElement
+      const inTextField =
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+      if (inTextField) return
+
+      if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); undoSlides() }
+      if ((e.key === 'z' && e.shiftKey) || e.key === 'y') { e.preventDefault(); redoSlides() }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [undoSlides, redoSlides])
 
   /**
    * Firebase restores auth state from storage asynchronously on page load.
@@ -431,6 +506,7 @@ export default function Create() {
         slides:    slidesToSave as unknown[],
         createdAt: Date.now(),
         updatedAt: Date.now(),
+        ...(isQuiz ? { isQuiz: true } : {}),
       }
       if (b === 'browser') {
         await browserSaveDeck(deck)
@@ -606,6 +682,7 @@ export default function Create() {
   /* ── Slide mutation ─────────────────────────────────────────────────── */
 
   const addQuestion = useCallback((type: QType, afterId?: string) => {
+    pushHistory()
     const slide = makeQuestion(type)
     setSlides(prev => {
       if (afterId === undefined) return [...prev, slide]
@@ -616,9 +693,10 @@ export default function Create() {
     })
     setSelectedId(slide.id)
     setAddMenu(undefined)
-  }, [])
+  }, [pushHistory])
 
   const deleteSlide = useCallback((id: string) => {
+    pushHistory()
     setSlides(prev => {
       const next = prev.filter(s => s.id !== id)
       if (selectedId === id) {
@@ -627,9 +705,10 @@ export default function Create() {
       }
       return next
     })
-  }, [selectedId])
+  }, [selectedId, pushHistory])
 
   const duplicateSlide = useCallback((id: string) => {
+    pushHistory()
     const newId = uid()
     setSlides(prev => {
       const idx = prev.findIndex(s => s.id === id)
@@ -641,7 +720,7 @@ export default function Create() {
       return next
     })
     setSelectedId(newId)
-  }, [])
+  }, [pushHistory])
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const updateSlide = useCallback((id: string, patch: any) => {
@@ -654,15 +733,17 @@ export default function Create() {
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     const { active, over } = event
     if (over && active.id !== over.id) {
+      pushHistory()
       setSlides(prev => {
         const from = prev.findIndex(s => s.id === active.id)
         const to   = prev.findIndex(s => s.id === over.id)
         return arrayMove(prev, from, to)
       })
     }
-  }, [])
+  }, [pushHistory])
 
   const addContent = useCallback((template: ContentTemplate, afterId?: string) => {
+    pushHistory()
     const slide = makeContent(template)
     setSlides(prev => {
       if (afterId === undefined) return [...prev, slide]
@@ -673,10 +754,24 @@ export default function Create() {
     })
     setSelectedId(slide.id)
     setAddMenu(undefined)
-  }, [])
+  }, [pushHistory])
 
   const addCanvas = useCallback((afterId?: string) => {
+    pushHistory()
     const slide = makeCanvas()
+    setSlides(prev => {
+      if (afterId === undefined) return [...prev, slide]
+      const idx  = prev.findIndex(s => s.id === afterId)
+      const next = [...prev]
+      next.splice(idx + 1, 0, slide)
+      return next
+    })
+    setSelectedId(slide.id)
+    setAddMenu(undefined)
+  }, [pushHistory])
+
+  const addLeaderboard = useCallback((afterId?: string) => {
+    const slide: LeaderboardSlide = { id: uid(), type: 'leaderboard' }
     setSlides(prev => {
       if (afterId === undefined) return [...prev, slide]
       const idx  = prev.findIndex(s => s.id === afterId)
@@ -831,8 +926,8 @@ export default function Create() {
       // https:// URLs — never raw base64 — or large images silently break.
       const cloudSlides = await toCloudinarySlides(slides)
       setSlides(cloudSlides) // lock cloud URLs into the editor so we don't re-upload
-      const code = await createSession(deckTitle, cloudSlides)
-      navigate(`/present/${code}`, { state: { slides: cloudSlides, deckTitle, sessionCode: code, startSlide, deckId: currentDeckId } })
+      const code = await createSession(deckTitle, cloudSlides, isQuiz)
+      navigate(`/present/${code}`, { state: { slides: cloudSlides, deckTitle, sessionCode: code, startSlide, deckId: currentDeckId, isQuiz } })
     } catch (err) {
       console.error('Failed to start session:', err)
       const msg = err instanceof Error ? err.message : 'Unknown error'
@@ -857,7 +952,7 @@ export default function Create() {
       // Resync slides first so audience index matches presenter's deck
       await updateSessionSlides(resumeCode, cloudSlides)
       await updateSessionState(resumeCode, startSlide, 'question')
-      navigate(`/present/${resumeCode}`, { state: { slides: cloudSlides, deckTitle, sessionCode: resumeCode, startSlide, deckId: currentDeckId } })
+      navigate(`/present/${resumeCode}`, { state: { slides: cloudSlides, deckTitle, sessionCode: resumeCode, startSlide, deckId: currentDeckId, isQuiz } })
     } catch (err) {
       console.error('Failed to resume session:', err)
       const msg = err instanceof Error ? err.message : 'Unknown error'
@@ -875,7 +970,7 @@ export default function Create() {
       {/* ── Top bar ─────────────────────────────────────────────────── */}
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-white/10 bg-midnight-sky-900 px-5">
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <button
             onClick={() => navigate('/decks')}
             className="flex items-center gap-1.5 rounded-lg bg-fresh-green px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-fresh-green/85 active:scale-95"
@@ -885,6 +980,50 @@ export default function Create() {
           </button>
           <span className="h-4 w-px bg-white/15" />
           <AlayaMark className="text-white" />
+          <span className="h-4 w-px bg-white/15" />
+          {/* Undo / Redo buttons */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={undoSlides}
+              disabled={!canUndo}
+              title="Undo (Ctrl+Z)"
+              className={cn(
+                'rounded-lg p-1.5 transition-all duration-150',
+                canUndo
+                  ? 'text-white/80 hover:bg-white/10 hover:text-white'
+                  : 'cursor-not-allowed text-white/40',
+              )}
+            >
+              <Undo2 className="size-4" />
+            </button>
+            <button
+              onClick={redoSlides}
+              disabled={!canRedo}
+              title="Redo (Ctrl+Shift+Z)"
+              className={cn(
+                'rounded-lg p-1.5 transition-all duration-150',
+                canRedo
+                  ? 'text-white/80 hover:bg-white/10 hover:text-white'
+                  : 'cursor-not-allowed text-white/40',
+              )}
+            >
+              <Redo2 className="size-4" />
+            </button>
+          </div>
+          <span className="h-4 w-px bg-white/15" />
+          <button
+            onClick={() => setIsQuiz(v => !v)}
+            title={isQuiz ? 'Quiz mode on — click to disable' : 'Enable quiz mode'}
+            className={cn(
+              'flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium transition-all',
+              isQuiz
+                ? 'bg-hot-pink/15 text-hot-pink'
+                : 'text-white/40 hover:bg-white/10 hover:text-white',
+            )}
+          >
+            <Trophy className="size-3.5" />
+            Quiz
+          </button>
         </div>
 
         {/* Editable deck title */}
@@ -1151,12 +1290,13 @@ export default function Create() {
           onAddQuestion={addQuestion}
           onAddContent={addContent}
           onAddCanvas={addCanvas}
+          onAddLeaderboard={addLeaderboard}
         />
 
         {/* Right: editor */}
         <div className="scrollbar-panel flex flex-1 flex-col overflow-auto">
           {selectedSlide ? (
-            <SlideEditor slide={selectedSlide} onUpdate={updateSlide} onSplitHtml={splitHtmlSlide} />
+            <SlideEditor slide={selectedSlide} onUpdate={updateSlide} onSplitHtml={splitHtmlSlide} onPushHistory={pushHistory} />
           ) : (
             <EmptyEditorState onImport={importFile} isImporting={isImporting} />
           )}
@@ -1172,7 +1312,7 @@ export default function Create() {
 
 function SlidePanel({
   slides, selectedId, isImporting, addMenuAfter,
-  onSelect, onDelete, onDuplicate, onDragEnd, onImport, onSetAddMenu, onAddQuestion, onAddContent, onAddCanvas,
+  onSelect, onDelete, onDuplicate, onDragEnd, onImport, onSetAddMenu, onAddQuestion, onAddContent, onAddCanvas, onAddLeaderboard,
 }: {
   slides: Slide[]
   selectedId: string | null
@@ -1187,6 +1327,7 @@ function SlidePanel({
   onAddQuestion: (type: QType, afterId?: string) => void
   onAddContent: (template: ContentTemplate, afterId?: string) => void
   onAddCanvas: (afterId?: string) => void
+  onAddLeaderboard: (afterId?: string) => void
 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -1263,13 +1404,22 @@ function SlidePanel({
               <p className="mb-1.5 px-0.5 text-[9px] font-semibold uppercase tracking-wider text-white/40">
                 Custom
               </p>
-              <button
-                onClick={() => onAddCanvas()}
-                className="flex w-full items-center gap-2 rounded-xl border border-white/10 px-3 py-2.5 text-white/75 transition-all hover:border-white/25 hover:bg-white/10 hover:text-white"
-              >
-                <Layers className="size-3.5 shrink-0 text-sky-blue/70" />
-                <span className="text-[9px] font-medium">Custom Slide</span>
-              </button>
+              <div className="flex flex-col gap-1">
+                <button
+                  onClick={() => onAddCanvas()}
+                  className="flex w-full items-center gap-2 rounded-xl border border-white/10 px-3 py-2.5 text-white/75 transition-all hover:border-white/25 hover:bg-white/10 hover:text-white"
+                >
+                  <Layers className="size-3.5 shrink-0 text-sky-blue/70" />
+                  <span className="text-[9px] font-medium">Custom Slide</span>
+                </button>
+                <button
+                  onClick={() => onAddLeaderboard()}
+                  className="flex w-full items-center gap-2 rounded-xl border border-white/10 px-3 py-2.5 text-white/75 transition-all hover:border-white/25 hover:bg-white/10 hover:text-white"
+                >
+                  <Trophy className="size-3.5 shrink-0 text-hot-pink/70" />
+                  <span className="text-[9px] font-medium">Leaderboard</span>
+                </button>
+              </div>
             </div>
           </div>
         ) : (
@@ -1294,6 +1444,7 @@ function SlidePanel({
                       onAdd={(type) => onAddQuestion(type, slide.id)}
                       onAddContent={(template) => onAddContent(template, slide.id)}
                       onAddCanvas={() => onAddCanvas(slide.id)}
+                      onAddLeaderboard={() => onAddLeaderboard(slide.id)}
                     />
                   </div>
                 ))}
@@ -1346,6 +1497,13 @@ function SlidePanel({
           >
             <Layers className="size-3.5 shrink-0 text-sky-blue/70" />
             <span>Custom Slide</span>
+          </button>
+          <button
+            onClick={() => onAddLeaderboard(selectedId ?? undefined)}
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
+          >
+            <Trophy className="size-3.5 shrink-0 text-hot-pink/70" />
+            <span>Leaderboard</span>
           </button>
         </div>
       )}
@@ -1566,6 +1724,11 @@ function SlideThumbnail({
                 <Layers className="size-3.5 text-white/50" />
               )}
             </div>
+          ) : slide.type === 'leaderboard' ? (
+            <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-midnight-sky-900">
+              <Trophy className="size-4 text-hot-pink/60" />
+              <span className="text-[8px] font-medium text-white/35">Leaderboard</span>
+            </div>
           ) : (
             <div
               className="flex h-full w-full items-center justify-center p-2"
@@ -1622,6 +1785,11 @@ function SlideThumbnail({
               : 'HTML'}
           </span>
         )}
+        {slide.type === 'leaderboard' && (
+          <span className="absolute right-3 top-3 rounded-md bg-hot-pink/15 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-hot-pink/70">
+            LB
+          </span>
+        )}
       </button>
 
       {/* Drag handle — appears on hover, left edge */}
@@ -1658,13 +1826,14 @@ function SlideThumbnail({
    ───────────────────────────────────────────────────────────────────────── */
 
 function AddBetweenButton({
-  isOpen, onToggle, onAdd, onAddContent, onAddCanvas,
+  isOpen, onToggle, onAdd, onAddContent, onAddCanvas, onAddLeaderboard,
 }: {
   isOpen: boolean
   onToggle: () => void
   onAdd: (type: QType) => void
   onAddContent: (template: ContentTemplate) => void
   onAddCanvas: () => void
+  onAddLeaderboard: () => void
 }) {
   return (
     <div className="px-2">
@@ -1725,6 +1894,13 @@ function AddBetweenButton({
               >
                 <Layers className="size-3 shrink-0 text-sky-blue/70" />
                 Custom Slide
+              </button>
+              <button
+                onClick={onAddLeaderboard}
+                className="mt-0.5 flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[9px] font-medium text-white/60 transition-all hover:bg-white/10 hover:text-white"
+              >
+                <Trophy className="size-3 shrink-0 text-hot-pink/70" />
+                Leaderboard
               </button>
             </div>
           </motion.div>
@@ -1951,11 +2127,12 @@ function HtmlSlideEditor({
   )
 }
 
-function SlideEditor({ slide, onUpdate, onSplitHtml }: {
+function SlideEditor({ slide, onUpdate, onSplitHtml, onPushHistory }: {
   slide: Slide
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onUpdate: (id: string, patch: any) => void
   onSplitHtml?: (id: string, count: number) => void
+  onPushHistory?: () => void
 }) {
   if (slide.type === 'pdf') {
     if (!slide.imgUrl) {
@@ -2040,7 +2217,7 @@ function SlideEditor({ slide, onUpdate, onSplitHtml }: {
     return (
       <div className="scrollbar-panel flex flex-1 flex-col overflow-auto" style={{ background: 'oklch(0.972 0.006 258)' }}>
         <div className="w-full max-w-4xl px-8 py-8">
-          <ContentEditor slide={slide} onUpdate={patch => onUpdate(slide.id, patch)} />
+          <ContentEditor slide={slide} onUpdate={patch => onUpdate(slide.id, patch)} onPushHistory={onPushHistory} />
         </div>
       </div>
     )
@@ -2056,12 +2233,31 @@ function SlideEditor({ slide, onUpdate, onSplitHtml }: {
     )
   }
 
+  if (slide.type === 'leaderboard') {
+    return (
+      <div className="flex flex-1 items-center justify-center bg-midnight-sky-900 p-10">
+        <div className="flex flex-col items-center gap-4 text-center">
+          <div className="flex size-16 items-center justify-center rounded-2xl bg-hot-pink/10">
+            <Trophy className="size-8 text-hot-pink/60" />
+          </div>
+          <div>
+            <p className="text-base font-semibold text-white/70">Leaderboard slide</p>
+            <p className="mt-2 max-w-xs text-sm font-light leading-relaxed text-white/40">
+              Top 10 scores will appear here during a live quiz session.
+            </p>
+            <p className="mt-1 text-xs text-white/25">No settings needed.</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   // Question slides — editor form above, 16:9 slide preview below
   return (
     <div className="scrollbar-panel flex flex-1 flex-col overflow-auto" style={{ background: 'oklch(0.972 0.006 258)' }}>
       {/* Editor form */}
       <div className="px-8 py-8">
-        <QuestionEditor slide={slide as QuestionSlide} onUpdate={patch => onUpdate(slide.id, patch)} hidePreview />
+        <QuestionEditor slide={slide as QuestionSlide} onUpdate={patch => onUpdate(slide.id, patch)} hidePreview onPushHistory={onPushHistory} />
       </div>
       {/* Slide preview — full width, 16:9, looks like the actual presenter screen */}
       <div className="px-8 pb-10">
@@ -2159,10 +2355,11 @@ function SlideImagePicker({ imgUrl, onChange }: {
    Question Editor — form for all 4 types
    ───────────────────────────────────────────────────────────────────────── */
 
-function QuestionEditor({ slide, onUpdate, hidePreview = false }: {
+function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }: {
   slide: QuestionSlide
   onUpdate: (patch: Partial<QuestionSlide>) => void
   hidePreview?: boolean
+  onPushHistory?: () => void
 }) {
   const qInfo = QTYPES.find(q => q.type === slide.type)!
 
@@ -2223,8 +2420,8 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false }: {
             </div>
 
             {/* Type-specific fields */}
-            {slide.type === 'mcq' && <MCQEditor slide={slide} onUpdate={onUpdate} />}
-            {slide.type === 'rating' && <RatingEditor slide={slide} onUpdate={onUpdate} />}
+            {slide.type === 'mcq' && <MCQEditor slide={slide} onUpdate={onUpdate} onPushHistory={onPushHistory} />}
+            {slide.type === 'rating' && <RatingEditor slide={slide} onUpdate={onUpdate} onPushHistory={onPushHistory} />}
             {slide.type === 'openended' && (
               <div className="mb-6 space-y-4">
                 <div className="flex items-start gap-2.5 rounded-xl bg-midnight-sky-50 p-4">
@@ -2373,9 +2570,10 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false }: {
    MCQ Editor — answer options A–F
    ───────────────────────────────────────────────────────────────────────── */
 
-function MCQEditor({ slide, onUpdate }: {
+function MCQEditor({ slide, onUpdate, onPushHistory }: {
   slide: QuestionSlide
   onUpdate: (patch: Partial<QuestionSlide>) => void
+  onPushHistory?: () => void
 }) {
   const setOption = (i: number, val: string) => {
     const next = [...slide.options]
@@ -2384,10 +2582,12 @@ function MCQEditor({ slide, onUpdate }: {
   }
   const addOption = () => {
     if (slide.options.length >= 6) return
+    onPushHistory?.()
     onUpdate({ options: [...slide.options, ''] })
   }
   const removeOption = (i: number) => {
     if (slide.options.length <= 2) return
+    onPushHistory?.()
     onUpdate({ options: slide.options.filter((_, idx) => idx !== i) })
   }
 
@@ -2497,9 +2697,10 @@ function MCQEditor({ slide, onUpdate }: {
    Rating Editor — up to 5 named parameters
    ───────────────────────────────────────────────────────────────────────── */
 
-function RatingEditor({ slide, onUpdate }: {
+function RatingEditor({ slide, onUpdate, onPushHistory }: {
   slide: QuestionSlide
   onUpdate: (patch: Partial<QuestionSlide>) => void
+  onPushHistory?: () => void
 }) {
   const params = slide.options.length > 0 ? slide.options : ['', '', '']
   const ratingMax = (slide.ratingMax === 10 ? 10 : 5) as 5 | 10
@@ -2526,6 +2727,7 @@ function RatingEditor({ slide, onUpdate }: {
   }
   const addParam = () => {
     if (params.length >= 5) return
+    onPushHistory?.()
     onUpdate({
       options:     [...params, ''],
       leftLabels:  [...leftLabels,  ''],
@@ -2534,6 +2736,7 @@ function RatingEditor({ slide, onUpdate }: {
   }
   const removeParam = (i: number) => {
     if (params.length <= 1) return
+    onPushHistory?.()
     onUpdate({
       options:     params.filter((_, idx) => idx !== i),
       leftLabels:  leftLabels.filter((_, idx) => idx !== i),
@@ -2901,9 +3104,10 @@ function ContentSlidePreview({ slide }: { slide: ContentSlide }) {
    Content Editor — template fields + theme picker + live preview
    ───────────────────────────────────────────────────────────────────────── */
 
-function ContentEditor({ slide, onUpdate }: {
+function ContentEditor({ slide, onUpdate, onPushHistory }: {
   slide: ContentSlide
   onUpdate: (patch: Partial<ContentSlide>) => void
+  onPushHistory?: () => void
 }) {
   const INPUT_CLASS = 'w-full rounded-xl border border-midnight-sky-150 bg-white px-4 py-3 text-sm text-midnight-sky-900 placeholder:font-light placeholder:text-midnight-sky-400 outline-none transition-all focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/10'
   const TITLE_PLACEHOLDERS: Record<ContentTemplate, string> = {
@@ -2931,14 +3135,14 @@ function ContentEditor({ slide, onUpdate }: {
               <label className="mb-2 block text-[11px] font-semibold text-midnight-sky-600">
                 Slide image <span className="font-light">(optional)</span>
               </label>
-              <SlideImagePicker imgUrl={slide.imgUrl} onChange={url => onUpdate({ imgUrl: url, imgLayout: url ? (slide.imgLayout ?? 'reference') : undefined })} />
+              <SlideImagePicker imgUrl={slide.imgUrl} onChange={url => { onPushHistory?.(); onUpdate({ imgUrl: url, imgLayout: url ? (slide.imgLayout ?? 'reference') : undefined }) }} />
               {slide.imgUrl && (
                 <div className="mt-3 flex items-center gap-1">
                   <span className="mr-1 text-[10px] font-medium text-midnight-sky-400">Display:</span>
                   {(['reference', 'background'] as const).map(opt => (
                     <button
                       key={opt}
-                      onClick={() => onUpdate({ imgLayout: opt })}
+                      onClick={() => { onPushHistory?.(); onUpdate({ imgLayout: opt }) }}
                       className={cn(
                         'rounded-md px-2.5 py-1 text-[10px] font-medium transition-all',
                         // treat legacy 'top'/'right' as 'reference' for highlight purposes
@@ -2961,7 +3165,7 @@ function ContentEditor({ slide, onUpdate }: {
                 {CONTENT_TEMPLATES.map(t => (
                   <button
                     key={t.template}
-                    onClick={() => onUpdate({ template: t.template })}
+                    onClick={() => { onPushHistory?.(); onUpdate({ template: t.template }) }}
                     className={cn(
                       'flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all',
                       slide.template === t.template

@@ -116,7 +116,13 @@ export interface StoredCanvasSlide {
   elements: CanvasEl[]
 }
 
-export type StoredSlide = StoredPdfSlide | StoredMediaSlide | StoredHtmlSlide | StoredContentSlide | QuestionSlide | StoredCanvasSlide
+/** Leaderboard slide — audience sees waiting state; presenter sees top-10 quiz scores */
+export interface StoredLeaderboardSlide {
+  id:   string
+  type: 'leaderboard'
+}
+
+export type StoredSlide = StoredPdfSlide | StoredMediaSlide | StoredHtmlSlide | StoredContentSlide | QuestionSlide | StoredCanvasSlide | StoredLeaderboardSlide
 
 export interface Session {
   code:          string
@@ -134,6 +140,10 @@ export interface Session {
    *  Audience Vote.tsx tracks submitted votes as `${slideId}:r${resetCounts[slideId] ?? 0}`
    *  so incrementing this unlocks voting for that slide without clearing other slides. */
   resetCounts?:   Record<string, number>
+  /** Quiz mode — when true, audience must enter a name and receives per-answer score feedback. */
+  isQuiz?:        boolean
+  /** Per-slide timing metadata for speed-point calculation. */
+  questionMeta?:  Record<string, { openedAt: number; duration: number | null }>
 }
 
 export interface Response {
@@ -194,7 +204,7 @@ function makeCode(): string {
    ───────────────────────────────────────────────────────────────────────── */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function createSession(title: string, rawSlides: any[]): Promise<string> {
+export async function createSession(title: string, rawSlides: any[], isQuiz?: boolean): Promise<string> {
   const slides: StoredSlide[] = rawSlides.map(s => {
     if (s.type === 'pdf') {
       return { id: s.id, type: 'pdf' as const, pageNum: s.pageNum ?? 1 }
@@ -237,6 +247,9 @@ export async function createSession(title: string, rawSlides: any[]): Promise<st
         elements: flattenCanvasElements(s.elements ?? []),
       }
     }
+    if (s.type === 'leaderboard') {
+      return { id: s.id, type: 'leaderboard' as const }
+    }
     return {
       id:       s.id,
       type:     s.type as QType,
@@ -274,6 +287,7 @@ export async function createSession(title: string, rawSlides: any[]): Promise<st
       currentPhase: 'question',
       status:       'active',
       createdAt:    serverTimestamp(),
+      ...(isQuiz ? { isQuiz: true } : {}),
     })
     return code
   }
@@ -368,6 +382,9 @@ export async function updateSessionSlides(code: string, rawSlides: any[]): Promi
         elements: flattenCanvasElements(s.elements ?? []),
       }
     }
+    if (s.type === 'leaderboard') {
+      return { id: s.id, type: 'leaderboard' as const }
+    }
     return {
       id:       s.id,
       type:     s.type as QType,
@@ -401,6 +418,23 @@ export async function updateSessionSlides(code: string, rawSlides: any[]): Promi
 
 export async function endSession(code: string): Promise<void> {
   await updateDoc(doc(db, 'sessions', code.toUpperCase()), { status: 'ended' })
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   updateQuestionMeta
+   Stores when a question slide opened and its timer duration so the
+   audience can calculate speed points client-side at submission time.
+   ───────────────────────────────────────────────────────────────────────── */
+
+export async function updateQuestionMeta(
+  sessionCode: string,
+  slideId: string,
+  openedAt: number,
+  duration: number | null,
+): Promise<void> {
+  await updateDoc(doc(db, 'sessions', sessionCode.toUpperCase()), {
+    [`questionMeta.${slideId}`]: { openedAt, duration },
+  })
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
