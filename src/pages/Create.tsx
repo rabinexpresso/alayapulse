@@ -2600,27 +2600,26 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
                 Slide background
                 <span className="ml-1.5 font-normal text-midnight-sky-500">how it looks on screen</span>
               </label>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap gap-3">
                 {CONTENT_THEMES.map(t => (
                   <button
                     key={t.id}
                     onClick={() => onUpdate({ theme: t.id })}
-                    title={t.label}
                     className={cn(
-                      'size-7 rounded-full transition-all ring-offset-2',
-                      (slide.theme ?? 'navy') === t.id
-                        ? 'ring-2 ring-midnight-sky-700 scale-110'
-                        : 'hover:scale-105 opacity-75 hover:opacity-100',
+                      'flex flex-col items-center gap-1 transition-all',
+                      (slide.theme ?? 'navy') === t.id ? 'opacity-100' : 'opacity-60 hover:opacity-90',
                     )}
-                    style={t.id === 'transparent'
-                      ? { backgroundImage: 'repeating-linear-gradient(45deg, #e0e0e0 0px, #e0e0e0 4px, white 4px, white 8px)', border: '1px solid #ccc' }
-                      : { backgroundColor: t.swatch }
-                    }
-                  />
+                  >
+                    <span
+                      className={cn('size-6 rounded-full ring-offset-1', (slide.theme ?? 'navy') === t.id ? 'ring-2 ring-midnight-sky-700' : '')}
+                      style={t.id === 'transparent'
+                        ? { backgroundImage: 'repeating-linear-gradient(45deg, #e0e0e0 0px, #e0e0e0 4px, white 4px, white 8px)', border: '1px solid #ccc' }
+                        : { backgroundColor: t.swatch, border: t.id === 'white' ? '1px solid rgba(0,0,0,0.12)' : undefined }
+                      }
+                    />
+                    <span className="text-[9px] font-medium text-midnight-sky-700">{t.label}</span>
+                  </button>
                 ))}
-                <span className="ml-1 text-xs font-light text-midnight-sky-400">
-                  {CONTENT_THEMES.find(t => t.id === (slide.theme ?? 'navy'))?.label ?? 'Navy'}
-                </span>
               </div>
             </div>
           </div>
@@ -3336,23 +3335,25 @@ function ContentEditor({ slide, onUpdate, onPushHistory }: {
             {/* Theme picker */}
             <div>
               <label className="mb-2 block text-[11px] font-semibold text-midnight-sky-600">Theme</label>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-3">
                 {CONTENT_THEMES.map(t => (
                   <button
                     key={t.id}
                     onClick={() => onUpdate({ theme: t.id })}
-                    title={t.label}
                     className={cn(
-                      'size-7 rounded-full transition-all ring-offset-2',
-                      slide.theme === t.id
-                        ? 'ring-2 ring-midnight-sky-700 scale-110'
-                        : 'hover:scale-105 opacity-75 hover:opacity-100',
+                      'flex flex-col items-center gap-1 transition-all',
+                      slide.theme === t.id ? 'opacity-100' : 'opacity-60 hover:opacity-90',
                     )}
-                    style={t.id === 'transparent'
-                      ? { backgroundImage: 'repeating-linear-gradient(45deg, #e0e0e0 0px, #e0e0e0 4px, white 4px, white 8px)', border: '1px solid #ccc' }
-                      : { backgroundColor: t.swatch, border: t.id === 'white' ? '1px solid rgba(0,0,0,0.12)' : undefined }
-                    }
-                  />
+                  >
+                    <span
+                      className={cn('size-6 rounded-full ring-offset-1', slide.theme === t.id ? 'ring-2 ring-midnight-sky-700' : '')}
+                      style={t.id === 'transparent'
+                        ? { backgroundImage: 'repeating-linear-gradient(45deg, #e0e0e0 0px, #e0e0e0 4px, white 4px, white 8px)', border: '1px solid #ccc' }
+                        : { backgroundColor: t.swatch, border: t.id === 'white' ? '1px solid rgba(0,0,0,0.12)' : undefined }
+                      }
+                    />
+                    <span className="text-[9px] font-medium text-midnight-sky-700">{t.label}</span>
+                  </button>
                 ))}
               </div>
             </div>
@@ -3611,65 +3612,71 @@ function CanvasLayoutPicker({ onSelect, onCancel }: {
 function BgPanel({ bg, onChange }: { bg: CanvasBg; onChange: (bg: CanvasBg) => void }) {
   const bgImgRef = useRef<HTMLInputElement>(null)
   return (
-    <div className="mb-3 overflow-hidden rounded-xl border border-midnight-sky-150 bg-white p-4 shadow-sm">
-      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-midnight-sky-400">Solid colour</p>
-      <div className="flex flex-wrap gap-2">
-        {CANVAS_BG_COLORS.map(c => (
-          <button
-            key={c.value}
-            onClick={() => onChange({ type: 'color', value: c.value })}
-            title={c.label}
-            className={cn(
-              'size-8 rounded-full transition-all ring-offset-2 hover:scale-110',
-              bg.type === 'color' && bg.value === c.value ? 'ring-2 ring-midnight-sky-700' : 'opacity-80',
-            )}
-            style={{ backgroundColor: c.value, border: c.value === '#f4f4f9' ? '1px solid #e8e8f1' : undefined }}
-          />
-        ))}
+    <div className="mb-2 flex flex-wrap items-start gap-x-5 gap-y-3 rounded-xl border border-midnight-sky-150 bg-white px-4 py-3 shadow-sm">
+      {/* Solid colours */}
+      <div className="flex flex-col gap-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-midnight-sky-700">Solid</p>
+        <div className="flex gap-2.5">
+          {CANVAS_BG_COLORS.map(c => (
+            <button
+              key={c.value}
+              onClick={() => onChange({ type: 'color', value: c.value })}
+              className={cn('flex flex-col items-center gap-1 transition-all', bg.type === 'color' && bg.value === c.value ? 'opacity-100' : 'opacity-65 hover:opacity-100')}
+            >
+              <span
+                className={cn('size-6 rounded-full ring-offset-1', bg.type === 'color' && bg.value === c.value ? 'ring-2 ring-midnight-sky-700' : '')}
+                style={{ backgroundColor: c.value, border: c.value === '#f4f4f9' ? '1px solid #d0d0e0' : undefined }}
+              />
+              <span className="text-[9px] font-medium text-midnight-sky-700">{c.label}</span>
+            </button>
+          ))}
+        </div>
       </div>
-      <p className="mb-2 mt-4 text-[11px] font-semibold uppercase tracking-wider text-midnight-sky-400">Gradient</p>
-      <div className="flex flex-wrap gap-2">
-        {CANVAS_BG_GRADIENTS.map(g => (
+
+      <div className="self-stretch w-px bg-midnight-sky-100" />
+
+      {/* Gradients */}
+      <div className="flex flex-col gap-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-midnight-sky-700">Gradient</p>
+        <div className="flex flex-wrap gap-2">
+          {CANVAS_BG_GRADIENTS.map(g => (
+            <button
+              key={g.value}
+              onClick={() => onChange({ type: 'gradient', value: g.value })}
+              className={cn(
+                'h-7 w-14 rounded-lg text-[9px] font-semibold text-white transition-all hover:scale-105',
+                bg.type === 'gradient' && bg.value === g.value ? 'ring-2 ring-midnight-sky-700 ring-offset-1' : 'opacity-75',
+              )}
+              style={{ background: g.value }}
+            >{g.label}</button>
+          ))}
+        </div>
+      </div>
+
+      <div className="self-stretch w-px bg-midnight-sky-100" />
+
+      {/* Image */}
+      <div className="flex flex-col gap-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-midnight-sky-700">Image</p>
+        <div className="flex items-center gap-2">
           <button
-            key={g.value}
-            onClick={() => onChange({ type: 'gradient', value: g.value })}
-            title={g.label}
+            onClick={() => bgImgRef.current?.click()}
             className={cn(
-              'h-8 w-16 rounded-lg text-[9px] font-semibold text-white transition-all hover:scale-105',
-              bg.type === 'gradient' && bg.value === g.value ? 'ring-2 ring-midnight-sky-700 ring-offset-2' : 'opacity-80',
+              'flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-medium transition-all',
+              bg.type === 'image' ? 'border-sky-blue bg-sky-blue/10 text-sky-blue' : 'border-midnight-sky-200 text-midnight-sky-700 hover:border-midnight-sky-400',
             )}
-            style={{ background: g.value }}
           >
-            {g.label}
+            <ImageIcon className="size-3" />
+            {bg.type === 'image' ? 'Change' : 'Upload'}
           </button>
-        ))}
-      </div>
-      <p className="mb-2 mt-4 text-[11px] font-semibold uppercase tracking-wider text-midnight-sky-400">Image</p>
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => bgImgRef.current?.click()}
-          className={cn(
-            'flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition-all',
-            bg.type === 'image'
-              ? 'border-sky-blue bg-sky-blue/10 text-sky-blue'
-              : 'border-midnight-sky-200 text-midnight-sky-600 hover:border-midnight-sky-400',
+          {bg.type === 'image' && (
+            <button onClick={() => onChange({ type: 'color', value: '#000079' })} className="text-xs text-red-500 hover:text-red-700 transition">
+              Remove
+            </button>
           )}
-        >
-          <ImageIcon className="size-3.5" />
-          {bg.type === 'image' ? 'Change image' : 'Upload image'}
-        </button>
-        {bg.type === 'image' && (
-          <button
-            onClick={() => onChange({ type: 'color', value: '#000079' })}
-            className="text-xs text-red-400 hover:text-red-600 transition"
-          >
-            Remove
-          </button>
-        )}
-        {bg.type === 'image' && (
-          <span className="truncate text-xs text-midnight-sky-400">Image set — cover fill</span>
-        )}
+        </div>
       </div>
+
       <input
         ref={bgImgRef}
         type="file"
@@ -3693,39 +3700,27 @@ function TableConfigPanel({ onAdd, onCancel }: { onAdd: (rows: number, cols: num
   const [cols, setCols] = useState(3)
 
   const Step = ({ val, min, max, onChange }: { val: number; min: number; max: number; onChange: (n: number) => void }) => (
-    <div className="flex items-center gap-2">
-      <button
-        onClick={() => onChange(Math.max(min, val - 1))}
-        className="flex size-7 items-center justify-center rounded-lg border border-midnight-sky-200 text-midnight-sky-600 transition hover:bg-midnight-sky-50"
-      >−</button>
+    <div className="flex items-center gap-1.5">
+      <button onClick={() => onChange(Math.max(min, val - 1))} className="flex size-6 items-center justify-center rounded-lg border border-midnight-sky-200 text-midnight-sky-700 transition hover:bg-midnight-sky-50 text-sm">−</button>
       <span className="w-5 text-center text-sm font-semibold text-midnight-sky-900">{val}</span>
-      <button
-        onClick={() => onChange(Math.min(max, val + 1))}
-        className="flex size-7 items-center justify-center rounded-lg border border-midnight-sky-200 text-midnight-sky-600 transition hover:bg-midnight-sky-50"
-      >+</button>
+      <button onClick={() => onChange(Math.min(max, val + 1))} className="flex size-6 items-center justify-center rounded-lg border border-midnight-sky-200 text-midnight-sky-700 transition hover:bg-midnight-sky-50 text-sm">+</button>
     </div>
   )
 
   return (
-    <div className="mb-3 overflow-hidden rounded-xl border border-midnight-sky-150 bg-white p-4 shadow-sm">
-      <p className="mb-3 text-sm font-semibold text-midnight-sky-700">Configure table</p>
-      <div className="flex items-center gap-8">
-        <div>
-          <p className="mb-1.5 text-xs text-midnight-sky-400">Rows</p>
-          <Step val={rows} min={1} max={12} onChange={setRows} />
-        </div>
-        <div>
-          <p className="mb-1.5 text-xs text-midnight-sky-400">Columns</p>
-          <Step val={cols} min={1} max={8} onChange={setCols} />
-        </div>
-        <div className="ml-auto flex gap-2">
-          <button onClick={onCancel} className="rounded-xl border border-midnight-sky-200 px-3 py-1.5 text-sm text-midnight-sky-500 transition hover:bg-midnight-sky-50">
-            Cancel
-          </button>
-          <button onClick={() => onAdd(rows, cols)} className="rounded-xl bg-hot-pink px-4 py-1.5 text-sm font-medium text-white shadow-sm transition hover:bg-hot-pink/90">
-            Insert
-          </button>
-        </div>
+    <div className="mb-2 flex flex-wrap items-center gap-4 rounded-xl border border-midnight-sky-150 bg-white px-4 py-3 shadow-sm">
+      <span className="text-xs font-semibold text-midnight-sky-800">Table size</span>
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-medium text-midnight-sky-700">Rows</span>
+        <Step val={rows} min={1} max={12} onChange={setRows} />
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-medium text-midnight-sky-700">Columns</span>
+        <Step val={cols} min={1} max={8} onChange={setCols} />
+      </div>
+      <div className="ml-auto flex gap-2">
+        <button onClick={onCancel} className="rounded-xl border border-midnight-sky-200 px-3 py-1.5 text-xs font-medium text-midnight-sky-700 transition hover:bg-midnight-sky-50">Cancel</button>
+        <button onClick={() => onAdd(rows, cols)} className="rounded-xl bg-hot-pink px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-hot-pink/90">Insert</button>
       </div>
     </div>
   )
@@ -4646,9 +4641,9 @@ function CanvasEditor({ slide, onUpdate }: {
         className="relative touch-none rounded-xl"
         style={{
           // Never wider than the container, never taller than the usable viewport.
-          // 300 px covers: header (56) + toolbar (36) + text-fmt bar (46) +
-          // padding (48) + hint text (24) + panels + breathing room.
-          width: 'min(100%, calc((100vh - 300px) * 16 / 9))',
+          // 200 px covers: header (56) + toolbar (40) + padding (32) + breathing room.
+          // Compact panels add ~65px when open; TextFormatBar adds ~48px.
+          width: 'min(100%, calc((100vh - 200px) * 16 / 9))',
           aspectRatio: '16 / 9',
           ...bgStyle,
         }}
@@ -4704,9 +4699,6 @@ function CanvasEditor({ slide, onUpdate }: {
         </div>
       </div>
 
-      <p className="mt-2 text-[11px] text-midnight-sky-400">
-        Click to select · Double-click text to edit · Drag bar to move · 8 handles to resize · Copy to duplicate · Arrow keys nudge (Shift = 5×) · Delete removes · Layer buttons reorder · Pink guides snap to centre/edges · Click outside to deselect
-      </p>
     </motion.div>
   )
 }
