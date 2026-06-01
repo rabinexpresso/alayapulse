@@ -178,12 +178,26 @@ function decksRef(uid: string) {
    ───────────────────────────────────────────────────────────────────────── */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+function stripUndef(obj: any): any {
+  if (Array.isArray(obj)) return obj.map(stripUndef)
+  if (obj !== null && typeof obj === 'object') {
+    return Object.fromEntries(
+      Object.entries(obj)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => [k, stripUndef(v)])
+    )
+  }
+  return obj
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function flattenCanvasElements(elements: any[]): any[] {
   return (elements ?? []).map((el: any) => {
+    let out = { ...el }
     if (el.kind === 'table' && Array.isArray(el.cells?.[0])) {
-      return { ...el, cells: (el.cells as string[][]).flat() }
+      out = { ...out, cells: (el.cells as string[][]).flat() }
     }
-    return el
+    return stripUndef(out)
   })
 }
 
