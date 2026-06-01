@@ -5,13 +5,13 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   ChevronLeft, ChevronRight, X,
   BarChart2, ChevronDown, ChevronUp, Clock,
-  Eye, EyeOff, Pin, Check,
+  Eye, EyeOff, Pin, Check, RotateCcw,
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { cn } from '@/lib/utils'
 import {
   updateSessionState, endSession, subscribeToSlideResponses, subscribeToViewerCount,
-  fetchAllSessionResponses, startTimer, clearTimer,
+  fetchAllSessionResponses, startTimer, clearTimer, resetSlideVotes,
   type Response as FirestoreResponse,
 } from '@/lib/session'
 import type {
@@ -279,7 +279,10 @@ export default function Present() {
   // ── Question timer ─────────────────────────────────────────────────────
   const [timerEndsAt,   setTimerEndsAt]   = useState<number | null>(null)
   const [timerDuration, setTimerDuration] = useState<number | null>(null)
-  const [showTimerMenu, setShowTimerMenu] = useState(false)
+  const [showTimerMenu,    setShowTimerMenu]    = useState(false)
+  // ── Re-vote / Reset ────────────────────────────────────────────────────
+  const [showResetConfirm, setShowResetConfirm] = useState(false)
+  const [isResetting,      setIsResetting]      = useState(false)
   // Refs so callbacks always read current values without stale closures.
   // isQuestion/code are not yet computed at this point — initialised with dummies,
   // then kept in sync via useEffects further down (after those values are computed).
@@ -364,6 +367,26 @@ export default function Present() {
     setShowTimerMenu(false)
     if (isRealSessionRef.current) startTimer(codeRef.current, seconds).catch(console.error)
   }, [])
+
+  // Clear all votes for the current slide and return to question phase so audience can vote again
+  const handleResetVotes = useCallback(async () => {
+    if (!isRealSession || !isQuestion) return
+    setIsResetting(true)
+    try {
+      await resetSlideVotes(code, (slide as QSlide).id)
+      setShowResetConfirm(false)
+      // Return to question phase so audience sees the voting form again
+      if (phase === 'results') {
+        setTransType('phase')
+        setDirection(-1)
+        setPhase('question')
+      }
+    } catch (e) {
+      console.error('[alaya-pulse] resetSlideVotes failed:', e)
+    } finally {
+      setIsResetting(false)
+    }
+  }, [isRealSession, isQuestion, code, slide, phase])
 
   // ── Navigation ────────────────────────────────────────────────────────
   const goNext = useCallback(() => {
@@ -612,6 +635,54 @@ export default function Present() {
                       {responseCount}
                     </motion.span>
                     <span>responses</span>
+                  </div>
+                </>
+              )}
+
+              {/* Re-vote / Reset — shown on question slides in real sessions */}
+              {isQuestion && isRealSession && (
+                <>
+                  <div className="h-3.5 w-px shrink-0 bg-white/15" />
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowResetConfirm(v => !v)}
+                      className={cn(
+                        'rounded-lg p-1.5 transition hover:bg-white/10',
+                        showResetConfirm ? 'text-white' : 'text-white/40 hover:text-white',
+                      )}
+                      title="Reset votes — let audience vote again"
+                    >
+                      <RotateCcw className="size-3.5" />
+                    </button>
+                    <AnimatePresence>
+                      {showResetConfirm && (
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.92, y: 4 }}
+                          animate={{ opacity: 1, scale: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.92, y: 4 }}
+                          transition={{ duration: 0.15 }}
+                          className="absolute bottom-full right-0 mb-2 w-44 overflow-hidden rounded-xl border border-white/15 bg-midnight-sky-800 p-3 shadow-xl"
+                        >
+                          <p className="mb-1 text-xs font-semibold text-white/80">Reset all votes?</p>
+                          <p className="mb-3 text-[11px] leading-relaxed text-white/40">Audience can vote again from scratch.</p>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => setShowResetConfirm(false)}
+                              className="flex-1 rounded-lg px-2 py-1.5 text-[11px] font-medium text-white/50 transition hover:bg-white/10 hover:text-white"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={handleResetVotes}
+                              disabled={isResetting}
+                              className="flex-1 rounded-lg bg-hot-pink px-2 py-1.5 text-[11px] font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
+                            >
+                              {isResetting ? '…' : 'Reset'}
+                            </button>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 </>
               )}
@@ -1832,13 +1903,18 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
               )}>
                 {opt}
               </span>
-              <span className={cn(
-                'shrink-0 text-right font-bold tabular-nums',
-                dense ? 'text-xl' : 'text-2xl',
-                isCorrect ? 'text-fresh-green' : isWinner ? 'text-hot-pink' : 'text-white/50',
-              )}>
+              <motion.span
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.45 + i * 0.18 + 0.7, duration: 0.25 }}
+                className={cn(
+                  'shrink-0 text-right font-bold tabular-nums',
+                  dense ? 'text-xl' : 'text-2xl',
+                  isCorrect ? 'text-fresh-green' : isWinner ? 'text-hot-pink' : 'text-white/50',
+                )}
+              >
                 {pct}%
-              </span>
+              </motion.span>
             </div>
             {/* Row 2: bar indented to align under the label text */}
             <div className={dense ? 'pl-11' : 'pl-14'}>
@@ -1850,7 +1926,7 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
                   )}
                   initial={{ width: '0%' }}
                   animate={{ width: `${pct}%` }}
-                  transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1], delay: i * 0.08 }}
+                  transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1], delay: 0.45 + i * 0.18 }}
                 />
                 {(isCorrect || isWinner) && !isWrong && (
                   <motion.div

@@ -129,7 +129,11 @@ export default function Vote() {
 
   const slideData = session.slides[session.currentSlide]
   const slideId   = slideData?.id ?? ''
-  const alreadySubmitted = submittedSlides.has(slideId)
+  // Track votes per reset-round so the presenter can clear votes and let audience re-vote.
+  // roundKey changes whenever the presenter resets this slide, unlocking the voting form.
+  const voteRound = (session.resetCounts ?? {})[slideId] ?? 0
+  const roundKey  = `${slideId}:r${voteRound}`
+  const alreadySubmitted = submittedSlides.has(roundKey)
 
   // ── Handle submit for any question type ───────────────────────────────
   const INTERACTIVE_TYPES = new Set(['mcq', 'wordcloud', 'openended', 'rating'])
@@ -142,12 +146,12 @@ export default function Vote() {
     // Extra guard for word cloud
     if (slideData.type === 'wordcloud') {
       const maxSubs = (slideData as { wcMaxSubmissions?: number }).wcMaxSubmissions ?? 3
-      if ((wcSubmissions[slideId] ?? 0) >= maxSubs) return
+      if ((wcSubmissions[roundKey] ?? 0) >= maxSubs) return
     }
     // Extra guard for open-ended multi-submit
     if (slideData.type === 'openended') {
       const maxSubs = (slideData as { oeMaxSubmissions?: number }).oeMaxSubmissions ?? 1
-      if ((oeSubmissions[slideId] ?? 0) >= maxSubs) return
+      if ((oeSubmissions[roundKey] ?? 0) >= maxSubs) return
     }
     setSubmitting(true)
     setSubmitError(null)
@@ -161,16 +165,16 @@ export default function Vote() {
 
       if (slideData.type === 'wordcloud') {
         const maxSubs  = (slideData as { wcMaxSubmissions?: number }).wcMaxSubmissions ?? 3
-        const newCount = (wcSubmissions[slideData.id] ?? 0) + 1
-        const updated  = { ...wcSubmissions, [slideData.id]: newCount }
+        const newCount = (wcSubmissions[roundKey] ?? 0) + 1
+        const updated  = { ...wcSubmissions, [roundKey]: newCount }
         setWcSubmissions(updated)
         try { sessionStorage.setItem(wcStorageKey, JSON.stringify(updated)) } catch {}
-        const updatedWords = { ...wcWords, [slideData.id]: [...(wcWords[slideData.id] ?? []), value.toLowerCase()] }
+        const updatedWords = { ...wcWords, [roundKey]: [...(wcWords[roundKey] ?? []), value.toLowerCase()] }
         setWcWords(updatedWords)
         try { sessionStorage.setItem(wcWordsStorageKey, JSON.stringify(updatedWords)) } catch {}
         if (newCount >= maxSubs) {
           setSubmittedSlides(prev => {
-            const next = new Set([...prev, slideData.id])
+            const next = new Set([...prev, roundKey])
             try { sessionStorage.setItem(storageKey, JSON.stringify([...next])) } catch {}
             return next
           })
@@ -178,13 +182,13 @@ export default function Vote() {
       } else if (slideData.type === 'openended') {
         // Open-ended: allow multiple submissions up to oeMaxSubmissions
         const maxSubs  = (slideData as { oeMaxSubmissions?: number }).oeMaxSubmissions ?? 1
-        const newCount = (oeSubmissions[slideData.id] ?? 0) + 1
-        const updated  = { ...oeSubmissions, [slideData.id]: newCount }
+        const newCount = (oeSubmissions[roundKey] ?? 0) + 1
+        const updated  = { ...oeSubmissions, [roundKey]: newCount }
         setOeSubmissions(updated)
         try { sessionStorage.setItem(oeStorageKey, JSON.stringify(updated)) } catch {}
         if (newCount >= maxSubs) {
           setSubmittedSlides(prev => {
-            const next = new Set([...prev, slideData.id])
+            const next = new Set([...prev, roundKey])
             try { sessionStorage.setItem(storageKey, JSON.stringify([...next])) } catch {}
             return next
           })
@@ -192,7 +196,7 @@ export default function Vote() {
       } else {
         // All other types: lock after one submission
         setSubmittedSlides(prev => {
-          const next = new Set([...prev, slideData.id])
+          const next = new Set([...prev, roundKey])
           try { sessionStorage.setItem(storageKey, JSON.stringify([...next])) } catch {}
           return next
         })
@@ -429,16 +433,16 @@ export default function Vote() {
                 {slideData.type === 'wordcloud' && (
                   <WordCloudQuestion
                     submitting={submitting}
-                    submissionsUsed={wcSubmissions[slideId] ?? 0}
+                    submissionsUsed={wcSubmissions[roundKey] ?? 0}
                     maxSubmissions={(slideData as { wcMaxSubmissions?: number }).wcMaxSubmissions ?? 3}
-                    submittedWords={wcWords[slideId] ?? []}
+                    submittedWords={wcWords[roundKey] ?? []}
                     onSubmit={word => handleSubmit(word)}
                   />
                 )}
                 {slideData.type === 'openended' && (
                   <OpenEndedQuestion
                     submitting={submitting}
-                    submissionsUsed={oeSubmissions[slideId] ?? 0}
+                    submissionsUsed={oeSubmissions[roundKey] ?? 0}
                     maxSubmissions={(slideData as { oeMaxSubmissions?: number }).oeMaxSubmissions ?? 1}
                     onSubmit={text => handleSubmit(text)}
                   />

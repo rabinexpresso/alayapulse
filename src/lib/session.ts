@@ -1,6 +1,6 @@
 import {
   doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot,
-  collection, query, where, serverTimestamp, deleteField,
+  collection, query, where, serverTimestamp, deleteField, increment,
   type Timestamp,
 } from 'firebase/firestore'
 import { db } from './firebase'
@@ -130,6 +130,10 @@ export interface Session {
   timerEndsAt?:   number | null
   /** Original duration in seconds — used by audience for the progress bar. */
   timerDuration?: number | null
+  /** Per-slide reset counter — incremented by presenter when votes are cleared.
+   *  Audience Vote.tsx tracks submitted votes as `${slideId}:r${resetCounts[slideId] ?? 0}`
+   *  so incrementing this unlocks voting for that slide without clearing other slides. */
+  resetCounts?:   Record<string, number>
 }
 
 export interface Response {
@@ -514,5 +518,30 @@ export async function clearTimer(code: string): Promise<void> {
   await updateDoc(doc(db, 'sessions', code.toUpperCase()), {
     timerEndsAt:   deleteField(),
     timerDuration: deleteField(),
+  })
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   resetSlideVotes
+   Presenter clears all responses for one slide so the audience can vote
+   again. Increments resetCounts[slideId] so every audience device sees the
+   new round and automatically unlocks their voting form.
+   ───────────────────────────────────────────────────────────────────────── */
+
+export async function resetSlideVotes(
+  sessionCode: string,
+  slideId: string,
+): Promise<void> {
+  // 1. Delete all responses for this slide
+  const q = query(
+    collection(db, 'sessions', sessionCode.toUpperCase(), 'responses'),
+    where('slideId', '==', slideId),
+  )
+  const snap = await getDocs(q)
+  await Promise.all(snap.docs.map(d => deleteDoc(d.ref)))
+
+  // 2. Bump reset counter — audience Vote.tsx reads this to re-enable voting
+  await updateDoc(doc(db, 'sessions', sessionCode.toUpperCase()), {
+    [`resetCounts.${slideId}`]: increment(1),
   })
 }
