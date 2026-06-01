@@ -220,9 +220,11 @@ interface CanvasTextEl extends CanvasBaseEl {
   kind: 'text'; html: string; fontSize: number; align: 'left' | 'center' | 'right'; color: string
 }
 interface CanvasTableEl extends CanvasBaseEl {
-  kind: 'table'; rows: number; cols: number; cells: string[][]; hasHeader: boolean
-  /** Per-cell background colour — null means use default colour */
-  cellColors?: (string | null)[][]
+  kind: 'table'; rows: number; cols: number
+  /** Flat array — index = ri * cols + ci. Firestore doesn't support nested arrays. */
+  cells: string[]
+  hasHeader: boolean
+  cellColors?: (string | null)[]   // flat, same indexing
   borderColor?: string
   borderStyle?: 'solid' | 'dashed' | 'none'
 }
@@ -316,6 +318,36 @@ const CANVAS_BG_GRADIENTS = [
   { value: 'linear-gradient(135deg,#ff0065 0%,#000079 100%)',                 label: 'Flame'    },
 ]
 
+/** Migrate any legacy canvas table elements that stored cells/cellColors as
+ *  nested string[][] (old format) to the flat string[] format.  Firestore
+ *  doesn't support nested arrays, so all new data is already flat. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function migrateSlides(slides: Slide[]): Slide[] {
+  return slides.map(s => {
+    if (s.type !== 'canvas') return s
+    const cs = s as CanvasSlide
+    return {
+      ...cs,
+      elements: cs.elements.map(el => {
+        if (el.kind !== 'table') return el
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const te = el as any
+        const isNested = te.cells.length > 0 && Array.isArray(te.cells[0])
+        if (!isNested) return el
+        return {
+          ...te,
+          cells:      (te.cells as string[][]).flat(),
+          cellColors: te.cellColors
+            ? Array.isArray(te.cellColors[0])
+              ? (te.cellColors as (string | null)[][]).flat()
+              : te.cellColors
+            : undefined,
+        }
+      }),
+    }
+  })
+}
+
 function makeCanvasWithLayout(layout: CanvasLayout): CanvasSlide {
   const base = { id: uid(), type: 'canvas' as const, bg: { type: 'color' as const, value: '#000079' } }
   switch (layout) {
@@ -359,7 +391,7 @@ export default function Create() {
   const deckFromState = returnState.deck as Deck | undefined   // loaded from My Decks
 
   const [slides, setSlides]         = useState<Slide[]>(
-    deckFromState?.slides as Slide[] ?? returnState.slides ?? [],
+    migrateSlides(deckFromState?.slides as Slide[] ?? returnState.slides ?? []),
   )
   const [selectedId, setSelectedId] = useState<string | null>(
     (returnState.selectedSlideId as string | undefined)
@@ -2264,7 +2296,7 @@ function SlideEditor({ slide, onUpdate, onSplitHtml, onPushHistory }: {
   if (slide.type === 'content') {
     return (
       <div className="scrollbar-panel flex flex-1 flex-col overflow-auto" style={{ background: 'oklch(0.972 0.006 258)' }}>
-        <div className="w-full max-w-4xl px-8 py-8">
+        <div className="w-full max-w-3xl px-5 py-4">
           <ContentEditor slide={slide} onUpdate={patch => onUpdate(slide.id, patch)} onPushHistory={onPushHistory} />
         </div>
       </div>
@@ -2274,7 +2306,7 @@ function SlideEditor({ slide, onUpdate, onSplitHtml, onPushHistory }: {
   if (slide.type === 'canvas') {
     return (
       <div className="scrollbar-panel flex flex-1 flex-col overflow-auto" style={{ background: 'oklch(0.972 0.006 258)' }}>
-        <div className="w-full px-6 py-6">
+        <div className="w-full px-5 py-4">
           <CanvasEditor slide={slide} onUpdate={patch => onUpdate(slide.id, patch)} />
         </div>
       </div>
@@ -2304,12 +2336,12 @@ function SlideEditor({ slide, onUpdate, onSplitHtml, onPushHistory }: {
   return (
     <div className="scrollbar-panel flex flex-1 flex-col overflow-auto" style={{ background: 'oklch(0.972 0.006 258)' }}>
       {/* Editor form */}
-      <div className="px-8 py-8">
+      <div className="max-w-3xl px-5 py-4">
         <QuestionEditor slide={slide as QuestionSlide} onUpdate={patch => onUpdate(slide.id, patch)} hidePreview onPushHistory={onPushHistory} />
       </div>
-      {/* Slide preview — full width, 16:9, looks like the actual presenter screen */}
-      <div className="px-8 pb-10">
-        <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-midnight-sky-500">
+      {/* Slide preview */}
+      <div className="max-w-3xl px-5 pb-6">
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-midnight-sky-500">
           Slide preview
         </p>
         <SlidePreviewCard slide={slide as QuestionSlide} />
@@ -2438,11 +2470,11 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
             'bg-hot-pink',
           )} />
 
-          <div className="p-6">
+          <div className="p-4">
 
             {/* Type chip */}
             <div className={cn(
-              'mb-5 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold tracking-wide',
+              'mb-3 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold tracking-wide',
               slide.type === 'mcq'       ? 'bg-sky-blue/10 text-sky-blue'       :
               slide.type === 'wordcloud' ? 'bg-fresh-green/10 text-fresh-green' :
               slide.type === 'openended' ? 'bg-golden-sun/10 text-golden-sun'   :
@@ -2453,8 +2485,8 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
             </div>
 
             {/* Question text */}
-            <div className="mb-5">
-              <label className="mb-2 block text-[11px] font-semibold text-midnight-sky-600">
+            <div className="mb-3">
+              <label className="mb-1.5 block text-xs font-semibold text-midnight-sky-700">
                 Question
               </label>
               <textarea
@@ -2535,9 +2567,9 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
             )}
 
             {/* Slide image + layout */}
-            <div className="mt-5 border-t border-midnight-sky-100 pt-5">
-              <label className="mb-2.5 block text-[11px] font-semibold text-midnight-sky-600">
-                Slide image <span className="font-light">(optional)</span>
+            <div className="mt-3 border-t border-midnight-sky-100 pt-3">
+              <label className="mb-2 block text-xs font-semibold text-midnight-sky-700">
+                Slide image <span className="font-normal text-midnight-sky-500">(optional)</span>
               </label>
               <SlideImagePicker imgUrl={slide.imgUrl} onChange={url => onUpdate({ imgUrl: url, imgLayout: url ? (slide.imgLayout ?? 'reference') : undefined })} />
               {slide.imgUrl && (
@@ -2563,10 +2595,10 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
             </div>
 
             {/* Slide background theme */}
-            <div className="mt-5 border-t border-midnight-sky-100 pt-5">
-              <label className="mb-2.5 block text-sm font-medium text-midnight-sky-700">
+            <div className="mt-3 border-t border-midnight-sky-100 pt-3">
+              <label className="mb-2 block text-xs font-semibold text-midnight-sky-700">
                 Slide background
-                <span className="ml-1.5 font-light text-midnight-sky-500">how this slide looks on the big screen</span>
+                <span className="ml-1.5 font-normal text-midnight-sky-500">how it looks on screen</span>
               </label>
               <div className="flex items-center gap-2">
                 {CONTENT_THEMES.map(t => (
@@ -2640,18 +2672,18 @@ function MCQEditor({ slide, onUpdate, onPushHistory }: {
   }
 
   return (
-    <div className="mb-6 space-y-2">
-      <label className="mb-2 block text-sm font-medium text-midnight-sky-700">
+    <div className="mb-4 space-y-2">
+      <label className="mb-2 block text-xs font-semibold text-midnight-sky-700">
         Answer options
-        <span className="ml-1 font-light text-midnight-sky-500">({slide.options.length}/6 — pick one)</span>
+        <span className="ml-1 font-normal text-midnight-sky-600">({slide.options.length}/6)</span>
       </label>
       {slide.options.map((opt, i) => {
         const isCorrect = (slide.correctAnswers ?? []).includes(i)
         return (
           <div key={i} className="flex items-start gap-2">
             <span className={cn(
-              'mt-2.5 flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold transition-colors',
-              isCorrect ? 'bg-fresh-green/15 text-fresh-green' : 'bg-midnight-sky-100 text-midnight-sky-600',
+              'mt-2 flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold transition-colors',
+              isCorrect ? 'bg-fresh-green/15 text-fresh-green' : 'bg-midnight-sky-200 text-midnight-sky-800',
             )}>
               {String.fromCharCode(65 + i)}
             </span>
@@ -2661,7 +2693,7 @@ function MCQEditor({ slide, onUpdate, onPushHistory }: {
               onChange={e => setOption(i, e.target.value)}
               placeholder={`Option ${String.fromCharCode(65 + i)}`}
               style={{ fieldSizing: 'content' } as React.CSSProperties}
-              className="flex-1 resize-none overflow-hidden rounded-xl border border-midnight-sky-200 bg-white px-3.5 py-2.5 text-sm leading-snug text-midnight-sky-900 placeholder:text-midnight-sky-400 outline-none transition-all focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/15"
+              className="flex-1 resize-none overflow-hidden rounded-xl border border-midnight-sky-200 bg-white px-3 py-2 text-sm leading-snug text-midnight-sky-900 placeholder:text-midnight-sky-400 outline-none transition-all focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/15"
             />
             {/* Correct-answer tick — always visible, turns solid green when marked */}
             <button
@@ -2671,10 +2703,10 @@ function MCQEditor({ slide, onUpdate, onPushHistory }: {
               }}
               title={isCorrect ? 'Remove correct answer' : 'Mark as correct answer'}
               className={cn(
-                'mt-1.5 rounded-lg border p-1.5 transition-all',
+                'mt-1 rounded-lg border p-1.5 transition-all',
                 isCorrect
                   ? 'border-fresh-green/40 bg-fresh-green/15 text-fresh-green'
-                  : 'border-midnight-sky-200 bg-white text-midnight-sky-400 hover:border-fresh-green/50 hover:bg-fresh-green/8 hover:text-fresh-green',
+                  : 'border-midnight-sky-300 bg-white text-midnight-sky-600 hover:border-fresh-green/60 hover:bg-fresh-green/10 hover:text-fresh-green',
               )}
             >
               <Check className="size-3.5" />
@@ -2682,7 +2714,8 @@ function MCQEditor({ slide, onUpdate, onPushHistory }: {
             {slide.options.length > 2 && (
               <button
                 onClick={() => removeOption(i)}
-                className="mt-1.5 rounded-lg p-1.5 text-midnight-sky-400 transition hover:bg-red-50 hover:text-red-400"
+                title="Remove option"
+                className="mt-1 rounded-lg p-1.5 text-midnight-sky-600 transition hover:bg-red-50 hover:text-red-500"
               >
                 <Trash2 className="size-3.5" />
               </button>
@@ -3971,84 +4004,72 @@ function CanvasTableView({ el, isSelected, onUpdate }: {
 }) {
   const [focusedCell, setFocusedCell] = useState<[number, number] | null>(null)
 
-  // Clear focused cell when table is deselected
-  useEffect(() => {
-    if (!isSelected) setFocusedCell(null)
-  }, [isSelected])
+  useEffect(() => { if (!isSelected) setFocusedCell(null) }, [isSelected])
+
+  // All cell access uses flat indexing: cells[ri * cols + ci]
+  function flatIdx(ri: number, ci: number) { return ri * el.cols + ci }
 
   function updateCell(r: number, c: number, text: string) {
-    const cells = el.cells.map((row, ri) =>
-      row.map((cell, ci) => (ri === r && ci === c ? text : cell)),
-    )
-    onUpdate({ cells })
+    const cells = [...el.cells]; cells[flatIdx(r, c)] = text; onUpdate({ cells })
   }
 
   function setCellColor(ri: number, ci: number, color: string | null) {
-    const colors: (string | null)[][] = el.cellColors
-      ? el.cellColors.map(row => [...row])
-      : Array.from({ length: el.rows }, () => Array<string | null>(el.cols).fill(null))
-    while (colors.length < el.rows) colors.push(Array<string | null>(el.cols).fill(null))
-    colors.forEach(row => { while (row.length < el.cols) row.push(null) })
-    colors[ri][ci] = color
+    const size = el.rows * el.cols
+    const colors: (string | null)[] = el.cellColors ? [...el.cellColors] : Array<string | null>(size).fill(null)
+    while (colors.length < size) colors.push(null)
+    colors[flatIdx(ri, ci)] = color
     onUpdate({ cellColors: colors })
   }
 
   function addRow() {
     onUpdate({
-      cells:      [...el.cells, Array<string>(el.cols).fill('')],
+      cells:      [...el.cells, ...Array<string>(el.cols).fill('')],
       rows:       el.rows + 1,
-      cellColors: el.cellColors ? [...el.cellColors, Array<string | null>(el.cols).fill(null)] : undefined,
+      cellColors: el.cellColors ? [...el.cellColors, ...Array<string | null>(el.cols).fill(null)] : undefined,
     })
   }
   function removeRow() {
     if (el.rows <= 1) return
     onUpdate({
-      cells:      el.cells.slice(0, -1),
+      cells:      el.cells.slice(0, -el.cols),
       rows:       el.rows - 1,
-      cellColors: el.cellColors ? el.cellColors.slice(0, -1) : undefined,
+      cellColors: el.cellColors ? el.cellColors.slice(0, -el.cols) : undefined,
     })
   }
   function addCol() {
-    onUpdate({
-      cells:      el.cells.map(row => [...row, '']),
-      cols:       el.cols + 1,
-      cellColors: el.cellColors ? el.cellColors.map(row => [...row, null]) : undefined,
-    })
+    const nc: string[]           = []
+    const ncc: (string|null)[] | undefined = el.cellColors ? [] : undefined
+    for (let ri = 0; ri < el.rows; ri++) {
+      for (let ci = 0; ci < el.cols; ci++) { nc.push(el.cells[flatIdx(ri,ci)] ?? ''); ncc?.push(el.cellColors?.[flatIdx(ri,ci)] ?? null) }
+      nc.push(''); ncc?.push(null)
+    }
+    onUpdate({ cells: nc, cols: el.cols + 1, cellColors: ncc })
   }
   function removeCol() {
     if (el.cols <= 1) return
-    onUpdate({
-      cells:      el.cells.map(row => row.slice(0, -1)),
-      cols:       el.cols - 1,
-      cellColors: el.cellColors ? el.cellColors.map(row => row.slice(0, -1)) : undefined,
-    })
+    const nc: string[]           = []
+    const ncc: (string|null)[] | undefined = el.cellColors ? [] : undefined
+    for (let ri = 0; ri < el.rows; ri++) {
+      for (let ci = 0; ci < el.cols - 1; ci++) { nc.push(el.cells[flatIdx(ri,ci)] ?? ''); ncc?.push(el.cellColors?.[flatIdx(ri,ci)] ?? null) }
+    }
+    onUpdate({ cells: nc, cols: el.cols - 1, cellColors: ncc })
   }
 
   const totalCells = el.rows * el.cols
-  function tabNext(ri: number, ci: number) {
-    const idx = ri * el.cols + ci
-    const next = (idx + 1) % totalCells
-    setFocusedCell([Math.floor(next / el.cols), next % el.cols])
-  }
-  function tabPrev(ri: number, ci: number) {
-    const idx = ri * el.cols + ci
-    const prev = (idx - 1 + totalCells) % totalCells
-    setFocusedCell([Math.floor(prev / el.cols), prev % el.cols])
-  }
+  function tabNext(ri: number, ci: number) { const n=(flatIdx(ri,ci)+1)%totalCells; setFocusedCell([Math.floor(n/el.cols),n%el.cols]) }
+  function tabPrev(ri: number, ci: number) { const p=(flatIdx(ri,ci)-1+totalCells)%totalCells; setFocusedCell([Math.floor(p/el.cols),p%el.cols]) }
 
-  const activeBorderColor = el.borderColor ?? 'rgba(255,255,255,0.25)'
   const fc = focusedCell
-  const activeCellColor = fc != null ? (el.cellColors?.[fc[0]]?.[fc[1]] ?? null) : null
+  const activeBorderColor = el.borderColor ?? 'rgba(255,255,255,0.25)'
+  const activeCellColor   = fc != null ? (el.cellColors?.[flatIdx(fc[0],fc[1])] ?? null) : null
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {/* Row / col / styling controls — shown when table is selected */}
       {isSelected && (
         <div
           onPointerDown={e => e.stopPropagation()}
           style={{ display: 'flex', flexWrap: 'wrap', gap: 3, padding: '3px 5px', background: 'rgba(0,0,0,0.7)', flexShrink: 0, alignItems: 'center' }}
         >
-          {/* Row / col / header */}
           <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', fontWeight: 600, display: 'flex', alignItems: 'center', paddingRight: 3 }}>ROWS</span>
           <CtrlBtn onClick={addRow}    title="Add row"><Plus  className="size-2.5" /></CtrlBtn>
           <CtrlBtn onClick={removeRow} title="Remove last row"    disabled={el.rows <= 1}><Minus className="size-2.5" /></CtrlBtn>
@@ -4057,18 +4078,10 @@ function CanvasTableView({ el, isSelected, onUpdate }: {
           <CtrlBtn onClick={addCol}    title="Add column"><Plus  className="size-2.5" /></CtrlBtn>
           <CtrlBtn onClick={removeCol} title="Remove last column" disabled={el.cols <= 1}><Minus className="size-2.5" /></CtrlBtn>
           <span style={{ width: 1, background: 'rgba(255,255,255,0.15)', alignSelf: 'stretch', margin: '0 2px' }} />
-          <CtrlBtn
-            onClick={() => onUpdate({ hasHeader: !el.hasHeader })}
-            title={el.hasHeader ? 'Remove header row' : 'Add header row'}
-            active={el.hasHeader}
-          >
+          <CtrlBtn onClick={() => onUpdate({ hasHeader: !el.hasHeader })} title={el.hasHeader ? 'Remove header row' : 'Add header row'} active={el.hasHeader}>
             <span style={{ fontSize: 8, fontWeight: 700 }}>H</span>
           </CtrlBtn>
-
-          {/* Force new row in the toolbar */}
           <div style={{ width: '100%', height: 0 }} />
-
-          {/* Border style + colour */}
           <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', fontWeight: 600, display: 'flex', alignItems: 'center', paddingRight: 3 }}>BORDER</span>
           {(['solid','dashed','none'] as const).map(s => (
             <CtrlBtn key={s} onClick={() => onUpdate({ borderStyle: s })} title={`Border: ${s}`} active={(el.borderStyle ?? 'solid') === s}>
@@ -4077,59 +4090,34 @@ function CanvasTableView({ el, isSelected, onUpdate }: {
           ))}
           <span style={{ width: 1, background: 'rgba(255,255,255,0.15)', alignSelf: 'stretch', margin: '0 2px' }} />
           {TABLE_BORDER_COLORS.map(c => (
-            <button
-              key={c}
-              onPointerDown={e => e.stopPropagation()}
-              onClick={e => { e.stopPropagation(); onUpdate({ borderColor: c }) }}
-              title="Border colour"
-              style={{
-                width: 13, height: 13, borderRadius: 2, padding: 0, cursor: 'pointer', flexShrink: 0,
-                background: c === 'transparent'
-                  ? 'repeating-linear-gradient(45deg,#888 0,#888 1px,transparent 0,transparent 50%) 0/4px 4px'
-                  : c,
-                outline: activeBorderColor === c ? '2px solid #fff' : '1px solid rgba(255,255,255,0.25)',
-                outlineOffset: activeBorderColor === c ? 1 : 0,
-              }}
-            />
+            <button key={c} onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onUpdate({ borderColor: c }) }} title="Border colour"
+              style={{ width: 13, height: 13, borderRadius: 2, padding: 0, cursor: 'pointer', flexShrink: 0,
+                background: c === 'transparent' ? 'repeating-linear-gradient(45deg,#888 0,#888 1px,transparent 0,transparent 50%) 0/4px 4px' : c,
+                outline: activeBorderColor === c ? '2px solid #fff' : '1px solid rgba(255,255,255,0.25)', outlineOffset: activeBorderColor === c ? 1 : 0 }} />
           ))}
-
-          {/* Cell fill — shown when a cell is focused */}
-          {fc && (
-            <>
-              <span style={{ width: 1, background: 'rgba(255,255,255,0.15)', alignSelf: 'stretch', margin: '0 2px' }} />
-              <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', fontWeight: 600, display: 'flex', alignItems: 'center', paddingRight: 3 }}>CELL</span>
-              <CtrlBtn onClick={() => setCellColor(fc[0], fc[1], null)} title="Clear cell fill" active={activeCellColor === null}>
-                <X className="size-2.5" />
-              </CtrlBtn>
-              {TABLE_CELL_COLORS.map(c => (
-                <button
-                  key={c}
-                  onPointerDown={e => e.stopPropagation()}
-                  onClick={e => { e.stopPropagation(); setCellColor(fc[0], fc[1], c) }}
-                  title="Cell fill colour"
-                  style={{
-                    width: 13, height: 13, borderRadius: 2, padding: 0, cursor: 'pointer', flexShrink: 0,
-                    background: c,
-                    outline: activeCellColor === c ? '2px solid #fff' : '1px solid rgba(255,255,255,0.25)',
-                    outlineOffset: activeCellColor === c ? 1 : 0,
-                  }}
-                />
-              ))}
-            </>
-          )}
+          {fc && (<>
+            <span style={{ width: 1, background: 'rgba(255,255,255,0.15)', alignSelf: 'stretch', margin: '0 2px' }} />
+            <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', fontWeight: 600, display: 'flex', alignItems: 'center', paddingRight: 3 }}>CELL</span>
+            <CtrlBtn onClick={() => setCellColor(fc[0], fc[1], null)} title="Clear cell fill" active={activeCellColor === null}><X className="size-2.5" /></CtrlBtn>
+            {TABLE_CELL_COLORS.map(c => (
+              <button key={c} onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); setCellColor(fc[0], fc[1], c) }} title="Cell fill colour"
+                style={{ width: 13, height: 13, borderRadius: 2, padding: 0, cursor: 'pointer', flexShrink: 0, background: c,
+                  outline: activeCellColor === c ? '2px solid #fff' : '1px solid rgba(255,255,255,0.25)', outlineOffset: activeCellColor === c ? 1 : 0 }} />
+            ))}
+          </>)}
         </div>
       )}
       <table style={{ width: '100%', flex: 1, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
         <tbody>
-          {el.cells.map((row, ri) => (
+          {Array.from({ length: el.rows }, (_, ri) => (
             <tr key={ri}>
-              {row.map((cell, ci) => (
+              {Array.from({ length: el.cols }, (_, ci) => (
                 <TableCell
                   key={`${ri}-${ci}`}
-                  value={cell}
+                  value={el.cells[flatIdx(ri, ci)] ?? ''}
                   isEditable={isSelected}
                   isHeader={el.hasHeader && ri === 0}
-                  cellColor={el.cellColors?.[ri]?.[ci] ?? null}
+                  cellColor={el.cellColors?.[flatIdx(ri, ci)] ?? null}
                   borderColor={el.borderColor}
                   borderStyle={el.borderStyle}
                   autoFocus={isSelected && !!focusedCell && focusedCell[0] === ri && focusedCell[1] === ci}
@@ -4386,11 +4374,12 @@ function CanvasEditor({ slide, onUpdate }: {
   }
 
   function addTable(rows: number, cols: number) {
-    const cells = Array.from({ length: rows }, () => Array.from({ length: cols }, () => ''))
     const el: CanvasTableEl = {
       id: uid(), kind: 'table',
       x: 8, y: 12, w: 62, h: 38,
-      rows, cols, cells, hasHeader: true,
+      rows, cols,
+      cells: Array<string>(rows * cols).fill(''),   // flat — Firestore-compatible
+      hasHeader: true,
     }
     onUpdate({ elements: [...slide.elements, el] })
     setSelectedId(el.id)
@@ -4651,11 +4640,18 @@ function CanvasEditor({ slide, onUpdate }: {
       )}
 
 
-      {/* ── Canvas area ── */}
+      {/* ── Canvas area — sized to always fit the viewport without scrolling ── */}
       <div
         ref={canvasRef}
-        className="relative w-full touch-none rounded-xl"
-        style={{ paddingBottom: '56.25%', ...bgStyle }}
+        className="relative touch-none rounded-xl"
+        style={{
+          // Never wider than the container, never taller than the usable viewport.
+          // 300 px covers: header (56) + toolbar (36) + text-fmt bar (46) +
+          // padding (48) + hint text (24) + panels + breathing room.
+          width: 'min(100%, calc((100vh - 300px) * 16 / 9))',
+          aspectRatio: '16 / 9',
+          ...bgStyle,
+        }}
         onPointerMove={onPtrMove}
         onPointerUp={() => { setDrag(null); setSnapGuides([]) }}
         onPointerLeave={() => { setDrag(null); setSnapGuides([]) }}

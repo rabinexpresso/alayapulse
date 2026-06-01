@@ -109,7 +109,14 @@ interface QSlide {
 interface CanvasBg     { type: 'color' | 'gradient' | 'image'; value: string }
 interface CanvasBaseEl { id: string; kind: 'text' | 'table' | 'image'; x: number; y: number; w: number; h: number }
 interface CanvasTextEl extends CanvasBaseEl { kind: 'text'; html: string; fontSize: number; align: 'left' | 'center' | 'right'; color: string }
-interface CanvasTableEl extends CanvasBaseEl { kind: 'table'; rows: number; cols: number; cells: string[][]; hasHeader: boolean }
+interface CanvasTableEl extends CanvasBaseEl {
+  kind: 'table'; rows: number; cols: number
+  cells: string[]          // flat: index = ri * cols + ci (may arrive as string[][] from old data)
+  hasHeader: boolean
+  cellColors?: (string | null)[]
+  borderColor?: string
+  borderStyle?: 'solid' | 'dashed' | 'none'
+}
 interface CanvasImageEl extends CanvasBaseEl { kind: 'image'; imgUrl: string; objectFit: 'cover' | 'contain' }
 type CanvasEl = CanvasTextEl | CanvasTableEl | CanvasImageEl
 interface CanvasSlide  { id: string; type: 'canvas'; bg: CanvasBg; elements: CanvasEl[] }
@@ -1464,42 +1471,42 @@ function CanvasSlideView({ slide }: { slide: CanvasSlide }) {
             />
           )}
           {el.kind === 'table' && (() => {
-            // Reconstruct 2D cells if Firestore-flattened (string[]) arrives here
             const tableEl  = el as CanvasTableEl
-            const rawCells = tableEl.cells ?? []
-            const is2D     = rawCells.length > 0 && Array.isArray(rawCells[0])
-            const cells2D: string[][] = is2D
-              ? (rawCells as unknown as string[][])
-              : (() => {
-                  const flat = rawCells as unknown as string[]
-                  const cols = tableEl.cols ?? 1
-                  const out: string[][] = []
-                  for (let i = 0; i < flat.length; i += cols) out.push(flat.slice(i, i + cols))
-                  return out
-                })()
+            const raw      = tableEl.cells ?? []
+            // Handle both flat (new) and nested-array (legacy) formats
+            const cells: string[] = raw.length > 0 && Array.isArray(raw[0])
+              ? (raw as unknown as string[][]).flat()
+              : raw as unknown as string[]
+            const cols = tableEl.cols ?? 1
+            const rows = tableEl.rows ?? 1
+            const borderStr = tableEl.borderStyle === 'none'
+              ? 'none'
+              : `1px ${tableEl.borderStyle ?? 'solid'} ${tableEl.borderColor ?? 'rgba(255,255,255,0.22)'}`
             return (
               <table style={{ width: '100%', height: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
                 <tbody>
-                  {cells2D.map((row, ri) => (
+                  {Array.from({ length: rows }, (_, ri) => (
                     <tr key={ri}>
-                      {row.map((cell, ci) => (
-                        <td
-                          key={ci}
-                          style={{
-                            border:          '1px solid rgba(255,255,255,0.22)',
+                      {Array.from({ length: cols }, (_, ci) => {
+                        const idx       = ri * cols + ci
+                        const cellColor = tableEl.cellColors?.[idx] ?? null
+                        const defaultBg = tableEl.hasHeader && ri === 0 ? 'rgba(0,0,121,0.65)' : 'rgba(255,255,255,0.05)'
+                        return (
+                          <td key={ci} style={{
+                            border:          borderStr,
                             padding:         '4px 8px',
                             fontSize:        13,
                             color:           '#ffffff',
-                            backgroundColor: tableEl.hasHeader && ri === 0 ? 'rgba(0,0,121,0.65)' : 'rgba(255,255,255,0.05)',
+                            backgroundColor: cellColor != null ? cellColor : defaultBg,
                             fontWeight:      tableEl.hasHeader && ri === 0 ? 600 : 400,
                             verticalAlign:   'middle',
                             overflow:        'hidden',
                             whiteSpace:      'nowrap',
-                          }}
-                        >
-                          {cell}
-                        </td>
-                      ))}
+                          }}>
+                            {cells[idx] ?? ''}
+                          </td>
+                        )
+                      })}
                     </tr>
                   ))}
                 </tbody>
