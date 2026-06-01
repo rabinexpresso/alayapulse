@@ -227,6 +227,7 @@ interface CanvasImageEl extends CanvasBaseEl {
 type CanvasEl = CanvasTextEl | CanvasTableEl | CanvasImageEl
 interface CanvasSlide { id: string; type: 'canvas'; bg: CanvasBg; elements: CanvasEl[] }
 interface LeaderboardSlide { id: string; type: 'leaderboard' }
+type CanvasLayout = 'blank' | 'title-only' | 'title-body' | 'two-columns'
 
 type Slide = PdfSlide | ImageSlide | VideoSlide | HtmlSlide | QuestionSlide | ContentSlide | CanvasSlide | LeaderboardSlide
 
@@ -310,8 +311,33 @@ const CANVAS_BG_GRADIENTS = [
   { value: 'linear-gradient(135deg,#ff0065 0%,#000079 100%)',                 label: 'Flame'    },
 ]
 
-function makeCanvas(): CanvasSlide {
-  return { id: uid(), type: 'canvas', bg: { type: 'color', value: '#000079' }, elements: [] }
+function makeCanvasWithLayout(layout: CanvasLayout): CanvasSlide {
+  const base = { id: uid(), type: 'canvas' as const, bg: { type: 'color' as const, value: '#000079' } }
+  switch (layout) {
+    case 'title-only':
+      return { ...base, elements: [
+        { id: uid(), kind: 'text' as const, x: 10, y: 32, w: 80, h: 33,
+          html: 'Click to add title', fontSize: 48, align: 'center' as const, color: '#ffffff' },
+      ] }
+    case 'title-body':
+      return { ...base, elements: [
+        { id: uid(), kind: 'text' as const, x: 8, y: 6, w: 84, h: 20,
+          html: 'Slide Title', fontSize: 40, align: 'left' as const, color: '#ffffff' },
+        { id: uid(), kind: 'text' as const, x: 8, y: 32, w: 84, h: 55,
+          html: 'Body text — click to edit', fontSize: 20, align: 'left' as const, color: 'rgba(255,255,255,0.75)' },
+      ] }
+    case 'two-columns':
+      return { ...base, elements: [
+        { id: uid(), kind: 'text' as const, x: 8, y: 4, w: 84, h: 18,
+          html: 'Slide Title', fontSize: 36, align: 'center' as const, color: '#ffffff' },
+        { id: uid(), kind: 'text' as const, x: 5, y: 27, w: 43, h: 62,
+          html: 'Left column', fontSize: 18, align: 'left' as const, color: 'rgba(255,255,255,0.85)' },
+        { id: uid(), kind: 'text' as const, x: 52, y: 27, w: 43, h: 62,
+          html: 'Right column', fontSize: 18, align: 'left' as const, color: 'rgba(255,255,255,0.85)' },
+      ] }
+    default: // blank
+      return { ...base, elements: [] }
+  }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -353,6 +379,7 @@ export default function Create() {
   const [isImporting, setImporting] = useState(false)
   const [isStarting,  setStarting]  = useState(false)
   const [addMenuAfter, setAddMenu]  = useState<string | undefined>(undefined)
+  const [layoutPicker, setLayoutPicker] = useState<{ afterId?: string } | null>(null)
 
   // Deck saving state
   const [storageBackend, setStorageBackend_] = useState<StorageBackend | null>(getStorageBackend)
@@ -756,9 +783,15 @@ export default function Create() {
     setAddMenu(undefined)
   }, [pushHistory])
 
-  const addCanvas = useCallback((afterId?: string) => {
+  // Opens the layout picker; actual canvas insertion happens in doAddCanvas
+  const requestCanvas = useCallback((afterId?: string) => {
+    setLayoutPicker({ afterId })
+    setAddMenu(undefined)
+  }, [])
+
+  const doAddCanvas = useCallback((layout: CanvasLayout, afterId?: string) => {
     pushHistory()
-    const slide = makeCanvas()
+    const slide = makeCanvasWithLayout(layout)
     setSlides(prev => {
       if (afterId === undefined) return [...prev, slide]
       const idx  = prev.findIndex(s => s.id === afterId)
@@ -767,7 +800,7 @@ export default function Create() {
       return next
     })
     setSelectedId(slide.id)
-    setAddMenu(undefined)
+    setLayoutPicker(null)
   }, [pushHistory])
 
   const addLeaderboard = useCallback((afterId?: string) => {
@@ -1272,6 +1305,16 @@ export default function Create() {
         )}
       </AnimatePresence>
 
+      {/* ── Canvas layout picker modal ──────────────────────────────── */}
+      <AnimatePresence>
+        {layoutPicker && (
+          <CanvasLayoutPicker
+            onSelect={layout => doAddCanvas(layout, layoutPicker.afterId)}
+            onCancel={() => setLayoutPicker(null)}
+          />
+        )}
+      </AnimatePresence>
+
       {/* ── Main area ───────────────────────────────────────────────── */}
       <div className="flex flex-1 overflow-hidden">
 
@@ -1289,7 +1332,7 @@ export default function Create() {
           onSetAddMenu={setAddMenu}
           onAddQuestion={addQuestion}
           onAddContent={addContent}
-          onAddCanvas={addCanvas}
+          onAddCanvas={requestCanvas}
           onAddLeaderboard={addLeaderboard}
         />
 
@@ -3432,6 +3475,99 @@ function SaveStorageModal({ onBrowser, onCloud, onCancel, saving }: {
    Canvas Editor — free-form drag/resize canvas slide
    ───────────────────────────────────────────────────────────────────────── */
 
+/* ── Layout picker modal — shown when "Custom Slide" is clicked ─────────── */
+
+function CanvasLayoutPicker({ onSelect, onCancel }: {
+  onSelect: (layout: CanvasLayout) => void
+  onCancel: () => void
+}) {
+  const layouts: { id: CanvasLayout; label: string; preview: React.ReactNode }[] = [
+    {
+      id: 'blank',
+      label: 'Blank',
+      preview: (
+        <div style={{ width: '100%', height: '100%', borderRadius: 6, background: 'rgba(255,255,255,0.07)' }} />
+      ),
+    },
+    {
+      id: 'title-only',
+      label: 'Title only',
+      preview: (
+        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: '75%', height: '28%', borderRadius: 4, background: 'rgba(255,255,255,0.40)' }} />
+        </div>
+      ),
+    },
+    {
+      id: 'title-body',
+      label: 'Title + Body',
+      preview: (
+        <div style={{ width: '100%', height: '100%', padding: 8, display: 'flex', flexDirection: 'column', gap: 5, boxSizing: 'border-box' }}>
+          <div style={{ width: '85%', height: '20%', borderRadius: 4, background: 'rgba(255,255,255,0.45)', flexShrink: 0 }} />
+          <div style={{ flex: 1, borderRadius: 4, background: 'rgba(255,255,255,0.18)' }} />
+        </div>
+      ),
+    },
+    {
+      id: 'two-columns',
+      label: 'Two columns',
+      preview: (
+        <div style={{ width: '100%', height: '100%', padding: 8, display: 'flex', flexDirection: 'column', gap: 5, boxSizing: 'border-box' }}>
+          <div style={{ width: '100%', height: '18%', borderRadius: 4, background: 'rgba(255,255,255,0.45)', flexShrink: 0 }} />
+          <div style={{ flex: 1, display: 'flex', gap: 5 }}>
+            <div style={{ flex: 1, borderRadius: 4, background: 'rgba(255,255,255,0.18)' }} />
+            <div style={{ flex: 1, borderRadius: 4, background: 'rgba(255,255,255,0.18)' }} />
+          </div>
+        </div>
+      ),
+    },
+  ]
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-sm px-6"
+      onClick={onCancel}
+    >
+      <motion.div
+        initial={{ scale: 0.94, opacity: 0, y: 8 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.94, opacity: 0 }}
+        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+        onClick={e => e.stopPropagation()}
+        className="w-full max-w-lg rounded-3xl border border-white/10 bg-midnight-sky-900 p-7 shadow-2xl"
+      >
+        <h3 className="mb-1 text-lg font-semibold text-white">Choose a layout</h3>
+        <p className="mb-5 text-sm font-light text-white/45">You can add, move and resize everything after.</p>
+        <div className="grid grid-cols-2 gap-3">
+          {layouts.map(l => (
+            <button
+              key={l.id}
+              onClick={() => onSelect(l.id)}
+              className="group flex flex-col gap-2 rounded-2xl border border-white/10 bg-white/5 p-3 text-left transition-all hover:border-sky-blue/50 hover:bg-white/10 active:scale-[0.98]"
+            >
+              <div
+                style={{ aspectRatio: '16/9', background: '#000079', borderRadius: 8, overflow: 'hidden', width: '100%' }}
+              >
+                {l.preview}
+              </div>
+              <span className="text-xs font-medium text-white/65 transition-colors group-hover:text-white">{l.label}</span>
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={onCancel}
+          className="mt-5 w-full rounded-xl border border-white/10 bg-white/5 py-2 text-sm text-white/50 transition hover:bg-white/10 hover:text-white/80"
+        >
+          Cancel
+        </button>
+      </motion.div>
+    </motion.div>
+  )
+}
+
 /* ── Background panel ──────────────────────────────────────────────────── */
 
 function BgPanel({ bg, onChange }: { bg: CanvasBg; onChange: (bg: CanvasBg) => void }) {
@@ -3946,7 +4082,7 @@ const RESIZE_HANDLES: { id: ResizeHandle; style: React.CSSProperties }[] = [
   { id: 'w',  style: { top: 'calc(50% - 5px)', left: -5,              cursor: 'w-resize'  } },
 ]
 
-function CanvasElView({ el, isSelected, isEditing, onSelect, onDoubleClick, onMoveStart, onResizeStart, onUpdate, onDelete }: {
+function CanvasElView({ el, isSelected, isEditing, onSelect, onDoubleClick, onMoveStart, onResizeStart, onUpdate, onDelete, onDuplicate }: {
   el:            CanvasEl
   isSelected:    boolean
   isEditing:     boolean
@@ -3956,6 +4092,7 @@ function CanvasElView({ el, isSelected, isEditing, onSelect, onDoubleClick, onMo
   onResizeStart: (e: React.PointerEvent, handle: ResizeHandle) => void
   onUpdate:      (p: Partial<CanvasEl>) => void
   onDelete:      () => void
+  onDuplicate:   () => void
 }) {
   // Border: blue when selected, green when actively editing text
   const borderColor = isEditing ? '#42db66' : '#00b0ff'
@@ -4005,8 +4142,17 @@ function CanvasElView({ el, isSelected, isEditing, onSelect, onDoubleClick, onMo
           </span>
           <button
             onPointerDown={e => e.stopPropagation()}
+            onClick={e => { e.stopPropagation(); onDuplicate() }}
+            title="Duplicate element"
+            style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center' }}
+          >
+            <Copy className="size-3 text-white/80 hover:text-white" />
+          </button>
+          <button
+            onPointerDown={e => e.stopPropagation()}
             onClick={e => { e.stopPropagation(); onDelete() }}
-            style={{ marginLeft: 'auto', marginRight: 4, background: 'none', border: 'none', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center' }}
+            title="Delete element"
+            style={{ marginRight: 4, background: 'none', border: 'none', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center' }}
           >
             <X className="size-3 text-white/80 hover:text-white" />
           </button>
@@ -4122,10 +4268,59 @@ function CanvasEditor({ slide, onUpdate }: {
     setShowTableCfg(false)
   }
 
-  function deleteEl(id: string) {
+  const deleteEl = useCallback((id: string) => {
     onUpdate({ elements: slide.elements.filter(e => e.id !== id) })
     setSelectedId(null)
-  }
+    setEditingId(null)
+  }, [slide.elements, onUpdate])
+
+  const duplicateEl = useCallback((id: string) => {
+    const el = slide.elements.find(e => e.id === id)
+    if (!el) return
+    const copy = {
+      ...JSON.parse(JSON.stringify(el)) as CanvasEl,
+      id:  uid(),
+      x:   Math.min(el.x + 3, 100 - el.w),
+      y:   Math.min(el.y + 3, 100 - el.h),
+    }
+    onUpdate({ elements: [...slide.elements, copy] })
+    setSelectedId(copy.id)
+    setEditingId(null)
+  }, [slide.elements, onUpdate])
+
+  // Arrow key nudge (1% normal, 5% with Shift) + Delete/Backspace to remove selected element.
+  // Only fires when an element is selected, NOT in text-edit mode, and focus is NOT in an input.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!selectedId) return
+      const target = e.target as HTMLElement
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return
+      if (editingId) return
+
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault()
+        deleteEl(selectedId)
+        return
+      }
+      const step = e.shiftKey ? 5 : 1
+      let dx = 0, dy = 0
+      if (e.key === 'ArrowLeft')  dx = -step
+      if (e.key === 'ArrowRight') dx =  step
+      if (e.key === 'ArrowUp')    dy = -step
+      if (e.key === 'ArrowDown')  dy =  step
+      if (dx !== 0 || dy !== 0) {
+        e.preventDefault()
+        const el = slide.elements.find(x => x.id === selectedId)
+        if (!el) return
+        updateEl(selectedId, {
+          x: Math.max(0, Math.min(100 - el.w, el.x + dx)),
+          y: Math.max(0, Math.min(100 - el.h, el.y + dy)),
+        })
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [selectedId, editingId, slide.elements, updateEl, deleteEl])
 
   function startMove(e: React.PointerEvent, elId: string) {
     e.stopPropagation()
@@ -4303,13 +4498,14 @@ function CanvasEditor({ slide, onUpdate }: {
               onResizeStart={(e, handle) => startResize(e, el.id, handle)}
               onUpdate={patch => updateEl(el.id, patch)}
               onDelete={() => deleteEl(el.id)}
+              onDuplicate={() => duplicateEl(el.id)}
             />
           ))}
         </div>
       </div>
 
       <p className="mt-2 text-[11px] text-midnight-sky-400">
-        Click to select · Double-click text to edit · Drag the bar to move · 8 handles to resize · Click outside to deselect
+        Click to select · Double-click text to edit · Drag bar to move · 8 handles to resize · Copy icon to duplicate · Arrow keys nudge (Shift = 5×) · Delete key removes · Click outside to deselect
       </p>
     </motion.div>
   )
