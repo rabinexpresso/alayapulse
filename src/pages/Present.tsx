@@ -2816,6 +2816,8 @@ function calculateQuizLeaderboard(
     const slideResponses = responses.filter(r => r.slideId === qs.id)
     for (const r of slideResponses) {
       const name = r.respondentName || 'Anonymous'
+      // Ensure every respondent appears on the leaderboard even if they score 0
+      if (!(name in totals)) totals[name] = 0
       let selected: number[]
       try {
         const p = JSON.parse(r.value)

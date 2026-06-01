@@ -217,27 +217,32 @@ export default function Vote() {
         respondentName: effectiveName,
       })
 
-      // Quiz feedback — MCQ only
+      // Quiz feedback — MCQ with correct answers set only
       if (session.isQuiz && slideData.type === 'mcq') {
         const qs = slideData as { options: string[]; correctAnswers?: number[] }
-        const corrSet = new Set(qs.correctAnswers ?? [])
-        let selected: number[]
-        try {
-          const p = JSON.parse(value)
-          selected = Array.isArray(p) ? p : [parseInt(value, 10)]
-        } catch { selected = [parseInt(value, 10)] }
-        const isCorrect = corrSet.size > 0 && selected.length === corrSet.size && selected.every(i => corrSet.has(i))
-        const answerPts = isCorrect ? 100 : 0
-        let speedPts = 0
-        const meta = session.questionMeta?.[slideData.id]
-        if (isCorrect && meta?.duration && meta.openedAt) {
-          const elapsed = Date.now() - meta.openedAt
-          const remaining = Math.max(0, meta.duration * 1000 - elapsed)
-          speedPts = Math.round((remaining / (meta.duration * 1000)) * 100)
+        // Skip unscored questions (no correct answer configured)
+        if (qs.correctAnswers?.length) {
+          const corrSet = new Set(qs.correctAnswers)
+          let selected: number[]
+          try {
+            const p = JSON.parse(value)
+            selected = Array.isArray(p) ? p : [parseInt(value, 10)]
+          } catch { selected = [parseInt(value, 10)] }
+          const isCorrect = selected.length === corrSet.size && selected.every(i => corrSet.has(i))
+          const answerPts = isCorrect ? 100 : 0
+          let speedPts = 0
+          // Use the session's live timer values — already subscribed for the audience countdown,
+          // so no extra Firestore read and no race condition with questionMeta writes.
+          const timerEndsAt   = session.timerEndsAt   ?? null
+          const timerDuration = session.timerDuration ?? null
+          if (isCorrect && timerEndsAt && timerDuration) {
+            const remaining = Math.max(0, timerEndsAt - Date.now())
+            speedPts = Math.round((remaining / (timerDuration * 1000)) * 100)
+          }
+          const correctAnswer = qs.correctAnswers.map(i => String.fromCharCode(65 + i)).join(', ')
+          setQuizScore(prev => prev + answerPts + speedPts)
+          setLastQuizResult({ isCorrect, answerPts, speedPts, correctAnswer, slideId: slideData.id })
         }
-        const correctAnswer = (qs.correctAnswers ?? []).map(i => String.fromCharCode(65 + i)).join(', ')
-        setQuizScore(prev => prev + answerPts + speedPts)
-        setLastQuizResult({ isCorrect, answerPts, speedPts, correctAnswer, slideId: slideData.id })
       }
 
       if (slideData.type === 'wordcloud') {
