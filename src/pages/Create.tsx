@@ -3569,6 +3569,51 @@ function TextFormatBar({ el, onUpdate }: { el: CanvasTextEl; onUpdate: (p: Parti
     document.execCommand(command, false, value ?? undefined)
   }
 
+  // queryCommandState('superscript') is unreliable in Chrome — it returns false
+  // even when the cursor is inside a <sup>. We use a DOM walk instead.
+  function findAncestorTag(tagName: string): Element | null {
+    const sel = window.getSelection()
+    if (!sel || sel.rangeCount === 0) return null
+    let n: Node | null = sel.getRangeAt(0).commonAncestorContainer
+    if (n.nodeType === Node.TEXT_NODE) n = n.parentNode
+    while (n) {
+      if (n.nodeType === Node.ELEMENT_NODE) {
+        if ((n as Element).tagName.toLowerCase() === tagName) return n as Element
+        if ((n as Element).hasAttribute('contenteditable')) break
+      }
+      n = n.parentNode
+    }
+    return null
+  }
+
+  function unwrapTag(el: Element) {
+    const parent = el.parentNode!
+    // Move all children out before the tag, then remove the now-empty tag
+    Array.from(el.childNodes).forEach(child => parent.insertBefore(child, el))
+    parent.removeChild(el)
+  }
+
+  function toggleSupSub(type: 'superscript' | 'subscript') {
+    const tag      = type === 'superscript' ? 'sup' : 'sub'
+    const otherTag = type === 'superscript' ? 'sub' : 'sup'
+    const otherCmd = type === 'superscript' ? 'subscript' : 'superscript'
+
+    const targetEl = findAncestorTag(tag)
+    if (targetEl) {
+      // Already in this tag — manually unwrap it (execCommand toggle is unreliable in Chrome)
+      unwrapTag(targetEl)
+      return
+    }
+    // Remove the opposite if active
+    const otherEl = findAncestorTag(otherTag)
+    if (otherEl) {
+      unwrapTag(otherEl)
+      // Re-select so execCommand below has something to act on
+      document.execCommand(otherCmd, false, undefined) // no-op but keeps undo stack consistent
+    }
+    document.execCommand(type, false, undefined)
+  }
+
   const FmtBtn = ({ onClick, children, title }: { onClick: () => void; children: React.ReactNode; title?: string }) => (
     <button
       title={title}
@@ -3599,10 +3644,10 @@ function TextFormatBar({ el, onUpdate }: { el: CanvasTextEl; onUpdate: (p: Parti
 
       <span className="mx-0.5 h-5 w-px bg-midnight-sky-200" />
 
-      <FmtBtn onClick={() => cmd('superscript')} title="Superscript">
+      <FmtBtn onClick={() => toggleSupSub('superscript')} title="Superscript (click again to remove)">
         <span className="text-xs leading-none">x<sup className="text-[8px]">2</sup></span>
       </FmtBtn>
-      <FmtBtn onClick={() => cmd('subscript')} title="Subscript">
+      <FmtBtn onClick={() => toggleSupSub('subscript')} title="Subscript (click again to remove)">
         <span className="text-xs leading-none">x<sub className="text-[8px]">2</sub></span>
       </FmtBtn>
 
