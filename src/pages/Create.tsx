@@ -950,7 +950,7 @@ export default function Create() {
       const cloudSlides = await toCloudinarySlides(slides)
       setSlides(cloudSlides)
       // Resync slides first so audience index matches presenter's deck
-      await updateSessionSlides(resumeCode, cloudSlides)
+      await updateSessionSlides(resumeCode, cloudSlides, isQuiz)
       await updateSessionState(resumeCode, startSlide, 'question')
       navigate(`/present/${resumeCode}`, { state: { slides: cloudSlides, deckTitle, sessionCode: resumeCode, startSlide, deckId: currentDeckId, isQuiz } })
     } catch (err) {
@@ -1033,8 +1033,10 @@ export default function Create() {
           className="w-64 border-b border-transparent bg-transparent px-2 py-1 text-center text-sm font-semibold text-white outline-none transition-colors placeholder:text-white/30 hover:border-white/20 focus:border-hot-pink"
         />
 
-        {/* Save deck button + error toast */}
+        {/* Right-side controls — grouped so justify-between stays stable */}
         <div className="flex items-center gap-2">
+
+          {/* Save / Export / Results buttons */}
           <AnimatePresence>
             {saveError && (
               <motion.span
@@ -1071,7 +1073,6 @@ export default function Create() {
             )}
           </motion.button>
 
-          {/* Export deck as shareable JSON */}
           <motion.button
             onClick={() => downloadDeckJSON(deckTitle, slides)}
             disabled={slides.length === 0}
@@ -1088,9 +1089,6 @@ export default function Create() {
             Export
           </motion.button>
 
-          {/* Results button — enabled whenever we have poll results, even
-              if the deck hasn't been saved yet. In that case clicking it
-              saves the deck first (to mint an ID) and then navigates. */}
           {(() => {
             const hasResults = !!lastResults && lastResults.questions.length > 0
             return (
@@ -1099,8 +1097,6 @@ export default function Create() {
                   if (!hasResults) return
                   let targetId = currentDeckId
                   if (!targetId) {
-                    // Save first to mint a deck ID. saveDeck will open the
-                    // storage modal if no backend is chosen yet.
                     targetId = await saveDeck() ?? undefined
                   }
                   if (targetId) navigate(`/results/${targetId}`)
@@ -1124,79 +1120,81 @@ export default function Create() {
               </motion.button>
             )
           })()}
-        </div>
 
-        {/* Session error toast — surfaces silent createSession / resumeSession failures */}
-        <AnimatePresence>
-          {sessionError && (
-            <motion.div
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              className="max-w-md rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 shadow-sm"
-            >
-              {sessionError}
-            </motion.div>
-          )}
-        </AnimatePresence>
+          {/* Session error toast */}
+          <AnimatePresence>
+            {sessionError && (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                className="max-w-md rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 shadow-sm"
+              >
+                {sessionError}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-        {/* Live audience count — only visible when a session is active */}
-        <AnimatePresence>
-          {resumeCode && viewerCount > 0 && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.85 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.85 }}
-              transition={{ duration: 0.2 }}
-              className="flex items-center gap-1.5 rounded-full bg-fresh-green/10 px-3 py-1.5 text-xs font-medium text-fresh-green"
-            >
-              <span className="relative flex size-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-fresh-green opacity-60" />
-                <span className="relative inline-flex size-2 rounded-full bg-fresh-green" />
-              </span>
-              <Users className="size-3" />
-              {viewerCount} in room
-            </motion.div>
-          )}
-        </AnimatePresence>
+          {/* Separator before session controls */}
+          {resumeCode && <span className="h-4 w-px bg-white/15" />}
 
-        {/* Start / Resume session */}
-        {resumeCode && slides.length > 0 ? (
-          /* Has an existing session — offer Resume (same code) or New */
-          <div className="flex items-center gap-2">
-            <motion.button
-              onClick={resumeSession}
-              whileTap={!isStarting ? { scale: 0.96 } : {}}
-              disabled={isStarting}
-              className="flex items-center gap-2 rounded-xl bg-hot-pink px-4 py-2 text-sm font-medium text-white shadow-[0_0_20px_-4px] shadow-hot-pink/50 transition-all hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/70 disabled:opacity-60"
-            >
-              {isStarting ? <LoadingDots /> : <><Play className="size-3.5 fill-white" />Resume · {resumeCode}</>}
-            </motion.button>
+          {/* Live audience count */}
+          <AnimatePresence>
+            {resumeCode && viewerCount > 0 && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.85 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.85 }}
+                transition={{ duration: 0.2 }}
+                className="flex items-center gap-1.5 rounded-full bg-fresh-green/10 px-3 py-1.5 text-xs font-medium text-fresh-green"
+              >
+                <span className="relative flex size-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-fresh-green opacity-60" />
+                  <span className="relative inline-flex size-2 rounded-full bg-fresh-green" />
+                </span>
+                <Users className="size-3" />
+                {viewerCount} in room
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Start / Resume session */}
+          {resumeCode && slides.length > 0 ? (
+            <>
+              <motion.button
+                onClick={resumeSession}
+                whileTap={!isStarting ? { scale: 0.96 } : {}}
+                disabled={isStarting}
+                className="flex items-center gap-2 rounded-xl bg-hot-pink px-4 py-2 text-sm font-medium text-white shadow-[0_0_20px_-4px] shadow-hot-pink/50 transition-all hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/70 disabled:opacity-60"
+              >
+                {isStarting ? <LoadingDots /> : <><Play className="size-3.5 fill-white" />Resume · {resumeCode}</>}
+              </motion.button>
+              <motion.button
+                onClick={startSession}
+                whileTap={!isStarting ? { scale: 0.96 } : {}}
+                disabled={isStarting}
+                className="flex items-center gap-2 rounded-xl bg-sky-blue px-3 py-2 text-sm font-semibold text-white shadow-[0_0_16px_-4px] shadow-sky-blue/50 transition-all hover:scale-[1.02] hover:shadow-[0_0_24px_-2px] hover:shadow-sky-blue/70 disabled:opacity-60"
+              >
+                New Slide Show
+              </motion.button>
+            </>
+          ) : (
             <motion.button
               onClick={startSession}
-              whileTap={!isStarting ? { scale: 0.96 } : {}}
-              disabled={isStarting}
-              className="flex items-center gap-2 rounded-xl bg-sky-blue px-3 py-2 text-sm font-semibold text-white shadow-[0_0_16px_-4px] shadow-sky-blue/50 transition-all hover:scale-[1.02] hover:shadow-[0_0_24px_-2px] hover:shadow-sky-blue/70 disabled:opacity-60"
+              whileTap={slides.length > 0 && !isStarting ? { scale: 0.96 } : {}}
+              disabled={slides.length === 0 || isStarting}
+              className={cn(
+                'flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium text-white transition-all duration-200',
+                slides.length > 0 && !isStarting
+                  ? 'bg-hot-pink shadow-[0_0_20px_-4px] shadow-hot-pink/50 hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/70'
+                  : 'cursor-not-allowed bg-white/10 text-white/30',
+              )}
             >
-              New Slide Show
+              {isStarting ? <LoadingDots /> : <><Play className="size-3.5 fill-white" />Start session</>}
             </motion.button>
-          </div>
-        ) : (
-          /* No existing session — single Start button */
-          <motion.button
-            onClick={startSession}
-            whileTap={slides.length > 0 && !isStarting ? { scale: 0.96 } : {}}
-            disabled={slides.length === 0 || isStarting}
-            className={cn(
-              'flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium text-white transition-all duration-200',
-              slides.length > 0 && !isStarting
-                ? 'bg-hot-pink shadow-[0_0_20px_-4px] shadow-hot-pink/50 hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/70'
-                : 'cursor-not-allowed bg-white/10 text-white/30',
-            )}
-          >
-            {isStarting ? <LoadingDots /> : <><Play className="size-3.5 fill-white" />Start session</>}
-          </motion.button>
-        )}
+          )}
+
+        </div>
       </header>
 
       {/* ── Auto-split toast ─────────────────────────────────────────── */}

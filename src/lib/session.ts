@@ -348,7 +348,7 @@ export async function updateSessionState(
    ───────────────────────────────────────────────────────────────────────── */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function updateSessionSlides(code: string, rawSlides: any[]): Promise<void> {
+export async function updateSessionSlides(code: string, rawSlides: any[], isQuiz?: boolean): Promise<void> {
   const slides: StoredSlide[] = rawSlides.map(s => {
     if (s.type === 'pdf')
       return { id: s.id, type: 'pdf' as const, pageNum: s.pageNum ?? 1 }
@@ -408,7 +408,10 @@ export async function updateSessionSlides(code: string, rawSlides: any[]): Promi
       ...(typeof s.oeMaxSubmissions === 'number' ? { oeMaxSubmissions: s.oeMaxSubmissions } : {}),
     }
   })
-  await updateDoc(doc(db, 'sessions', code.toUpperCase()), { slides })
+  await updateDoc(doc(db, 'sessions', code.toUpperCase()), {
+    slides,
+    ...(isQuiz ? { isQuiz: true } : { isQuiz: deleteField() }),
+  })
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
