@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   ChevronLeft, ChevronRight, X,
   BarChart2, ChevronDown, ChevronUp, Clock,
-  Eye, EyeOff, Pin, Check, RotateCcw,
+  Eye, EyeOff, Pin, Check, RotateCcw, Trophy, Crown,
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { cn } from '@/lib/utils'
@@ -552,6 +552,7 @@ export default function Present() {
               sessionCode={code}
               deck={deck}
               questionMeta={questionMetaRef.current}
+              timerActive={!!(timerEndsAt && timerDuration && isQuestion)}
             />
           </motion.div>
         </AnimatePresence>
@@ -629,6 +630,17 @@ export default function Present() {
 
               {/* Join URL — large + white so late joiners can see it without asking */}
               <span className="text-sm font-semibold text-white">{window.location.host}/join</span>
+
+              {/* Quiz mode indicator — lets the presenter confirm scoring is on */}
+              {isQuiz && (
+                <>
+                  <div className="h-5 w-px shrink-0 bg-white/15" />
+                  <div className="flex items-center gap-1.5 rounded-full bg-golden-sun/15 px-2.5 py-1 text-xs font-semibold text-golden-sun">
+                    <Trophy className="size-3.5" />
+                    Quiz mode
+                  </div>
+                </>
+              )}
 
               <div className="flex-1" />
 
@@ -951,7 +963,7 @@ export default function Present() {
 function SlideContent({
   slide, phase, responseCount,
   mcqVotes, cloudWords, openAnswers, ratingAvgs, ratingDist,
-  onReveal, sessionCode, deck, questionMeta,
+  onReveal, sessionCode, deck, questionMeta, timerActive,
 }: {
   slide:          AnySlide
   phase:          SlidePhase
@@ -965,6 +977,7 @@ function SlideContent({
   sessionCode:    string
   deck:           AnySlide[]
   questionMeta:   Record<string, { openedAt: number; duration: number | null }>
+  timerActive:    boolean
 }) {
   if (slide.type === 'pdf')          return <PdfSlideView slide={slide} />
   if (slide.type === 'image')        return <ImageSlideView slide={slide} />
@@ -982,6 +995,7 @@ function SlideContent({
       openAnswers={openAnswers}
       ratingAvgs={ratingAvgs}
       ratingDist={ratingDist}
+      timerActive={timerActive}
     />
   )
   return (
@@ -1752,11 +1766,12 @@ function QuestionSlideView({
    ───────────────────────────────────────────────────────────────────────── */
 
 function ResultsSlideView({
-  slide, mcqVotes, respondentCount, cloudWords, openAnswers, ratingAvgs, ratingDist,
+  slide, mcqVotes, respondentCount, cloudWords, openAnswers, ratingAvgs, ratingDist, timerActive = false,
 }: {
   slide:           QSlide
   mcqVotes:        number[]
   respondentCount: number
+  timerActive?:    boolean
   cloudWords:      { text: string; count: number }[]
   openAnswers:     { name: string; text: string }[]
   ratingAvgs:      number[]
@@ -1792,8 +1807,10 @@ function ResultsSlideView({
       className="absolute inset-0 flex flex-col overflow-hidden px-14 pt-10 pb-24"
       style={{ backgroundColor: slide.theme === 'transparent' ? 'transparent' : c.bg }}
     >
-      {/* Badge + question + optional reveal button */}
-      <div className="flex items-start gap-3">
+      {/* Badge + question + optional reveal button.
+          When the timer pill is showing (top-right), add right padding so the
+          Reveal answer button shifts left and never sits under the pill. */}
+      <div className={cn('flex items-start gap-3', timerActive && 'pr-24')}>
         <span
           className="mt-0.5 shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider"
           style={{ backgroundColor: c.fg, color: c.bg }}
@@ -2899,70 +2916,170 @@ function LeaderboardSlideView({
   const maxScore = top10[0]?.score ?? 1
   // Reveal from last (10th) to first (1st)
   const revealedEntries = top10.slice(top10.length - revealCount)
+  // The winner (#1) is revealed last — fire confetti the moment they appear.
+  const winnerRevealed = revealCount >= top10.length && top10.length > 0
 
   return (
-    <div className="absolute inset-0 flex flex-col overflow-hidden bg-midnight-sky-900 px-14 pt-12 pb-24">
-      <motion.h1
+    <div className="absolute inset-0 flex flex-col overflow-hidden bg-gradient-to-b from-midnight-sky-900 via-midnight-sky-900 to-[#1a0a3a] px-14 pt-12 pb-24">
+
+      {/* Celebratory glow orbs behind everything */}
+      <div aria-hidden className="pointer-events-none absolute inset-0">
+        <div className="absolute left-1/2 top-0 h-[420px] w-[420px] -translate-x-1/2 rounded-full bg-golden-sun/12 blur-[120px]" />
+        <div className="absolute bottom-0 left-[8%] h-72 w-72 rounded-full bg-hot-pink/12 blur-[100px]" />
+        <div className="absolute bottom-0 right-[8%] h-72 w-72 rounded-full bg-sky-blue/12 blur-[100px]" />
+      </div>
+
+      {/* Confetti burst — fires when the winner is revealed */}
+      <AnimatePresence>{winnerRevealed && <Confetti />}</AnimatePresence>
+
+      <motion.div
         initial={{ opacity: 0, y: -16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-        className="mb-8 text-center text-4xl font-bold tracking-tight text-white"
+        className="relative mb-8 flex items-center justify-center gap-3"
       >
-        LEADERBOARD
-      </motion.h1>
+        <Trophy className="size-9 text-golden-sun drop-shadow-[0_0_18px_rgba(255,199,9,0.55)]" />
+        <h1 className="text-5xl font-extrabold tracking-tight text-white drop-shadow-[0_2px_20px_rgba(255,255,255,0.15)]">
+          LEADERBOARD
+        </h1>
+        <Trophy className="size-9 text-golden-sun drop-shadow-[0_0_18px_rgba(255,199,9,0.55)]" />
+      </motion.div>
 
       {leaderboard.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center">
+        <div className="relative flex flex-1 items-center justify-center">
           <p className="text-white/30">No scores yet — no quiz questions have been answered.</p>
         </div>
       ) : (
-        <div className="flex flex-1 flex-col gap-3 overflow-hidden">
+        <div className="relative flex flex-1 flex-col justify-center gap-3 overflow-hidden">
           {revealedEntries.map(entry => {
             const rank = top10.indexOf(entry) + 1
             const barPct = maxScore > 0 ? (entry.score / maxScore) * 100 : 0
             const medalColor = rank <= 3 ? MEDAL_COLORS[rank - 1] : null
+            const isWinner = rank === 1
+            const isPodium = rank <= 3
             return (
               <motion.div
                 key={entry.name}
-                initial={{ opacity: 0, x: -40 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-                className="flex items-center gap-4"
+                initial={{ opacity: 0, x: -40, scale: 0.96 }}
+                animate={{ opacity: 1, x: 0, scale: 1 }}
+                transition={{ type: 'spring', stiffness: 260, damping: 22 }}
+                className={cn(
+                  'flex items-center gap-4 rounded-2xl px-5 transition-colors',
+                  isWinner ? 'py-4' : isPodium ? 'py-3' : 'py-2',
+                  isPodium && 'border bg-white/[0.04]',
+                )}
+                style={isPodium ? {
+                  borderColor: `${medalColor}55`,
+                  boxShadow: isWinner ? `0 0 40px -8px ${medalColor}80` : `0 0 24px -10px ${medalColor}66`,
+                } : undefined}
               >
-                <span
-                  className="w-8 shrink-0 text-center text-lg font-bold tabular-nums"
-                  style={{ color: medalColor ?? 'rgba(255,255,255,0.4)' }}
-                >
-                  {rank}
-                </span>
-                <div className="flex flex-1 flex-col gap-1">
+                {/* Rank badge — medal circle for top 3, plain number otherwise */}
+                {isPodium ? (
+                  <motion.div
+                    initial={{ scale: 0, rotate: -30 }}
+                    animate={{ scale: 1, rotate: 0 }}
+                    transition={{ type: 'spring', stiffness: 380, damping: 16, delay: 0.1 }}
+                    className="relative flex size-12 shrink-0 items-center justify-center rounded-full text-xl font-extrabold tabular-nums shrink-0"
+                    style={{ backgroundColor: `${medalColor}26`, color: medalColor ?? undefined, border: `2px solid ${medalColor}` }}
+                  >
+                    {isWinner && (
+                      <motion.div
+                        initial={{ y: 6, opacity: 0, scale: 0.5 }}
+                        animate={{ y: 0, opacity: 1, scale: 1 }}
+                        transition={{ type: 'spring', stiffness: 400, damping: 14, delay: 0.25 }}
+                        className="absolute -top-5 left-1/2 -translate-x-1/2"
+                      >
+                        <Crown className="size-6 fill-golden-sun text-golden-sun drop-shadow-[0_0_10px_rgba(255,199,9,0.8)]" />
+                      </motion.div>
+                    )}
+                    {rank}
+                  </motion.div>
+                ) : (
+                  <span className="w-12 shrink-0 text-center text-lg font-bold tabular-nums text-white/40">
+                    {rank}
+                  </span>
+                )}
+
+                <div className="flex flex-1 flex-col gap-1.5">
                   <span
-                    className="text-sm font-semibold"
-                    style={{ color: medalColor ?? 'rgba(255,255,255,0.85)' }}
+                    className={cn('font-bold', isWinner ? 'text-2xl' : isPodium ? 'text-xl' : 'text-base')}
+                    style={{ color: medalColor ?? 'rgba(255,255,255,0.9)' }}
                   >
                     {entry.name}
                   </span>
-                  <div className="relative h-2 overflow-hidden rounded-full bg-white/10">
+                  <div className={cn('relative overflow-hidden rounded-full bg-white/10', isWinner ? 'h-3' : 'h-2')}>
                     <motion.div
                       className="absolute inset-y-0 left-0 rounded-full"
-                      style={{ backgroundColor: medalColor ?? '#ff0065' }}
+                      style={{
+                        backgroundColor: medalColor ?? '#ff0065',
+                        boxShadow: isPodium ? `0 0 12px ${medalColor}aa` : undefined,
+                      }}
                       initial={{ width: '0%' }}
                       animate={{ width: `${barPct}%` }}
-                      transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
+                      transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1], delay: 0.15 }}
                     />
                   </div>
                 </div>
-                <span
-                  className="w-20 shrink-0 text-right text-base font-bold tabular-nums"
-                  style={{ color: medalColor ?? 'rgba(255,255,255,0.7)' }}
+
+                <motion.span
+                  initial={{ opacity: 0, scale: 0.7 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: 0.3, type: 'spring', stiffness: 300, damping: 18 }}
+                  className={cn('shrink-0 text-right font-extrabold tabular-nums', isWinner ? 'w-28 text-2xl' : 'w-24 text-lg')}
+                  style={{ color: medalColor ?? 'rgba(255,255,255,0.75)' }}
                 >
                   {entry.score.toLocaleString()} pts
-                </span>
+                </motion.span>
               </motion.div>
             )
           })}
         </div>
       )}
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Confetti — lightweight celebratory burst rendered over the leaderboard.
+   Pure framer-motion (no external lib); pieces fall + spin from the top.
+   ───────────────────────────────────────────────────────────────────────── */
+
+function Confetti() {
+  const COLORS = ['#ffc709', '#ff0065', '#00b8d9', '#36b37e', '#ffffff', '#a855f7']
+  // Generate piece configs once so they don't reshuffle on re-render.
+  const pieces = useMemo(
+    () => Array.from({ length: 90 }, (_, i) => ({
+      id: i,
+      left: Math.random() * 100,
+      delay: Math.random() * 0.6,
+      duration: 2.4 + Math.random() * 1.8,
+      drift: (Math.random() - 0.5) * 220,
+      rotate: Math.random() * 720 - 360,
+      size: 7 + Math.random() * 8,
+      color: COLORS[i % COLORS.length],
+      round: Math.random() > 0.5,
+    })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
+  return (
+    <div aria-hidden className="pointer-events-none absolute inset-0 z-40 overflow-hidden">
+      {pieces.map(p => (
+        <motion.div
+          key={p.id}
+          initial={{ y: -40, x: 0, opacity: 1, rotate: 0 }}
+          animate={{ y: '110vh', x: p.drift, opacity: [1, 1, 0.9, 0], rotate: p.rotate }}
+          transition={{ duration: p.duration, delay: p.delay, ease: 'easeIn' }}
+          className="absolute top-0"
+          style={{
+            left: `${p.left}%`,
+            width: p.size,
+            height: p.round ? p.size : p.size * 0.45,
+            backgroundColor: p.color,
+            borderRadius: p.round ? '9999px' : '2px',
+          }}
+        />
+      ))}
     </div>
   )
 }

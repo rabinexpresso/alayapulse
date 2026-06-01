@@ -968,12 +968,12 @@ export default function Create() {
     <div className="flex h-screen flex-col overflow-hidden bg-white">
 
       {/* ── Top bar ─────────────────────────────────────────────────── */}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-white/10 bg-midnight-sky-900 px-5">
+      <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-midnight-sky-900 px-5">
 
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-3">
           <button
             onClick={() => navigate('/decks')}
-            className="flex items-center gap-1.5 rounded-lg bg-fresh-green px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-fresh-green/85 active:scale-95"
+            className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-fresh-green px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-fresh-green/85 active:scale-95"
           >
             <LayoutGrid className="size-4" />
             My Decks
@@ -1011,30 +1011,32 @@ export default function Create() {
             </button>
           </div>
           <span className="h-4 w-px bg-white/15" />
-          <button
+          {/* Quiz mode toggle — styled as a prominent button (matches Save / Export) */}
+          <motion.button
             onClick={() => setIsQuiz(v => !v)}
-            title={isQuiz ? 'Quiz mode on — click to disable' : 'Enable quiz mode'}
+            whileTap={{ scale: 0.96 }}
+            title={isQuiz ? 'Quiz mode on — click to disable' : 'Enable quiz mode — score answers & show a leaderboard'}
             className={cn(
-              'flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium transition-all',
+              'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-medium transition-all duration-200',
               isQuiz
-                ? 'bg-hot-pink/15 text-hot-pink'
-                : 'text-white/40 hover:bg-white/10 hover:text-white',
+                ? 'border-golden-sun/50 bg-golden-sun/15 text-golden-sun shadow-[0_0_16px_-4px] shadow-golden-sun/50'
+                : 'border-white/20 bg-white/5 text-white/80 hover:border-white/40 hover:text-white',
             )}
           >
             <Trophy className="size-3.5" />
-            Quiz
-          </button>
+            Quiz {isQuiz ? 'On' : 'Off'}
+          </motion.button>
         </div>
 
-        {/* Editable deck title */}
+        {/* Editable deck title — shrinks first so action buttons never wrap */}
         <input
           value={deckTitle}
           onChange={e => setDeckTitle(e.target.value)}
-          className="w-64 border-b border-transparent bg-transparent px-2 py-1 text-center text-sm font-semibold text-white outline-none transition-colors placeholder:text-white/30 hover:border-white/20 focus:border-hot-pink"
+          className="min-w-0 flex-1 border-b border-transparent bg-transparent px-2 py-1 text-center text-sm font-semibold text-white outline-none transition-colors placeholder:text-white/30 hover:border-white/20 focus:border-hot-pink"
         />
 
         {/* Right-side controls — grouped so justify-between stays stable */}
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
 
           {/* Save / Export / Results buttons */}
           <AnimatePresence>
@@ -1054,7 +1056,7 @@ export default function Create() {
             disabled={slides.length === 0 || isSaving}
             whileTap={slides.length > 0 ? { scale: 0.96 } : {}}
             className={cn(
-              'flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm font-medium transition-all duration-200',
+              'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-medium transition-all duration-200',
               savedToast
                 ? 'border-fresh-green/40 bg-fresh-green/10 text-fresh-green'
                 : saveError
@@ -1079,7 +1081,7 @@ export default function Create() {
             whileTap={slides.length > 0 ? { scale: 0.96 } : {}}
             title={slides.length === 0 ? 'Add slides first' : 'Export deck as a file to share with colleagues'}
             className={cn(
-              'flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm font-medium transition-all duration-200',
+              'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-medium transition-all duration-200',
               slides.length > 0
                 ? 'border-white/20 bg-white/5 text-white/80 hover:border-white/40 hover:text-white'
                 : 'cursor-not-allowed border-white/10 text-white/30',
@@ -1109,7 +1111,7 @@ export default function Create() {
                     : 'View live poll results'
                 }
                 className={cn(
-                  'flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm font-medium transition-all duration-200',
+                  'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-medium transition-all duration-200',
                   hasResults && !isSaving
                     ? 'border-hot-pink/30 bg-hot-pink/5 text-hot-pink hover:border-hot-pink/60 hover:bg-hot-pink/10'
                     : 'cursor-not-allowed border-white/10 text-white/30',
@@ -1165,7 +1167,7 @@ export default function Create() {
                 onClick={resumeSession}
                 whileTap={!isStarting ? { scale: 0.96 } : {}}
                 disabled={isStarting}
-                className="flex items-center gap-2 rounded-xl bg-hot-pink px-4 py-2 text-sm font-medium text-white shadow-[0_0_20px_-4px] shadow-hot-pink/50 transition-all hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/70 disabled:opacity-60"
+                className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl bg-hot-pink px-4 py-2 text-sm font-medium text-white shadow-[0_0_20px_-4px] shadow-hot-pink/50 transition-all hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/70 disabled:opacity-60"
               >
                 {isStarting ? <LoadingDots /> : <><Play className="size-3.5 fill-white" />Resume · {resumeCode}</>}
               </motion.button>
@@ -1173,7 +1175,7 @@ export default function Create() {
                 onClick={startSession}
                 whileTap={!isStarting ? { scale: 0.96 } : {}}
                 disabled={isStarting}
-                className="flex items-center gap-2 rounded-xl bg-sky-blue px-3 py-2 text-sm font-semibold text-white shadow-[0_0_16px_-4px] shadow-sky-blue/50 transition-all hover:scale-[1.02] hover:shadow-[0_0_24px_-2px] hover:shadow-sky-blue/70 disabled:opacity-60"
+                className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl bg-sky-blue px-3 py-2 text-sm font-semibold text-white shadow-[0_0_16px_-4px] shadow-sky-blue/50 transition-all hover:scale-[1.02] hover:shadow-[0_0_24px_-2px] hover:shadow-sky-blue/70 disabled:opacity-60"
               >
                 New Slide Show
               </motion.button>
@@ -1184,7 +1186,7 @@ export default function Create() {
               whileTap={slides.length > 0 && !isStarting ? { scale: 0.96 } : {}}
               disabled={slides.length === 0 || isStarting}
               className={cn(
-                'flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium text-white transition-all duration-200',
+                'flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl px-4 py-2 text-sm font-medium text-white transition-all duration-200',
                 slides.length > 0 && !isStarting
                   ? 'bg-hot-pink shadow-[0_0_20px_-4px] shadow-hot-pink/50 hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/70'
                   : 'cursor-not-allowed bg-white/10 text-white/30',
