@@ -1374,7 +1374,7 @@ export default function Create() {
         />
 
         {/* Right: editor */}
-        <div className="scrollbar-panel flex flex-1 flex-col overflow-auto">
+        <div className="scrollbar-panel flex flex-1 flex-col overflow-auto" style={{ background: '#f8f7f5' }}>
           {selectedSlide ? (
             <SlideEditor slide={selectedSlide} onUpdate={updateSlide} onSplitHtml={splitHtmlSlide} onPushHistory={pushHistory} />
           ) : (
@@ -1416,7 +1416,7 @@ function SlidePanel({
   const fileRef = useRef<HTMLInputElement>(null)
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col overflow-hidden border-r border-white/10 bg-midnight-sky-900">
+    <aside className="flex w-64 shrink-0 flex-col overflow-hidden border-r border-white/8 bg-[#14142b]">
 
       {/* Import PDF button */}
       <div className="shrink-0 border-b border-white/10 p-3">
@@ -2295,7 +2295,7 @@ function SlideEditor({ slide, onUpdate, onSplitHtml, onPushHistory }: {
 
   if (slide.type === 'content') {
     return (
-      <div className="scrollbar-panel flex flex-1 flex-col overflow-auto" style={{ background: 'oklch(0.972 0.006 258)' }}>
+      <div className="scrollbar-panel flex flex-1 flex-col overflow-auto" style={{ background: '#f8f7f5' }}>
         <div className="w-full max-w-3xl px-5 py-4">
           <ContentEditor slide={slide} onUpdate={patch => onUpdate(slide.id, patch)} onPushHistory={onPushHistory} />
         </div>
@@ -2305,7 +2305,7 @@ function SlideEditor({ slide, onUpdate, onSplitHtml, onPushHistory }: {
 
   if (slide.type === 'canvas') {
     return (
-      <div className="scrollbar-panel flex flex-1 flex-col overflow-auto" style={{ background: 'oklch(0.972 0.006 258)' }}>
+      <div className="scrollbar-panel flex flex-1 flex-col overflow-auto" style={{ background: '#f8f7f5' }}>
         <div className="w-full px-5 py-4">
           <CanvasEditor slide={slide} onUpdate={patch => onUpdate(slide.id, patch)} />
         </div>
@@ -2334,7 +2334,7 @@ function SlideEditor({ slide, onUpdate, onSplitHtml, onPushHistory }: {
 
   // Question slides — editor form above, 16:9 slide preview below
   return (
-    <div className="scrollbar-panel flex flex-1 flex-col overflow-auto" style={{ background: 'oklch(0.972 0.006 258)' }}>
+    <div className="scrollbar-panel flex flex-1 flex-col overflow-auto" style={{ background: '#f8f7f5' }}>
       {/* Editor form */}
       <div className="max-w-3xl px-5 py-4">
         <QuestionEditor slide={slide as QuestionSlide} onUpdate={patch => onUpdate(slide.id, patch)} hidePreview onPushHistory={onPushHistory} />
