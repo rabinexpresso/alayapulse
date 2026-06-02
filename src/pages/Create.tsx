@@ -1921,8 +1921,9 @@ function SlideThumbnail({
     <div ref={setNodeRef} style={style} {...attributes} className="group relative my-0.5">
       <button
         onClick={onSelect}
+        {...listeners}
         className={cn(
-          'relative flex w-full items-start gap-1.5 rounded-xl px-1.5 py-1.5 text-left transition-all',
+          'relative flex w-full items-start gap-1.5 rounded-xl px-1.5 py-1.5 text-left transition-all cursor-grab active:cursor-grabbing',
           isSelected ? 'bg-white/15 ring-1 ring-hot-pink/70' : 'hover:bg-white/8',
         )}
       >
@@ -1982,13 +1983,6 @@ function SlideThumbnail({
       </button>
 
       {/* Drag handle — appears on hover, left edge */}
-      <button
-        {...listeners}
-        className="absolute left-0.5 top-1/2 -translate-y-1/2 cursor-grab rounded p-0.5 text-white/0 transition-all group-hover:text-white/35 hover:text-white/60 active:cursor-grabbing"
-      >
-        <GripVertical className="size-3" />
-      </button>
-
       {/* Duplicate button — bottom left, faint at rest, clear on hover */}
       <button
         onClick={e => { e.stopPropagation(); onDuplicate() }}
