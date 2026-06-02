@@ -1437,6 +1437,14 @@ function SlidePanel({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
   const fileRef = useRef<HTMLInputElement>(null)
+  const [addMenuOpen, setAddMenuOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem('alaya-add-menu-open') !== 'false' } catch { return true }
+  })
+  const toggleAddMenu = () => setAddMenuOpen(prev => {
+    const next = !prev
+    try { localStorage.setItem('alaya-add-menu-open', String(next)) } catch {}
+    return next
+  })
 
   return (
     <aside className="flex w-64 shrink-0 flex-col overflow-hidden border-r border-white/8 bg-[#14142b]">
@@ -1568,55 +1576,82 @@ function SlidePanel({
 
       {/* Bottom: add question / content at end (only when slides exist) */}
       {slides.length > 0 && (
-        <div className="shrink-0 border-t border-white/10 p-3 space-y-2">
-          <div>
-            <p className="mb-1 px-1 text-[9px] font-semibold uppercase tracking-wider text-white/40">
-              Question
-            </p>
-            <div className="grid grid-cols-2 gap-1">
-              {QTYPES.map(q => (
-                <button
-                  key={q.type}
-                  onClick={() => onAddQuestion(q.type, selectedId ?? undefined)}
-                  className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
-                >
-                  <span className={cn('shrink-0', q.color)}>{q.icon}</span>
-                  <span className="truncate">{q.label.split(' ')[0]}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <p className="mb-1 px-1 text-[9px] font-semibold uppercase tracking-wider text-white/40">
-              Content
-            </p>
-            <div className="grid grid-cols-3 gap-1">
-              {CONTENT_TEMPLATES.map(t => (
-                <button
-                  key={t.template}
-                  onClick={() => onAddContent(t.template, selectedId ?? undefined)}
-                  className="flex flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-[10px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
-                >
-                  <span className="text-white/80">{t.icon}</span>
-                  <span className="truncate">{t.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
+        <div className="shrink-0 border-t border-white/10">
+          {/* Toggle strip — always visible */}
           <button
-            onClick={() => onAddCanvas(selectedId ?? undefined)}
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
+            onClick={toggleAddMenu}
+            className="flex w-full items-center justify-between px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-white/40 transition-all hover:bg-white/5 hover:text-white/65"
           >
-            <Layers className="size-3.5 shrink-0 text-sky-blue/70" />
-            <span>Custom Slide</span>
+            <span>Add slide</span>
+            {addMenuOpen
+              ? <ChevronDown className="size-3" />
+              : <ChevronUp   className="size-3" />
+            }
           </button>
-          <button
-            onClick={() => onAddLeaderboard(selectedId ?? undefined)}
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
-          >
-            <Trophy className="size-3.5 shrink-0 text-hot-pink/70" />
-            <span>Leaderboard</span>
-          </button>
+
+          {/* Collapsible menu */}
+          <AnimatePresence initial={false}>
+            {addMenuOpen && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.18, ease: 'easeInOut' }}
+                className="overflow-hidden"
+              >
+                <div className="space-y-2 px-3 pb-3">
+                  <div>
+                    <p className="mb-1 px-1 text-[9px] font-semibold uppercase tracking-wider text-white/40">
+                      Question
+                    </p>
+                    <div className="grid grid-cols-2 gap-1">
+                      {QTYPES.map(q => (
+                        <button
+                          key={q.type}
+                          onClick={() => onAddQuestion(q.type, selectedId ?? undefined)}
+                          className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
+                        >
+                          <span className={cn('shrink-0', q.color)}>{q.icon}</span>
+                          <span className="truncate">{q.label.split(' ')[0]}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="mb-1 px-1 text-[9px] font-semibold uppercase tracking-wider text-white/40">
+                      Content
+                    </p>
+                    <div className="grid grid-cols-3 gap-1">
+                      {CONTENT_TEMPLATES.map(t => (
+                        <button
+                          key={t.template}
+                          onClick={() => onAddContent(t.template, selectedId ?? undefined)}
+                          className="flex flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-[10px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
+                        >
+                          <span className="text-white/80">{t.icon}</span>
+                          <span className="truncate">{t.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => onAddCanvas(selectedId ?? undefined)}
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
+                  >
+                    <Layers className="size-3.5 shrink-0 text-sky-blue/70" />
+                    <span>Custom Slide</span>
+                  </button>
+                  <button
+                    onClick={() => onAddLeaderboard(selectedId ?? undefined)}
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
+                  >
+                    <Trophy className="size-3.5 shrink-0 text-hot-pink/70" />
+                    <span>Leaderboard</span>
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       )}
     </aside>
