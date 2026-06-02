@@ -985,6 +985,13 @@ export default function Create() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Run once on mount only
 
+  // Scroll selected slide into view on every selection change (e.g. navigating from Slide Overview)
+  useEffect(() => {
+    if (!selectedId) return
+    const el = document.querySelector(`[data-slide-id="${selectedId}"]`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [selectedId])
+
   const startSession = async () => {
     if (slides.length === 0 || isStarting) return
     setStarting(true)
@@ -1046,6 +1053,8 @@ export default function Create() {
           onDragEnd={handleDragEnd}
           onSelect={setSelectedId}
           onClose={() => setShowSorter(false)}
+          onDelete={deleteSlide}
+          onDuplicate={duplicateSlide}
         />
       )}
 
@@ -1975,12 +1984,14 @@ function SlideThumbnail({
    ───────────────────────────────────────────────────────────────────────── */
 
 function SlideSorterCard({
-  slide, index, isSelected, onClick,
+  slide, index, isSelected, onClick, onDelete, onDuplicate,
 }: {
   slide: Slide
   index: number
   isSelected: boolean
   onClick: () => void
+  onDelete: () => void
+  onDuplicate: () => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: slide.id })
@@ -1994,31 +2005,55 @@ function SlideSorterCard({
         opacity: isDragging ? 0.35 : 1,
       }}
       {...attributes}
-      className="flex flex-col gap-1.5"
+      className="group flex flex-col gap-1.5"
     >
-      <button
-        onClick={onClick}
-        {...listeners}
-        className={cn(
-          'relative aspect-video w-full overflow-hidden rounded-xl bg-midnight-sky-800 transition-all cursor-grab active:cursor-grabbing',
-          isSelected ? 'ring-2 ring-hot-pink' : 'ring-1 ring-white/10 hover:ring-white/30',
-        )}
-      >
-        {renderThumbContent(slide)}
-      </button>
+      {/* Card + action buttons share this relative wrapper */}
+      <div className="relative">
+        <button
+          onClick={onClick}
+          {...listeners}
+          className={cn(
+            'relative aspect-video w-full overflow-hidden rounded-xl bg-midnight-sky-800 transition-all cursor-grab active:cursor-grabbing',
+            isSelected ? 'ring-2 ring-hot-pink' : 'ring-1 ring-white/10 hover:ring-white/30',
+          )}
+        >
+          {renderThumbContent(slide)}
+        </button>
+
+        {/* Duplicate — bottom left */}
+        <button
+          onClick={e => { e.stopPropagation(); onDuplicate() }}
+          title="Duplicate slide"
+          className="absolute bottom-2 left-2 rounded-md p-1 text-white/35 transition-all [filter:drop-shadow(0_1px_3px_rgba(0,0,0,0.85))] group-hover:text-white/70 hover:!text-sky-blue"
+        >
+          <Copy className="size-3.5" />
+        </button>
+
+        {/* Delete — bottom right */}
+        <button
+          onClick={e => { e.stopPropagation(); onDelete() }}
+          title="Delete slide"
+          className="absolute bottom-2 right-2 rounded-md p-1 text-white/35 transition-all [filter:drop-shadow(0_1px_3px_rgba(0,0,0,0.85))] group-hover:text-white/70 hover:!text-red-400"
+        >
+          <Trash2 className="size-3.5" />
+        </button>
+      </div>
+
       <span className="text-center text-[10px] text-white/65">{index + 1}</span>
     </div>
   )
 }
 
 function SlideSorter({
-  slides, selectedId, onDragEnd, onSelect, onClose,
+  slides, selectedId, onDragEnd, onSelect, onClose, onDelete, onDuplicate,
 }: {
   slides: Slide[]
   selectedId: string | null
   onDragEnd: (e: DragEndEvent) => void
   onSelect: (id: string) => void
   onClose: () => void
+  onDelete: (id: string) => void
+  onDuplicate: (id: string) => void
 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -2061,6 +2096,8 @@ function SlideSorter({
                   index={idx}
                   isSelected={slide.id === selectedId}
                   onClick={() => { onSelect(slide.id); onClose() }}
+                  onDelete={() => onDelete(slide.id)}
+                  onDuplicate={() => onDuplicate(slide.id)}
                 />
               ))}
             </div>
