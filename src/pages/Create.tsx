@@ -1918,7 +1918,7 @@ function SlideThumbnail({
       <button
         onClick={e => { e.stopPropagation(); onDuplicate() }}
         title="Duplicate slide"
-        className="absolute bottom-2 left-8 rounded-md bg-black/20 p-0.5 text-white/30 transition-all group-hover:bg-black/50 group-hover:text-white/65 hover:!bg-black/65 hover:!text-sky-blue"
+        className="absolute bottom-2 left-8 rounded-md p-0.5 text-white/35 transition-all [filter:drop-shadow(0_1px_3px_rgba(0,0,0,0.85))] group-hover:text-white/70 hover:!text-sky-blue"
       >
         <Copy className="size-3" />
       </button>
@@ -1927,7 +1927,7 @@ function SlideThumbnail({
       <button
         onClick={e => { e.stopPropagation(); onDelete() }}
         title="Delete slide"
-        className="absolute bottom-2 right-2 rounded-md bg-black/20 p-0.5 text-white/30 transition-all group-hover:bg-black/50 group-hover:text-white/65 hover:!bg-black/65 hover:!text-red-400"
+        className="absolute bottom-2 right-2 rounded-md p-0.5 text-white/35 transition-all [filter:drop-shadow(0_1px_3px_rgba(0,0,0,0.85))] group-hover:text-white/70 hover:!text-red-400"
       >
         <Trash2 className="size-3" />
       </button>
