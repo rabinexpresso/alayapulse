@@ -1599,9 +1599,9 @@ function SlidePanel({
                 transition={{ duration: 0.18, ease: 'easeInOut' }}
                 className="overflow-hidden"
               >
-                <div className="space-y-2 px-3 pb-3">
+                <div className="space-y-1.5 px-3 pb-2">
                   <div>
-                    <p className="mb-1 px-1 text-[9px] font-semibold uppercase tracking-wider text-white/40">
+                    <p className="mb-0.5 px-1 text-[9px] font-semibold uppercase tracking-wider text-white/40">
                       Question
                     </p>
                     <div className="grid grid-cols-2 gap-1">
@@ -1609,7 +1609,7 @@ function SlidePanel({
                         <button
                           key={q.type}
                           onClick={() => onAddQuestion(q.type, selectedId ?? undefined)}
-                          className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
+                          className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
                         >
                           <span className={cn('shrink-0', q.color)}>{q.icon}</span>
                           <span className="truncate">{q.label.split(' ')[0]}</span>
@@ -1618,7 +1618,7 @@ function SlidePanel({
                     </div>
                   </div>
                   <div>
-                    <p className="mb-1 px-1 text-[9px] font-semibold uppercase tracking-wider text-white/40">
+                    <p className="mb-0.5 px-1 text-[9px] font-semibold uppercase tracking-wider text-white/40">
                       Content
                     </p>
                     <div className="grid grid-cols-3 gap-1">
@@ -1626,9 +1626,9 @@ function SlidePanel({
                         <button
                           key={t.template}
                           onClick={() => onAddContent(t.template, selectedId ?? undefined)}
-                          className="flex flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-[10px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
+                          className="flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-[11px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
                         >
-                          <span className="text-white/80">{t.icon}</span>
+                          <span className="shrink-0 text-white/80">{t.icon}</span>
                           <span className="truncate">{t.label}</span>
                         </button>
                       ))}
@@ -1636,14 +1636,14 @@ function SlidePanel({
                   </div>
                   <button
                     onClick={() => onAddCanvas(selectedId ?? undefined)}
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-[11px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
                   >
                     <Layers className="size-3.5 shrink-0 text-sky-blue/70" />
                     <span>Custom Slide</span>
                   </button>
                   <button
                     onClick={() => onAddLeaderboard(selectedId ?? undefined)}
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-[11px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
                   >
                     <Trophy className="size-3.5 shrink-0 text-hot-pink/70" />
                     <span>Leaderboard</span>
