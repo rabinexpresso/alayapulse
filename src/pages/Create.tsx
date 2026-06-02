@@ -1994,26 +1994,19 @@ function SlideSorterCard({
         opacity: isDragging ? 0.35 : 1,
       }}
       {...attributes}
-      className="group flex flex-col gap-1.5"
+      className="flex flex-col gap-1.5"
     >
       <button
         onClick={onClick}
+        {...listeners}
         className={cn(
-          'relative aspect-video w-full overflow-hidden rounded-xl bg-midnight-sky-800 transition-all',
+          'relative aspect-video w-full overflow-hidden rounded-xl bg-midnight-sky-800 transition-all cursor-grab active:cursor-grabbing',
           isSelected ? 'ring-2 ring-hot-pink' : 'ring-1 ring-white/10 hover:ring-white/30',
         )}
       >
         {renderThumbContent(slide)}
-        {/* drag handle — top-right corner on hover */}
-        <div
-          {...listeners}
-          className="absolute right-1.5 top-1.5 cursor-grab rounded-md p-1 text-white/0 transition-all group-hover:text-white/50 hover:!text-white active:cursor-grabbing"
-          onClick={e => e.stopPropagation()}
-        >
-          <GripVertical className="size-3.5" />
-        </div>
       </button>
-      <span className="text-center text-[10px] text-white/40">{index + 1}</span>
+      <span className="text-center text-[10px] text-white/65">{index + 1}</span>
     </div>
   )
 }
@@ -2045,7 +2038,7 @@ function SlideSorter({
         <div className="flex items-center gap-2">
           <LayoutGrid className="size-4 text-white/50" />
           <span className="text-sm font-semibold text-white/80">Slide Overview</span>
-          <span className="rounded-md bg-white/8 px-2 py-0.5 text-[11px] text-white/40">{slides.length} slides</span>
+          <span className="rounded-md bg-white/12 px-2 py-0.5 text-[11px] text-white/65">{slides.length} slides</span>
         </div>
         <button
           onClick={onClose}
