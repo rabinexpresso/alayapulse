@@ -1609,7 +1609,7 @@ function SlidePanel({
                         <button
                           key={q.type}
                           onClick={() => onAddQuestion(q.type, selectedId ?? undefined)}
-                          className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
+                          className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[10px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
                         >
                           <span className={cn('shrink-0', q.color)}>{q.icon}</span>
                           <span className="truncate">{q.label.split(' ')[0]}</span>
@@ -1626,7 +1626,7 @@ function SlidePanel({
                         <button
                           key={t.template}
                           onClick={() => onAddContent(t.template, selectedId ?? undefined)}
-                          className="flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-[11px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
+                          className="flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-[10px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
                         >
                           <span className="shrink-0 text-white/80">{t.icon}</span>
                           <span className="truncate">{t.label}</span>
@@ -1636,14 +1636,14 @@ function SlidePanel({
                   </div>
                   <button
                     onClick={() => onAddCanvas(selectedId ?? undefined)}
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-[11px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-[10px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
                   >
                     <Layers className="size-3.5 shrink-0 text-sky-blue/70" />
                     <span>Custom Slide</span>
                   </button>
                   <button
                     onClick={() => onAddLeaderboard(selectedId ?? undefined)}
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-[11px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-[10px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
                   >
                     <Trophy className="size-3.5 shrink-0 text-hot-pink/70" />
                     <span>Leaderboard</span>
