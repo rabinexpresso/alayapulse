@@ -8,7 +8,7 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core'
 import {
-  SortableContext, verticalListSortingStrategy,
+  SortableContext, verticalListSortingStrategy, rectSortingStrategy,
   useSortable, arrayMove, sortableKeyboardCoordinates,
 } from '@dnd-kit/sortable'
 import {
@@ -399,6 +399,7 @@ export default function Create() {
       ?? returnState.slides?.[0]?.id
       ?? null,
   )
+  const [showSorter, setShowSorter] = useState(false)
   const [deckTitle, setDeckTitle]   = useState(
     deckFromState?.title ?? returnState.deckTitle ?? 'Untitled session',
   )
@@ -1037,6 +1038,17 @@ export default function Create() {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-white">
 
+      {/* ── Slide Sorter overlay ─────────────────────────────────────── */}
+      {showSorter && (
+        <SlideSorter
+          slides={slides}
+          selectedId={selectedId}
+          onDragEnd={handleDragEnd}
+          onSelect={setSelectedId}
+          onClose={() => setShowSorter(false)}
+        />
+      )}
+
       {/* ── Top bar ─────────────────────────────────────────────────── */}
       <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-midnight-sky-900 px-5">
 
@@ -1366,6 +1378,7 @@ export default function Create() {
           onDuplicate={duplicateSlide}
           onDragEnd={handleDragEnd}
           onImport={importFile}
+          onOpenSorter={() => setShowSorter(true)}
           onSetAddMenu={setAddMenu}
           onAddQuestion={addQuestion}
           onAddContent={addContent}
@@ -1392,7 +1405,7 @@ export default function Create() {
 
 function SlidePanel({
   slides, selectedId, isImporting, addMenuAfter,
-  onSelect, onDelete, onDuplicate, onDragEnd, onImport, onSetAddMenu, onAddQuestion, onAddContent, onAddCanvas, onAddLeaderboard,
+  onSelect, onDelete, onDuplicate, onDragEnd, onImport, onOpenSorter, onSetAddMenu, onAddQuestion, onAddContent, onAddCanvas, onAddLeaderboard,
 }: {
   slides: Slide[]
   selectedId: string | null
@@ -1403,6 +1416,7 @@ function SlidePanel({
   onDuplicate: (id: string) => void
   onDragEnd: (e: DragEndEvent) => void
   onImport: (file: File) => void
+  onOpenSorter: () => void
   onSetAddMenu: (id: string | undefined) => void
   onAddQuestion: (type: QType, afterId?: string) => void
   onAddContent: (template: ContentTemplate, afterId?: string) => void
@@ -1418,15 +1432,24 @@ function SlidePanel({
   return (
     <aside className="flex w-64 shrink-0 flex-col overflow-hidden border-r border-white/8 bg-[#14142b]">
 
-      {/* Import PDF button */}
+      {/* Import / Sorter button row */}
       <div className="shrink-0 border-b border-white/10 p-3">
-        <button
-          onClick={() => fileRef.current?.click()}
-          disabled={isImporting}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#f97316] py-2.5 text-xs font-semibold text-white shadow-sm transition-all hover:bg-[#ea6c0a] active:scale-95 disabled:opacity-40"
-        >
-          {isImporting ? <LoadingDots /> : <><Download className="size-3.5" />Import / Merge</>}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={isImporting}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#f97316] py-2.5 text-xs font-semibold text-white shadow-sm transition-all hover:bg-[#ea6c0a] active:scale-95 disabled:opacity-40"
+          >
+            {isImporting ? <LoadingDots /> : <><Download className="size-3.5" />Import / Merge</>}
+          </button>
+          <button
+            onClick={onOpenSorter}
+            title="Slide overview"
+            className="flex items-center justify-center rounded-xl bg-white/8 px-3 py-2.5 text-white/60 transition-all hover:bg-white/15 hover:text-white active:scale-95"
+          >
+            <LayoutGrid className="size-4" />
+          </button>
+        </div>
         <input
           ref={fileRef} type="file"
           accept=".pdf,.html,.htm,text/html,image/*,video/mp4,video/webm,video/quicktime,.json,.apulse"
@@ -1713,6 +1736,119 @@ function injectThumbnailNavScript(html: string, slideIndex: number): string {
   return html + script
 }
 
+/* Shared thumbnail content renderer — used by both the sidebar SlideThumbnail
+   and the full-screen SlideSorter cards. Returns the inner coloured box content. */
+function renderThumbContent(slide: Slide): ReactNode {
+  if (slide.type === 'pdf') {
+    const s = slide as PdfSlide
+    return s.imgUrl ? (
+      <img src={s.imgUrl} alt={`Page ${s.pageNum}`} className="h-full w-full object-cover" />
+    ) : (
+      <div className="flex h-full w-full flex-col items-center justify-center gap-1">
+        <FileText className="size-4 text-white/30" />
+        <span className="text-[8px] text-white/25">Page {s.pageNum}</span>
+      </div>
+    )
+  }
+  if (slide.type === 'image') {
+    const s = slide as ImageSlide
+    return <img src={s.imgUrl} alt={s.fileName} className="h-full w-full object-cover" />
+  }
+  if (slide.type === 'video') {
+    const s = slide as VideoSlide
+    return (
+      <div className="flex h-full w-full flex-col items-center justify-center gap-1">
+        <Video className="size-4 text-white/40" />
+        <span className="max-w-full truncate px-1 text-[8px] text-white/25">{s.fileName}</span>
+      </div>
+    )
+  }
+  if (slide.type === 'html') {
+    return <HtmlSlideThumbnail slide={slide as HtmlSlide} />
+  }
+  if (slide.type === 'content') {
+    const s = slide as ContentSlide
+    const cInfo = CONTENT_TEMPLATES.find(t => t.template === s.template)
+    return (
+      <div
+        className="flex h-full w-full items-center justify-center p-2"
+        style={{ backgroundColor: (() => { const bg = contentColors(s.theme).bg; return bg === 'transparent' ? '#f4f4f9' : bg })() }}
+      >
+        <p className="text-center text-[9px] font-medium leading-snug line-clamp-2"
+          style={{ color: contentColors(s.theme).text, opacity: s.title ? 1 : 0.4 }}>
+          {s.title || cInfo?.label}
+        </p>
+      </div>
+    )
+  }
+  if (slide.type === 'canvas') {
+    const cs = slide as CanvasSlide
+    const hasTable  = cs.elements.some(el => el.kind === 'table')
+    const hasImgEl  = cs.elements.some(el => el.kind === 'image')
+    const hasBgImg  = cs.bg.type === 'image'
+    const hasImage  = hasImgEl || hasBgImg
+    const firstText = cs.elements.find(el => el.kind === 'text') as CanvasTextEl | undefined
+    const rawText   = firstText ? firstText.html.replace(/<[^>]*>/g, '').trim() : ''
+    const isEmpty   = cs.elements.length === 0 && !hasBgImg
+    return (
+      <div
+        className="flex h-full w-full items-center justify-center p-2"
+        style={
+          cs.bg.type === 'color'    ? { background:      cs.bg.value } :
+          cs.bg.type === 'gradient' ? { backgroundImage: cs.bg.value } :
+          { background: '#1a1a3e' }
+        }
+      >
+        {rawText ? (
+          <div className="flex w-full flex-col items-center gap-0.5">
+            <p className="w-full text-center text-[9px] font-medium leading-snug line-clamp-2 text-white/80">{rawText}</p>
+            {(hasTable || hasImage) && (
+              <div className="flex items-center gap-1">
+                {hasTable && <Table2    className="size-2.5 text-white/50" />}
+                {hasImage  && <ImageIcon className="size-2.5 text-white/50" />}
+              </div>
+            )}
+          </div>
+        ) : isEmpty ? (
+          <span className="text-[8px] text-white/30">Custom slide</span>
+        ) : (hasBgImg && !hasTable && !hasImgEl) ? (
+          <div className="flex flex-col items-center gap-1">
+            <ImageIcon className="size-4 text-white/50" />
+            <span className="text-[8px] text-white/40">Background image</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            {hasTable && <Table2    className="size-4 text-white/50" />}
+            {hasImage  && <ImageIcon className="size-4 text-white/50" />}
+          </div>
+        )}
+      </div>
+    )
+  }
+  if (slide.type === 'leaderboard') {
+    return (
+      <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-midnight-sky-900">
+        <Trophy className="size-4 text-hot-pink/60" />
+        <span className="text-[8px] font-medium text-white/35">Leaderboard</span>
+      </div>
+    )
+  }
+  // Question slides (mcq / wordcloud / openended / rating)
+  const qs    = slide as QuestionSlide
+  const qInfo = QTYPES.find(q => q.type === qs.type)
+  return (
+    <div
+      className="flex h-full w-full items-center justify-center p-2"
+      style={{ backgroundColor: (() => { const bg = contentColors(qs.theme ?? 'navy').bg; return bg === 'transparent' ? '#f4f4f9' : bg })() }}
+    >
+      <p className="text-center text-[9px] font-medium leading-snug line-clamp-2"
+        style={{ color: contentColors(qs.theme ?? 'navy').text, opacity: qs.question ? 1 : 0.35 }}>
+        {qs.question || qInfo?.label}
+      </p>
+    </div>
+  )
+}
+
 function SlideThumbnail({
   slide, index, isSelected, onSelect, onDelete, onDuplicate,
 }: {
@@ -1753,112 +1889,7 @@ function SlideThumbnail({
 
         {/* Thumbnail */}
         <div className="aspect-video flex-1 overflow-hidden rounded-lg bg-midnight-sky-800">
-          {slide.type === 'pdf' ? (
-            slide.imgUrl ? (
-              <img src={slide.imgUrl} alt={`Page ${slide.pageNum}`} className="h-full w-full object-cover" />
-            ) : (
-              <div className="flex h-full w-full flex-col items-center justify-center gap-1">
-                <FileText className="size-4 text-white/30" />
-                <span className="text-[8px] text-white/25">Page {slide.pageNum}</span>
-              </div>
-            )
-          ) : slide.type === 'image' ? (
-            <img src={slide.imgUrl} alt={slide.fileName} className="h-full w-full object-cover" />
-          ) : slide.type === 'video' ? (
-            <div className="flex h-full w-full flex-col items-center justify-center gap-1">
-              <Video className="size-4 text-white/40" />
-              <span className="max-w-full truncate px-1 text-[8px] text-white/25">{slide.fileName}</span>
-            </div>
-          ) : slide.type === 'html' ? (
-            <HtmlSlideThumbnail slide={slide as HtmlSlide} />
-          ) : slide.type === 'content' ? (
-            <div
-              className="flex h-full w-full items-center justify-center p-2"
-              style={{ backgroundColor: (() => { const bg = contentColors((slide as ContentSlide).theme).bg; return bg === 'transparent' ? '#f4f4f9' : bg })() }}
-            >
-              <p
-                className="text-center text-[9px] font-medium leading-snug line-clamp-2"
-                style={{
-                  color: contentColors((slide as ContentSlide).theme).text,
-                  opacity: (slide as ContentSlide).title ? 1 : 0.4,
-                }}
-              >
-                {(slide as ContentSlide).title || cInfo?.label}
-              </p>
-            </div>
-          ) : slide.type === 'canvas' ? (
-            <div
-              className="flex h-full w-full items-center justify-center p-2"
-              style={
-                (slide as CanvasSlide).bg.type === 'color'    ? { background:      (slide as CanvasSlide).bg.value } :
-                (slide as CanvasSlide).bg.type === 'gradient' ? { backgroundImage: (slide as CanvasSlide).bg.value } :
-                { background: '#1a1a3e' }
-              }
-            >
-              {(() => {
-                const cs        = slide as CanvasSlide
-                const hasTable  = cs.elements.some(el => el.kind === 'table')
-                const hasImgEl  = cs.elements.some(el => el.kind === 'image')
-                const hasBgImg  = cs.bg.type === 'image'
-                const hasImage  = hasImgEl || hasBgImg
-                const firstText = cs.elements.find(el => el.kind === 'text') as CanvasTextEl | undefined
-                const rawText   = firstText ? firstText.html.replace(/<[^>]*>/g, '').trim() : ''
-                const isEmpty   = cs.elements.length === 0 && !hasBgImg
-
-                // has text — show text + optional icons beneath
-                if (rawText) return (
-                  <div className="flex w-full flex-col items-center gap-0.5">
-                    <p className="w-full text-center text-[9px] font-medium leading-snug line-clamp-2 text-white/80">{rawText}</p>
-                    {(hasTable || hasImage) && (
-                      <div className="flex items-center gap-1">
-                        {hasTable && <Table2    className="size-2.5 text-white/50" />}
-                        {hasImage  && <ImageIcon className="size-2.5 text-white/50" />}
-                      </div>
-                    )}
-                  </div>
-                )
-
-                // no text, nothing at all
-                if (isEmpty) return <span className="text-[8px] text-white/30">Custom slide</span>
-
-                // no text, bg image is the only thing
-                if (hasBgImg && !hasTable && !hasImgEl) return (
-                  <div className="flex flex-col items-center gap-1">
-                    <ImageIcon className="size-4 text-white/50" />
-                    <span className="text-[8px] text-white/40">Background image</span>
-                  </div>
-                )
-
-                // no text, show element icons (table and/or image)
-                return (
-                  <div className="flex items-center gap-1.5">
-                    {hasTable && <Table2    className="size-4 text-white/50" />}
-                    {hasImage  && <ImageIcon className="size-4 text-white/50" />}
-                  </div>
-                )
-              })()}
-            </div>
-          ) : slide.type === 'leaderboard' ? (
-            <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-midnight-sky-900">
-              <Trophy className="size-4 text-hot-pink/60" />
-              <span className="text-[8px] font-medium text-white/35">Leaderboard</span>
-            </div>
-          ) : (
-            <div
-              className="flex h-full w-full items-center justify-center p-2"
-              style={{ backgroundColor: (() => { const bg = contentColors((slide as QuestionSlide).theme ?? 'navy').bg; return bg === 'transparent' ? '#f4f4f9' : bg })() }}
-            >
-              <p
-                className="text-center text-[9px] font-medium leading-snug line-clamp-2"
-                style={{
-                  color: contentColors((slide as QuestionSlide).theme ?? 'navy').text,
-                  opacity: (slide as QuestionSlide).question ? 1 : 0.35,
-                }}
-              >
-                {(slide as QuestionSlide).question || `${qInfo?.label}`}
-              </p>
-            </div>
-          )}
+          {renderThumbContent(slide)}
         </div>
 
         {/* Question type badge */}
@@ -1938,6 +1969,114 @@ function SlideThumbnail({
 /* ─────────────────────────────────────────────────────────────────────────
    Add-between button — the "+" row between slides
    ───────────────────────────────────────────────────────────────────────── */
+
+/* ─────────────────────────────────────────────────────────────────────────
+   SlideSorter — full-screen slide overview / drag-to-reorder grid
+   ───────────────────────────────────────────────────────────────────────── */
+
+function SlideSorterCard({
+  slide, index, isSelected, onClick,
+}: {
+  slide: Slide
+  index: number
+  isSelected: boolean
+  onClick: () => void
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: slide.id })
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
+        transition,
+        opacity: isDragging ? 0.35 : 1,
+      }}
+      {...attributes}
+      className="group flex flex-col gap-1.5"
+    >
+      <button
+        onClick={onClick}
+        className={cn(
+          'relative aspect-video w-full overflow-hidden rounded-xl bg-midnight-sky-800 transition-all',
+          isSelected ? 'ring-2 ring-hot-pink' : 'ring-1 ring-white/10 hover:ring-white/30',
+        )}
+      >
+        {renderThumbContent(slide)}
+        {/* drag handle — top-right corner on hover */}
+        <div
+          {...listeners}
+          className="absolute right-1.5 top-1.5 cursor-grab rounded-md p-1 text-white/0 transition-all group-hover:text-white/50 hover:!text-white active:cursor-grabbing"
+          onClick={e => e.stopPropagation()}
+        >
+          <GripVertical className="size-3.5" />
+        </div>
+      </button>
+      <span className="text-center text-[10px] text-white/40">{index + 1}</span>
+    </div>
+  )
+}
+
+function SlideSorter({
+  slides, selectedId, onDragEnd, onSelect, onClose,
+}: {
+  slides: Slide[]
+  selectedId: string | null
+  onDragEnd: (e: DragEndEvent) => void
+  onSelect: (id: string) => void
+  onClose: () => void
+}) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col bg-[#0d0d20]">
+      {/* Header */}
+      <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-6 py-3">
+        <div className="flex items-center gap-2">
+          <LayoutGrid className="size-4 text-white/50" />
+          <span className="text-sm font-semibold text-white/80">Slide Overview</span>
+          <span className="rounded-md bg-white/8 px-2 py-0.5 text-[11px] text-white/40">{slides.length} slides</span>
+        </div>
+        <button
+          onClick={onClose}
+          className="rounded-lg p-1.5 text-white/40 transition-all hover:bg-white/10 hover:text-white"
+          title="Close (Esc)"
+        >
+          <X className="size-4" />
+        </button>
+      </div>
+
+      {/* Grid */}
+      <div className="flex-1 overflow-y-auto p-6">
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+          <SortableContext items={slides.map(s => s.id)} strategy={rectSortingStrategy}>
+            <div className="grid grid-cols-3 gap-4 lg:grid-cols-4 xl:grid-cols-5">
+              {slides.map((slide, idx) => (
+                <SlideSorterCard
+                  key={slide.id}
+                  slide={slide}
+                  index={idx}
+                  isSelected={slide.id === selectedId}
+                  onClick={() => { onSelect(slide.id); onClose() }}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
+      </div>
+    </div>
+  )
+}
 
 function AddBetweenButton({
   isOpen, onToggle, onAdd, onAddContent, onAddCanvas, onAddLeaderboard,
