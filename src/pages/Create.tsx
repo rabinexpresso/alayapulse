@@ -1423,7 +1423,7 @@ function SlidePanel({
         <button
           onClick={() => fileRef.current?.click()}
           disabled={isImporting}
-          className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-white/25 py-2.5 text-xs font-medium text-white/60 transition-all hover:border-white/50 hover:bg-white/5 hover:text-white disabled:opacity-40"
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#f97316] py-2.5 text-xs font-semibold text-white shadow-sm transition-all hover:bg-[#ea6c0a] active:scale-95 disabled:opacity-40"
         >
           {isImporting ? <LoadingDots /> : <><Download className="size-3.5" />Import / Merge</>}
         </button>
