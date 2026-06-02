@@ -1790,30 +1790,52 @@ function SlideThumbnail({
             <div
               className="flex h-full w-full items-center justify-center p-2"
               style={
-                (slide as CanvasSlide).bg.type === 'color'   ? { background:       (slide as CanvasSlide).bg.value } :
+                (slide as CanvasSlide).bg.type === 'color'    ? { background:      (slide as CanvasSlide).bg.value } :
                 (slide as CanvasSlide).bg.type === 'gradient' ? { backgroundImage: (slide as CanvasSlide).bg.value } :
                 { background: '#1a1a3e' }
               }
             >
               {(() => {
-                const cs         = slide as CanvasSlide
-                const hasBgImage = cs.bg.type === 'image'
-                const firstText  = cs.elements.find(el => el.kind === 'text') as CanvasTextEl | undefined
-                const rawText    = firstText ? firstText.html.replace(/<[^>]*>/g, '').trim() : ''
+                const cs        = slide as CanvasSlide
+                const hasTable  = cs.elements.some(el => el.kind === 'table')
+                const hasImgEl  = cs.elements.some(el => el.kind === 'image')
+                const hasBgImg  = cs.bg.type === 'image'
+                const hasImage  = hasImgEl || hasBgImg
+                const firstText = cs.elements.find(el => el.kind === 'text') as CanvasTextEl | undefined
+                const rawText   = firstText ? firstText.html.replace(/<[^>]*>/g, '').trim() : ''
+                const isEmpty   = cs.elements.length === 0 && !hasBgImg
+
+                // has text — show text + optional icons beneath
                 if (rawText) return (
-                  <div className="flex w-full items-center justify-center gap-1">
-                    <p className="text-center text-[9px] font-medium leading-snug line-clamp-2 text-white/80">{rawText}</p>
-                    {hasBgImage && <ImageIcon className="size-2.5 shrink-0 text-white/50" />}
+                  <div className="flex w-full flex-col items-center gap-0.5">
+                    <p className="w-full text-center text-[9px] font-medium leading-snug line-clamp-2 text-white/80">{rawText}</p>
+                    {(hasTable || hasImage) && (
+                      <div className="flex items-center gap-1">
+                        {hasTable && <Table2    className="size-2.5 text-white/50" />}
+                        {hasImage  && <ImageIcon className="size-2.5 text-white/50" />}
+                      </div>
+                    )}
                   </div>
                 )
-                if (hasBgImage) return (
+
+                // no text, nothing at all
+                if (isEmpty) return <span className="text-[8px] text-white/30">Custom slide</span>
+
+                // no text, bg image is the only thing
+                if (hasBgImg && !hasTable && !hasImgEl) return (
                   <div className="flex flex-col items-center gap-1">
                     <ImageIcon className="size-4 text-white/50" />
                     <span className="text-[8px] text-white/40">Background image</span>
                   </div>
                 )
-                if (cs.elements.length === 0) return <span className="text-[8px] text-white/30">Custom slide</span>
-                return <Layers className="size-3.5 text-white/50" />
+
+                // no text, show element icons (table and/or image)
+                return (
+                  <div className="flex items-center gap-1.5">
+                    {hasTable && <Table2    className="size-4 text-white/50" />}
+                    {hasImage  && <ImageIcon className="size-4 text-white/50" />}
+                  </div>
+                )
               })()}
             </div>
           ) : slide.type === 'leaderboard' ? (
