@@ -1546,7 +1546,7 @@ function SlidePanel({
           /* Drag-and-drop slide list */
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
             <SortableContext items={slides.map(s => s.id)} strategy={verticalListSortingStrategy}>
-              <div className="flex flex-col px-2 pb-2">
+              <div className="flex flex-col px-1 pb-1">
                 {slides.map((slide, idx) => (
                   <div key={slide.id} data-slide-id={slide.id}>
                     <SlideThumbnail
@@ -1922,7 +1922,7 @@ function SlideThumbnail({
       <button
         onClick={onSelect}
         className={cn(
-          'relative flex w-full items-start gap-2 rounded-xl p-2 text-left transition-all',
+          'relative flex w-full items-start gap-1.5 rounded-xl px-1.5 py-1.5 text-left transition-all',
           isSelected ? 'bg-white/15 ring-1 ring-hot-pink/70' : 'hover:bg-white/8',
         )}
       >
