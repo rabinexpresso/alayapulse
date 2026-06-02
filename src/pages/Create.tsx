@@ -2307,7 +2307,7 @@ function SlideEditor({ slide, onUpdate, onSplitHtml, onPushHistory }: {
     return (
       <div className="scrollbar-panel flex flex-1 flex-col overflow-auto" style={{ background: '#f8f7f5' }}>
         <div className="w-full px-5 py-4">
-          <CanvasEditor slide={slide} onUpdate={patch => onUpdate(slide.id, patch)} />
+          <CanvasEditor slide={slide} onUpdate={patch => onUpdate(slide.id, patch)} onPushHistory={onPushHistory} />
         </div>
       </div>
     )
@@ -4330,10 +4330,11 @@ type CanvasDrag = {
   ex0:     number; ey0: number; ew0: number; eh0: number
 } | null
 
-function CanvasEditor({ slide, onUpdate }: {
+function CanvasEditor({ slide, onUpdate, onPushHistory = () => {} }: {
   slide:    CanvasSlide
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onUpdate: (p: any) => void
+  onPushHistory?: () => void
 }) {
   const [selectedId,   setSelectedId]   = useState<string | null>(null)
   const [editingId,    setEditingId]    = useState<string | null>(null)
@@ -4341,14 +4342,26 @@ function CanvasEditor({ slide, onUpdate }: {
   const [showTableCfg, setShowTableCfg] = useState(false)
   const [drag,         setDrag]         = useState<CanvasDrag>(null)
   const [snapGuides,   setSnapGuides]   = useState<{ x?: number; y?: number }[]>([])
-  const canvasRef   = useRef<HTMLDivElement>(null)
-  const imgFileRef  = useRef<HTMLInputElement>(null)
+  const canvasRef     = useRef<HTMLDivElement>(null)
+  const imgFileRef    = useRef<HTMLInputElement>(null)
+  const nudgeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const prevEditingRef = useRef<string | null>(null)
 
   const updateEl = useCallback((id: string, patch: Partial<CanvasEl>) => {
     onUpdate({ elements: slide.elements.map(e => e.id === id ? { ...e, ...patch } as CanvasEl : e) })
   }, [slide.elements, onUpdate])
 
+  // Push history when text editing starts (double-click into a text element).
+  // Uses a ref to detect the transition from null → id without firing on every re-render.
+  useEffect(() => {
+    if (editingId && !prevEditingRef.current) {
+      onPushHistory()
+    }
+    prevEditingRef.current = editingId
+  }, [editingId, onPushHistory])
+
   function addText() {
+    onPushHistory()
     const el: CanvasTextEl = {
       id: uid(), kind: 'text',
       x: 8, y: 12, w: 45, h: 20,
@@ -4359,6 +4372,7 @@ function CanvasEditor({ slide, onUpdate }: {
   }
 
   function addImage(imgUrl: string) {
+    onPushHistory()
     const el: CanvasImageEl = {
       id: uid(), kind: 'image',
       x: 8, y: 12, w: 40, h: 45,
@@ -4369,6 +4383,7 @@ function CanvasEditor({ slide, onUpdate }: {
   }
 
   function addTable(rows: number, cols: number) {
+    onPushHistory()
     const el: CanvasTableEl = {
       id: uid(), kind: 'table',
       x: 8, y: 12, w: 62, h: 38,
@@ -4385,6 +4400,7 @@ function CanvasEditor({ slide, onUpdate }: {
   function bringToFront(id: string) {
     const idx = slide.elements.findIndex(e => e.id === id)
     if (idx === slide.elements.length - 1) return
+    onPushHistory()
     const next = [...slide.elements]
     next.push(next.splice(idx, 1)[0])
     onUpdate({ elements: next })
@@ -4392,6 +4408,7 @@ function CanvasEditor({ slide, onUpdate }: {
   function sendToBack(id: string) {
     const idx = slide.elements.findIndex(e => e.id === id)
     if (idx === 0) return
+    onPushHistory()
     const next = [...slide.elements]
     next.unshift(next.splice(idx, 1)[0])
     onUpdate({ elements: next })
@@ -4399,6 +4416,7 @@ function CanvasEditor({ slide, onUpdate }: {
   function bringForward(id: string) {
     const idx = slide.elements.findIndex(e => e.id === id)
     if (idx >= slide.elements.length - 1) return
+    onPushHistory()
     const next = [...slide.elements]
     const tmp = next[idx]; next[idx] = next[idx + 1]; next[idx + 1] = tmp
     onUpdate({ elements: next })
@@ -4406,20 +4424,23 @@ function CanvasEditor({ slide, onUpdate }: {
   function sendBackward(id: string) {
     const idx = slide.elements.findIndex(e => e.id === id)
     if (idx <= 0) return
+    onPushHistory()
     const next = [...slide.elements]
     const tmp = next[idx]; next[idx] = next[idx - 1]; next[idx - 1] = tmp
     onUpdate({ elements: next })
   }
 
   const deleteEl = useCallback((id: string) => {
+    onPushHistory()
     onUpdate({ elements: slide.elements.filter(e => e.id !== id) })
     setSelectedId(null)
     setEditingId(null)
-  }, [slide.elements, onUpdate])
+  }, [slide.elements, onUpdate, onPushHistory])
 
   const duplicateEl = useCallback((id: string) => {
     const el = slide.elements.find(e => e.id === id)
     if (!el) return
+    onPushHistory()
     const copy = {
       ...JSON.parse(JSON.stringify(el)) as CanvasEl,
       id:  uid(),
@@ -4429,7 +4450,7 @@ function CanvasEditor({ slide, onUpdate }: {
     onUpdate({ elements: [...slide.elements, copy] })
     setSelectedId(copy.id)
     setEditingId(null)
-  }, [slide.elements, onUpdate])
+  }, [slide.elements, onUpdate, onPushHistory])
 
   // Arrow key nudge (1% normal, 5% with Shift) + Delete/Backspace to remove selected element.
   // Only fires when an element is selected, NOT in text-edit mode, and focus is NOT in an input.
@@ -4442,7 +4463,7 @@ function CanvasEditor({ slide, onUpdate }: {
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
-        deleteEl(selectedId)
+        deleteEl(selectedId)   // deleteEl now calls onPushHistory internally
         return
       }
       const step = e.shiftKey ? 5 : 1
@@ -4453,6 +4474,10 @@ function CanvasEditor({ slide, onUpdate }: {
       if (e.key === 'ArrowDown')  dy =  step
       if (dx !== 0 || dy !== 0) {
         e.preventDefault()
+        // Push history only on the first keydown in a burst; debounce repeats.
+        if (!nudgeTimerRef.current) onPushHistory()
+        clearTimeout(nudgeTimerRef.current!)
+        nudgeTimerRef.current = setTimeout(() => { nudgeTimerRef.current = null }, 600)
         const el = slide.elements.find(x => x.id === selectedId)
         if (!el) return
         updateEl(selectedId, {
@@ -4467,6 +4492,7 @@ function CanvasEditor({ slide, onUpdate }: {
 
   function startMove(e: React.PointerEvent, elId: string) {
     e.stopPropagation()
+    onPushHistory()
     const el = slide.elements.find(x => x.id === elId)!
     setSelectedId(elId)
     setDrag({ mode: 'move', elId, px0: e.clientX, py0: e.clientY, ex0: el.x, ey0: el.y, ew0: el.w, eh0: el.h })
@@ -4474,6 +4500,7 @@ function CanvasEditor({ slide, onUpdate }: {
 
   function startResize(e: React.PointerEvent, elId: string, handle: ResizeHandle) {
     e.stopPropagation()
+    onPushHistory()
     const el = slide.elements.find(x => x.id === elId)!
     setDrag({ mode: 'resize', elId, handle, px0: e.clientX, py0: e.clientY, ex0: el.x, ey0: el.y, ew0: el.w, eh0: el.h })
   }
@@ -4619,7 +4646,7 @@ function CanvasEditor({ slide, onUpdate }: {
       {showBg && (
         <BgPanel
           bg={slide.bg}
-          onChange={bg => { onUpdate({ bg }); setShowBg(false) }}
+          onChange={bg => { onPushHistory(); onUpdate({ bg }); setShowBg(false) }}
         />
       )}
       {showTableCfg && (
@@ -4630,7 +4657,7 @@ function CanvasEditor({ slide, onUpdate }: {
       {selectedEl?.kind === 'text' && (
         <TextFormatBar
           el={selectedEl as CanvasTextEl}
-          onUpdate={p => updateEl(selectedEl.id, p)}
+          onUpdate={p => { onPushHistory(); updateEl(selectedEl.id, p) }}
         />
       )}
 
