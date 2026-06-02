@@ -2255,9 +2255,9 @@ function HtmlSlideEditor({
   }
 
   return (
-    <div className="flex flex-1 flex-col bg-midnight-sky-900 p-6">
+    <div className="flex flex-1 flex-col bg-midnight-sky-900 px-4 py-2">
       {/* Top bar — filename + slide info + split control */}
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-2 flex items-center gap-2">
         <div className="flex items-center gap-2 text-xs text-white/45">
           <FileText className="size-3.5" />
           <span className="font-medium">{slide.fileName}</span>
