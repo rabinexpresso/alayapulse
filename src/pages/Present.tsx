@@ -1564,15 +1564,22 @@ function QuestionSlideView({
   // JSX variables are plain React elements; React reconciles them in-place.
 
   const mcqOptions = slide.type === 'mcq' ? (
-    // 5+ options → 2-col grid so they all fit without scrolling; ≤4 → single column
-    <div className={cn('mt-4 gap-2', slide.options.length >= 5 ? 'grid grid-cols-2' : 'flex flex-col')}>
+    // 5+ options → 2-col; ≤4 → single column.
+    // w-fit shrinks the container to its widest child so options never
+    // bleed into empty space — max-w-[80%] caps very long option text.
+    <div
+      className="mt-4 gap-2 w-fit max-w-[80%]"
+      style={slide.options.length >= 5
+        ? { display: 'grid', gridTemplateColumns: 'auto auto' }
+        : { display: 'flex', flexDirection: 'column' }}
+    >
       {slide.options.map((opt, i) => (
         <motion.div
           key={i}
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.10 + i * 0.05, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-          className="flex min-w-0 items-center gap-2.5 rounded-xl px-3 py-2 text-left backdrop-blur-sm"
+          className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left backdrop-blur-sm"
           style={{ border: `1px solid ${c.cardBorder}`, backgroundColor: c.cardBg }}
         >
           <span className="flex size-6 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold" style={{ backgroundColor: c.fg, color: c.bg }}>
