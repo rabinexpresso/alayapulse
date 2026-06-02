@@ -4687,12 +4687,6 @@ function CanvasEditor({ slide, onUpdate, onPushHistory = () => {} }: {
             }
           }}
         >
-          {slide.elements.length === 0 && (
-            <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-white/25 select-none pointer-events-none">
-              <Layers className="size-10" />
-              <p className="text-sm font-light">Click "Add Text", "Add Image" or "Add Table" to build your slide</p>
-            </div>
-          )}
           {slide.elements.map(el => (
             <CanvasElView
               key={el.id}

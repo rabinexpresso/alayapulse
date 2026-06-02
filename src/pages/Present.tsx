@@ -1413,21 +1413,6 @@ function CanvasSlideView({ slide }: { slide: CanvasSlide }) {
 
   return (
     <div className="absolute inset-0 overflow-hidden" style={bgStyle}>
-      {/* Empty canvas hint — only when slide has no elements */}
-      {elements.length === 0 && (
-        <div
-          className="absolute inset-0 flex flex-col items-center justify-center gap-3 select-none"
-          style={{ color: isLightBg ? 'rgba(0,0,121,0.35)' : 'rgba(255,255,255,0.35)' }}
-        >
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M12 2L2 7l10 5 10-5-10-5z" />
-            <path d="M2 17l10 5 10-5" />
-            <path d="M2 12l10 5 10-5" />
-          </svg>
-          <p className="text-sm font-light">Empty canvas slide</p>
-        </div>
-      )}
-
       {elements.map(el => (
         <div
           key={el.id}
