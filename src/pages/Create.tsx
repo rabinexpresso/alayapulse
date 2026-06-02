@@ -1914,20 +1914,20 @@ function SlideThumbnail({
         <GripVertical className="size-3" />
       </button>
 
-      {/* Duplicate button — bottom left, only on slide hover */}
+      {/* Duplicate button — bottom left, faint at rest, clear on hover */}
       <button
         onClick={e => { e.stopPropagation(); onDuplicate() }}
         title="Duplicate slide"
-        className="absolute bottom-2 left-8 rounded-md p-0.5 text-white/0 transition-all group-hover:text-white/50 hover:!text-sky-blue"
+        className="absolute bottom-2 left-8 rounded-md bg-black/20 p-0.5 text-white/30 transition-all group-hover:bg-black/50 group-hover:text-white/65 hover:!bg-black/65 hover:!text-sky-blue"
       >
         <Copy className="size-3" />
       </button>
 
-      {/* Delete button — bottom right, only on slide hover */}
+      {/* Delete button — bottom right, faint at rest, clear on hover */}
       <button
         onClick={e => { e.stopPropagation(); onDelete() }}
         title="Delete slide"
-        className="absolute bottom-2 right-2 rounded-md p-0.5 text-white/0 transition-all group-hover:text-white/50 hover:!text-red-400"
+        className="absolute bottom-2 right-2 rounded-md bg-black/20 p-0.5 text-white/30 transition-all group-hover:bg-black/50 group-hover:text-white/65 hover:!bg-black/65 hover:!text-red-400"
       >
         <Trash2 className="size-3" />
       </button>
