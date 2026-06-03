@@ -1499,7 +1499,7 @@ function QuizFeedbackState({ result, totalScore }: {
           'mb-5 text-center text-xl font-bold tracking-wide',
           result.isCorrect ? 'text-fresh-green' : 'text-hot-pink',
         )}>
-          {result.isCorrect ? 'CORRECT' : `INCORRECT${result.correctAnswer ? ` · The answer was ${result.correctAnswer}` : ''}`}
+          {result.isCorrect ? 'CORRECT' : 'INCORRECT'}
         </p>
         <div className="space-y-2 text-sm">
           <div className="flex items-center justify-between">

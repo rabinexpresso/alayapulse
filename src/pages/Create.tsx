@@ -17,7 +17,7 @@ import {
   LayoutList, Bookmark, BookmarkCheck, Monitor, LayoutGrid,
   Video, Type, List, Quote, Users, BarChart2, PieChart,
   X, Table2, Check, Undo2, Redo2, Trophy, ImageIcon,
-  ChevronUp, ChevronDown, ChevronsUp, ChevronsDown,
+  ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, Clock,
 } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
 import { PersistentHtmlIframe } from '@/components/PersistentHtmlIframe'
@@ -205,6 +205,8 @@ interface QuestionSlide {
   imgLayout?: 'top' | 'right' | 'background' | 'reference'
   /** Word Cloud only — max number of word submissions per person. Default 3. */
   wcMaxSubmissions?: number
+  /** Optional countdown timer in seconds shown during the question phase. */
+  timer?: number
 }
 type ContentTemplate = 'heading' | 'bullets' | 'quote'
 interface ContentSlide {
@@ -257,12 +259,14 @@ const QTYPES: { type: QType; label: string; icon: ReactNode; color: string; badg
 
 function uid() { return Math.random().toString(36).slice(2, 10) }
 
-function makeQuestion(type: QType): QuestionSlide {
+function makeQuestion(type: QType, isQuizMode = false): QuestionSlide {
   return {
     id: uid(),
     type,
     question: '',
     options: type === 'mcq' ? ['', '', '', ''] : type === 'rating' ? ['', '', ''] : [],
+    // Default 30s timer on MCQ slides when quiz mode is on (needed for speed points)
+    ...(isQuizMode && type === 'mcq' ? { timer: 30 } : {}),
   }
 }
 
@@ -757,7 +761,7 @@ export default function Create() {
 
   const addQuestion = useCallback((type: QType, afterId?: string) => {
     pushHistory()
-    const slide = makeQuestion(type)
+    const slide = makeQuestion(type, isQuiz)
     setSlides(prev => {
       if (afterId === undefined) return [...prev, slide]
       const idx  = prev.findIndex(s => s.id === afterId)
@@ -767,7 +771,7 @@ export default function Create() {
     })
     setSelectedId(slide.id)
     setAddMenu(undefined)
-  }, [pushHistory])
+  }, [pushHistory, isQuiz])
 
   const deleteSlide = useCallback((id: string) => {
     pushHistory()
@@ -1073,9 +1077,9 @@ export default function Create() {
         <div className="flex shrink-0 items-center gap-3">
           <button
             onClick={() => navigate('/decks')}
-            className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-fresh-green px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-fresh-green/85 active:scale-95"
+            className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl bg-fresh-green px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-fresh-green/85 active:scale-95"
           >
-            <LayoutGrid className="size-4" />
+            <span className="text-sm leading-none">←</span>
             My Decks
           </button>
           <span className="h-4 w-px bg-white/15" />
@@ -1113,11 +1117,21 @@ export default function Create() {
           <span className="h-4 w-px bg-white/15" />
           {/* Quiz mode toggle — styled as a prominent button (matches Save / Export) */}
           <motion.button
-            onClick={() => setIsQuiz(v => !v)}
+            onClick={() => {
+              // When turning quiz ON, apply 30s default to any MCQ slide without a timer
+              if (!isQuiz) {
+                setSlides(prev => prev.map(s =>
+                  s.type === 'mcq' && !(s as QuestionSlide).timer
+                    ? { ...s, timer: 30 }
+                    : s
+                ))
+              }
+              setIsQuiz(v => !v)
+            }}
             whileTap={{ scale: 0.96 }}
             title={isQuiz ? 'Quiz mode on — click to disable' : 'Enable quiz mode — score answers & show a leaderboard'}
             className={cn(
-              'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-medium transition-all duration-200',
+              'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-medium transition-all duration-200',
               isQuiz
                 ? 'border-golden-sun/50 bg-golden-sun/15 text-golden-sun shadow-[0_0_16px_-4px] shadow-golden-sun/50'
                 : 'border-white/20 bg-white/5 text-white/80 hover:border-white/40 hover:text-white',
@@ -1156,7 +1170,7 @@ export default function Create() {
             disabled={slides.length === 0 || isSaving}
             whileTap={slides.length > 0 ? { scale: 0.96 } : {}}
             className={cn(
-              'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-medium transition-all duration-200',
+              'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-medium transition-all duration-200',
               savedToast
                 ? 'border-fresh-green/40 bg-fresh-green/10 text-fresh-green'
                 : saveError
@@ -1181,7 +1195,7 @@ export default function Create() {
             whileTap={slides.length > 0 ? { scale: 0.96 } : {}}
             title={slides.length === 0 ? 'Add slides first' : 'Export deck as a file to share with colleagues'}
             className={cn(
-              'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-medium transition-all duration-200',
+              'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-medium transition-all duration-200',
               slides.length > 0
                 ? 'border-white/20 bg-white/5 text-white/80 hover:border-white/40 hover:text-white'
                 : 'cursor-not-allowed border-white/10 text-white/30',
@@ -1211,9 +1225,9 @@ export default function Create() {
                     : 'View live poll results'
                 }
                 className={cn(
-                  'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-3 py-2 text-sm font-medium transition-all duration-200',
+                  'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-medium transition-all duration-200',
                   hasResults && !isSaving
-                    ? 'border-hot-pink/30 bg-hot-pink/5 text-hot-pink hover:border-hot-pink/60 hover:bg-hot-pink/10'
+                    ? 'border-hot-pink/50 bg-hot-pink/5 text-hot-pink hover:border-hot-pink/70 hover:bg-hot-pink/10'
                     : 'cursor-not-allowed border-white/10 text-white/30',
                 )}
               >
@@ -1267,7 +1281,7 @@ export default function Create() {
                 onClick={resumeSession}
                 whileTap={!isStarting ? { scale: 0.96 } : {}}
                 disabled={isStarting}
-                className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl bg-hot-pink px-4 py-2 text-sm font-medium text-white shadow-[0_0_20px_-4px] shadow-hot-pink/50 transition-all hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/70 disabled:opacity-60"
+                className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl bg-hot-pink px-3 py-1.5 text-sm font-medium text-white shadow-[0_0_20px_-4px] shadow-hot-pink/50 transition-all hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/70 disabled:opacity-60"
               >
                 {isStarting ? <LoadingDots /> : <><Play className="size-3.5 fill-white" />Resume</>}
               </motion.button>
@@ -1275,7 +1289,7 @@ export default function Create() {
                 onClick={startSession}
                 whileTap={!isStarting ? { scale: 0.96 } : {}}
                 disabled={isStarting}
-                className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl bg-sky-blue px-3 py-2 text-sm font-semibold text-white shadow-[0_0_16px_-4px] shadow-sky-blue/50 transition-all hover:scale-[1.02] hover:shadow-[0_0_24px_-2px] hover:shadow-sky-blue/70 disabled:opacity-60"
+                className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl bg-sky-blue px-3 py-1.5 text-sm font-semibold text-white shadow-[0_0_16px_-4px] shadow-sky-blue/50 transition-all hover:scale-[1.02] hover:shadow-[0_0_24px_-2px] hover:shadow-sky-blue/70 disabled:opacity-60"
               >
                 New Show
               </motion.button>
@@ -1286,7 +1300,7 @@ export default function Create() {
               whileTap={slides.length > 0 && !isStarting ? { scale: 0.96 } : {}}
               disabled={slides.length === 0 || isStarting}
               className={cn(
-                'flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl px-4 py-2 text-sm font-medium text-white transition-all duration-200',
+                'flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl px-3 py-1.5 text-sm font-medium text-white transition-all duration-200',
                 slides.length > 0 && !isStarting
                   ? 'bg-hot-pink shadow-[0_0_20px_-4px] shadow-hot-pink/50 hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/70'
                   : 'cursor-not-allowed bg-white/10 text-white/30',
@@ -1464,14 +1478,14 @@ function SlidePanel({
           <button
             onClick={() => fileRef.current?.click()}
             disabled={isImporting}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#f97316] py-2.5 text-xs font-semibold text-white shadow-sm transition-all hover:bg-[#ea6c0a] active:scale-95 disabled:opacity-40"
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#f97316] py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-[#ea6c0a] active:scale-95 disabled:opacity-40"
           >
             {isImporting ? <LoadingDots /> : 'Import / Merge'}
           </button>
           <button
             onClick={onOpenSorter}
             title="Slide overview"
-            className="flex items-center justify-center rounded-xl bg-white/8 px-3 py-2.5 text-white/60 transition-all hover:bg-white/15 hover:text-white active:scale-95"
+            className="flex items-center justify-center rounded-xl bg-white/8 px-3 py-2 text-white/60 transition-all hover:bg-white/15 hover:text-white active:scale-95"
           >
             <LayoutGrid className="size-4" />
           </button>
@@ -2999,6 +3013,31 @@ function MCQEditor({ slide, onUpdate, onPushHistory }: {
             >
               {v.icon}
               {v.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Timer — per-question time limit (also used for speed points in quiz mode) */}
+      <div className="mt-5 border-t border-midnight-sky-100 pt-5">
+        <label className="mb-2.5 flex items-center gap-1.5 text-sm font-medium text-midnight-sky-700">
+          <Clock className="size-3.5" />
+          Timer
+          <span className="ml-0.5 font-light text-midnight-sky-500">response time limit</span>
+        </label>
+        <div className="flex flex-wrap gap-2">
+          {([undefined, 15, 30, 45, 60, 90] as (number | undefined)[]).map(t => (
+            <button
+              key={t ?? 'no-limit'}
+              onClick={() => onUpdate({ timer: t })}
+              className={cn(
+                'rounded-xl border px-3 py-2 text-sm transition-all',
+                (slide.timer ?? undefined) === t
+                  ? 'border-golden-sun bg-golden-sun/10 font-medium text-golden-sun'
+                  : 'border-midnight-sky-200 text-midnight-sky-500 hover:border-midnight-sky-400 hover:text-midnight-sky-700',
+              )}
+            >
+              {t ? `${t}s` : 'No limit'}
             </button>
           ))}
         </div>
