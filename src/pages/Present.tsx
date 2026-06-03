@@ -1987,6 +1987,25 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
   // Compact layout when there are many options so all fit without scrolling
   const dense = options.length >= 5
 
+  // After the initial entrance animation, live vote updates should animate
+  // immediately — no stagger delay that would make bars feel unresponsive.
+  const mountedRef = useRef(false)
+  useEffect(() => { mountedRef.current = true }, [])
+
+  // Brief flash-reveal window: fires once when the correct answer is first shown.
+  // Correct bars get a scale-pulse; wrong bars dim with a short lag so the
+  // correct answer has a moment to shine before the others fade out.
+  const [flashReveal, setFlashReveal] = useState(false)
+  const prevRevealedRef = useRef(false)
+  useEffect(() => {
+    if (!prevRevealedRef.current && revealed) {
+      setFlashReveal(true)
+      const id = setTimeout(() => setFlashReveal(false), 900)
+      return () => clearTimeout(id)
+    }
+    prevRevealedRef.current = !!revealed
+  }, [revealed])
+
   return (
     <div className={cn('flex flex-col', dense ? 'gap-2' : 'gap-5')}>
       {options.map((opt, i) => {
@@ -1999,8 +2018,19 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
           <motion.div
             key={i}
             initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: isWrong ? 0.28 : 1, x: 0 }}
-            transition={{ delay: i * 0.08, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+            animate={{
+              opacity: isWrong ? 0.28 : 1,
+              x: 0,
+              // Correct answer pops on reveal; wrong answers hold for 250ms first
+              scale: flashReveal && isCorrect ? [1, 1.03, 1] : 1,
+            }}
+            transition={{
+              opacity: { delay: flashReveal && isWrong ? 0.25 : i * 0.08, duration: 0.45 },
+              x:       { delay: i * 0.08, duration: 0.45, ease: [0.16, 1, 0.3, 1] },
+              scale:   flashReveal && isCorrect
+                ? { duration: 0.55, times: [0, 0.3, 1], ease: 'easeOut' }
+                : { duration: 0 },
+            }}
             className={cn('flex flex-col', dense ? 'gap-1' : 'gap-2')}
           >
             {/* Row 1: badge + full-width label + percentage */}
@@ -2042,7 +2072,12 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
                   )}
                   initial={{ width: '0%' }}
                   animate={{ width: `${pct}%` }}
-                  transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1], delay: 0.45 + i * 0.18 }}
+                  transition={mountedRef.current
+                    // Live update — respond immediately, no entrance delay
+                    ? { duration: 0.5, ease: [0.16, 1, 0.3, 1] }
+                    // First mount — staggered entrance so bars cascade in
+                    : { duration: 0.9, ease: [0.16, 1, 0.3, 1], delay: 0.45 + i * 0.18 }
+                  }
                 />
                 {(isCorrect || isWinner) && !isWrong && (
                   <motion.div
