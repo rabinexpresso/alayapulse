@@ -31,6 +31,49 @@ function downloadDeckJSON(title: string, slides: unknown[]) {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
+   Onboarding — demo deck auto-created for first-time users
+   ───────────────────────────────────────────────────────────────────────── */
+
+const LS_ONBOARDING        = 'alaya_onboarding_done'
+const LS_WELCOME_DISMISSED = 'alaya_welcome_dismissed'
+
+function buildDemoDeck(): Deck {
+  const uid = () => Math.random().toString(36).slice(2, 10)
+  const now = Date.now()
+  return {
+    id:        uid(),
+    title:     'Welcome to Alaya Pulse ✦',
+    isQuiz:    true,
+    createdAt: now,
+    updatedAt: now,
+    slides: [
+      { id: uid(), type: 'content', template: 'heading',
+        title: 'Welcome to Alaya Pulse ✦',
+        body: 'Run this deck live with your team to see everything in action',
+        attribution: '', theme: 'navy' },
+      { id: uid(), type: 'mcq',
+        question: 'How many hearts does an octopus have?',
+        options: ['1', '2', '3', '4'], correctAnswers: [2], vizType: 'bar' },
+      { id: uid(), type: 'mcq',
+        question: 'Which of these were invented in Australia? Select all that apply.',
+        options: ['Wi-Fi', 'The telephone', 'Vegemite', 'The black box flight recorder'],
+        correctAnswers: [0, 2, 3], vizType: 'bar' },
+      { id: uid(), type: 'mcq',
+        question: 'A group of flamingos is officially called a…?',
+        options: ['Flock', 'Colony', 'Flamboyance', 'Parade'], correctAnswers: [2], vizType: 'bar' },
+      { id: uid(), type: 'wordcloud',
+        question: 'In one word — describe your Monday morning mood', options: [] },
+      { id: uid(), type: 'openended',
+        question: "What's one work habit you wish everyone on your team had?", options: [] },
+      { id: uid(), type: 'rating',
+        question: 'Rate your confidence in these survival skills:',
+        options: ['Starting a campfire', 'Reading a map', 'Building a shelter'] },
+      { id: uid(), type: 'leaderboard' },
+    ] as unknown[],
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
    My Decks page — saved presentations library
    ───────────────────────────────────────────────────────────────────────── */
 
@@ -53,6 +96,10 @@ export default function Decks() {
   const [accountMenuOpen,       setAccountMenuOpen]       = useState(false)
   const [selectedIds,           setSelectedIds]           = useState<Set<string>>(new Set())
   const [confirmDeleteSelected, setConfirmDeleteSelected] = useState(false)
+  // Welcome banner — shown after demo deck is created, dismissed once user closes it
+  const [showWelcomeBanner, setShowWelcomeBanner] = useState(
+    () => !!localStorage.getItem(LS_ONBOARDING) && !localStorage.getItem(LS_WELCOME_DISMISSED)
+  )
 
   const filteredDecks = useMemo(() =>
     searchQuery.trim()
@@ -89,7 +136,22 @@ export default function Decks() {
     setLoading(true)
     try {
       const list = backend === 'browser' ? await browserListDecks() : await cloudListDecks()
-      setDecks(list)
+      // First-time user: no decks + no prior onboarding → auto-create sample deck
+      if (list.length === 0 && !localStorage.getItem(LS_ONBOARDING)) {
+        try {
+          const demo = buildDemoDeck()
+          if (backend === 'browser') await browserSaveDeck(demo)
+          else await cloudSaveDeck(demo)
+          localStorage.setItem(LS_ONBOARDING, '1')
+          setShowWelcomeBanner(true)
+          setDecks([demo])
+        } catch {
+          // Save failed — just show the empty state, no harm done
+          setDecks([])
+        }
+      } else {
+        setDecks(list)
+      }
     } finally {
       setLoading(false)
     }
@@ -451,6 +513,42 @@ export default function Decks() {
             </motion.button>
           </div>
         </div>
+
+        {/* Welcome banner — shown once after demo deck is auto-created */}
+        <AnimatePresence>
+          {showWelcomeBanner && (
+            <motion.div
+              key="welcome-banner"
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+              className="mb-6 flex items-start gap-4 rounded-2xl border border-hot-pink/20 bg-hot-pink/[0.05] px-5 py-4"
+            >
+              <div className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-hot-pink/15 text-sm font-bold text-hot-pink">
+                ✦
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-midnight-sky-900">Your sample deck is ready</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-midnight-sky-500">
+                  Quiz mode is on — 3 questions have correct answers marked. Open the deck, start a session, and join from your phone to see it all live. Hit{' '}
+                  <span className="font-semibold text-midnight-sky-700">Results</span>{' '}
+                  in the editor after to review responses.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowWelcomeBanner(false)
+                  localStorage.setItem(LS_WELCOME_DISMISSED, '1')
+                }}
+                title="Dismiss"
+                className="shrink-0 rounded-lg p-1 text-midnight-sky-400 transition hover:bg-midnight-sky-100 hover:text-midnight-sky-700"
+              >
+                <XIcon className="size-4" />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Deck grid / empty / loading */}
         {loading ? (
