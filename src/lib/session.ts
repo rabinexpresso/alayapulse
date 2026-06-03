@@ -73,6 +73,8 @@ export interface QuestionSlide {
   oeMaxSubmissions?: number
   /** MCQ only — 0-based indices of correct options (supports multiple). Used for presenter answer reveal. */
   correctAnswers?: number[]
+  /** MCQ only — countdown timer in seconds. Auto-starts when presenter reaches this slide. */
+  timer?: number
 }
 
 /* ─── Canvas slide types ────────────────────────────────────────────────── */
@@ -284,6 +286,8 @@ export async function createSession(title: string, rawSlides: any[], isQuiz?: bo
       ...(typeof s.wcMaxSubmissions === 'number' ? { wcMaxSubmissions: s.wcMaxSubmissions } : {}),
       // MCQ: preserve correct answer indices for presenter reveal
       ...(Array.isArray(s.correctAnswers) && s.correctAnswers.length > 0 ? { correctAnswers: s.correctAnswers as number[] } : {}),
+      // MCQ: preserve timer so auto-start works on session resume
+      ...(typeof s.timer === 'number' ? { timer: s.timer } : {}),
       // Open Ended: preserve max submissions per person
       ...(typeof s.oeMaxSubmissions === 'number' ? { oeMaxSubmissions: s.oeMaxSubmissions } : {}),
     }
@@ -419,6 +423,8 @@ export async function updateSessionSlides(code: string, rawSlides: any[], isQuiz
       ...(typeof s.wcMaxSubmissions === 'number' ? { wcMaxSubmissions: s.wcMaxSubmissions } : {}),
       // MCQ: preserve correct answer indices for presenter reveal
       ...(Array.isArray(s.correctAnswers) && s.correctAnswers.length > 0 ? { correctAnswers: s.correctAnswers as number[] } : {}),
+      // MCQ: preserve timer so auto-start works on session resume
+      ...(typeof s.timer === 'number' ? { timer: s.timer } : {}),
       // Open Ended: preserve max submissions per person
       ...(typeof s.oeMaxSubmissions === 'number' ? { oeMaxSubmissions: s.oeMaxSubmissions } : {}),
     }

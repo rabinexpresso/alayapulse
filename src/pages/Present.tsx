@@ -110,6 +110,8 @@ interface QSlide {
   imgLayout?:   'top' | 'right' | 'background' | 'reference'
   /** MCQ only — 0-based indices of correct options (supports multiple). */
   correctAnswers?: number[]
+  /** MCQ only — countdown timer in seconds; auto-starts when presenter reaches this slide. */
+  timer?: number
   /** Word Cloud only — max submissions per person. */
   wcMaxSubmissions?: number
   /** Open Ended only — max responses per person. Default 1. */
@@ -339,6 +341,19 @@ export default function Present() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRealSession, code, current, phase])
 
+  // ── Auto-start timer when navigating FORWARD to an MCQ slide with a timer ──
+  // Skips the initial mount (presenter might still be setting up) and back-navigation.
+  const autoTimerMountedRef = useRef(false)
+  useEffect(() => {
+    if (!autoTimerMountedRef.current) { autoTimerMountedRef.current = true; return }
+    if (!isRealSession || direction !== 1 || slide?.type !== 'mcq') return
+    const timerSecs = (slide as QSlide).timer
+    if (!timerSecs) return
+    handleStartTimer(timerSecs)
+  // direction + slide both update in the same batch as current, so watching current is enough
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current])
+
   // ── Subscribe to live viewer count ────────────────────────────────────
   // Skip only for the hard-coded DEMO fallback, always subscribe for real sessions.
   // Also track the PEAK viewer count for the participation % calculation
@@ -382,12 +397,8 @@ export default function Present() {
   const handleTimerExpire = useCallback(() => {
     setTimerEndsAt(null)
     setTimerDuration(null)
-    // Auto-reveal results if still collecting responses
-    if (isQuestionRef.current && phaseRef.current === 'question') {
-      setTransType('phase')
-      setDirection(1)
-      setPhase('results')
-    }
+    // Timer expired — audience is locked from new submissions (timerEndsAt stays in
+    // Firestore as a past timestamp). Presenter decides when to advance to results.
   }, [])
 
   // Start a countdown for `seconds` — the interval runs inside TimerCount
@@ -410,7 +421,8 @@ export default function Present() {
     }
   }, [])
 
-  // Clear all votes for the current slide and return to question phase so audience can vote again
+  // Clear all votes for the current slide and return to question phase so audience can vote again.
+  // Also restarts the timer at the slide's configured duration so everyone gets a fresh attempt.
   const handleResetVotes = useCallback(async () => {
     if (!isRealSession || !isQuestion) return
     setIsResetting(true)
@@ -423,12 +435,15 @@ export default function Present() {
         setDirection(-1)
         setPhase('question')
       }
+      // Restart timer at the slide's configured duration (if one was set)
+      const timerSecs = (slide as QSlide).timer
+      if (timerSecs) handleStartTimer(timerSecs)
     } catch (e) {
       console.error('[alaya-pulse] resetSlideVotes failed:', e)
     } finally {
       setIsResetting(false)
     }
-  }, [isRealSession, isQuestion, code, slide, phase])
+  }, [isRealSession, isQuestion, code, slide, phase, handleStartTimer])
 
   // ── Reactions subscription ────────────────────────────────────────────
   useEffect(() => {
