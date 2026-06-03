@@ -607,6 +607,47 @@ export async function resetSlideVotes(
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
+   resetSlideAndTimer
+   Atomically resets slide votes AND updates the timer in ONE Firestore
+   document write. The audience's onSnapshot fires once with both changes
+   together — eliminating the race window where resetCounts has arrived
+   (alreadySubmitted=false) but the old expired timerEndsAt is still in place
+   (timerExpired=true), which would lock the audience on "Time's up!" even
+   after a presenter reset.
+
+   Pass newTimerSecs to restart the timer; omit / undefined to clear it.
+   ───────────────────────────────────────────────────────────────────────── */
+
+export async function resetSlideAndTimer(
+  sessionCode: string,
+  slideId: string,
+  newTimerSecs?: number,
+): Promise<void> {
+  // 1. Delete all responses for this slide
+  const q = query(
+    collection(db, 'sessions', sessionCode.toUpperCase(), 'responses'),
+    where('slideId', '==', slideId),
+  )
+  const snap = await getDocs(q)
+  await Promise.all(snap.docs.map(d => deleteDoc(d.ref)))
+
+  // 2. One atomic updateDoc: bump reset counter + restart or clear timer.
+  //    Combining into a single write means audience receives both fields in
+  //    the same onSnapshot event — no split-brain state.
+  const update: Record<string, unknown> = {
+    [`resetCounts.${slideId}`]: increment(1),
+  }
+  if (newTimerSecs) {
+    update.timerEndsAt   = Date.now() + newTimerSecs * 1000
+    update.timerDuration = newTimerSecs
+  } else {
+    update.timerEndsAt   = deleteField()
+    update.timerDuration = deleteField()
+  }
+  await updateDoc(doc(db, 'sessions', sessionCode.toUpperCase()), update)
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
    Reactions — live icon bursts sent by audience during content slides
    ───────────────────────────────────────────────────────────────────────── */
 

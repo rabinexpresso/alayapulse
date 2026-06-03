@@ -12,7 +12,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import { cn } from '@/lib/utils'
 import {
   updateSessionState, endSession, subscribeToSlideResponses, subscribeToViewerCount,
-  fetchAllSessionResponses, getSessionByCode, startTimer, clearTimer, resetSlideVotes, updateQuestionMeta,
+  fetchAllSessionResponses, getSessionByCode, startTimer, clearTimer, resetSlideAndTimer, updateQuestionMeta,
   subscribeToReactions, deleteReaction,
   type Response as FirestoreResponse, type Reaction, type ReactionType,
 } from '@/lib/session'
@@ -297,6 +297,8 @@ export default function Present() {
   const peakViewerRef     = useRef(0)
   const sessionStartedAt  = useRef<number>(Date.now())
   const questionMetaRef   = useRef<Record<string, { openedAt: number; duration: number | null }>>({})
+  // Ref to current slide so handleStartTimer can scope questionMeta updates to the active slide only
+  const slideRef          = useRef<AnySlide | null>(null)
 
   // ── Question timer ─────────────────────────────────────────────────────
   const [timerEndsAt,   setTimerEndsAt]   = useState<number | null>(null)
@@ -326,6 +328,7 @@ export default function Present() {
   useEffect(() => { isQuestionRef.current = isQuestion },     [isQuestion])
   useEffect(() => { isRealSessionRef.current = isRealSession }, [isRealSession])
   useEffect(() => { codeRef.current = code },                 [code])
+  useEffect(() => { slideRef.current = slide },               [slide])
 
   // ── Sync presenter state to Firestore so audience knows current slide ──
   useEffect(() => {
@@ -409,41 +412,65 @@ export default function Present() {
     setShowTimerMenu(false)
     if (isRealSessionRef.current) {
       startTimer(codeRef.current, seconds).catch(console.error)
-      if (isQuestionRef.current) {
-        // Update questionMeta for the current question with the chosen timer duration
-        for (const [sid, meta] of Object.entries(questionMetaRef.current)) {
-          if (meta.duration === null) {
-            questionMetaRef.current[sid] = { ...meta, duration: seconds }
-            updateQuestionMeta(codeRef.current, sid, meta.openedAt, seconds).catch(console.error)
-          }
+      if (isQuestionRef.current && slideRef.current) {
+        // Update questionMeta for the current slide only — scoped so that manual
+        // timer overrides (e.g. changing from 30 s to 60 s after a reset) correctly
+        // update the active slide's duration without touching other slides.
+        const sid  = (slideRef.current as { id: string }).id
+        const meta = questionMetaRef.current[sid]
+        if (meta) {
+          questionMetaRef.current[sid] = { ...meta, duration: seconds }
+          updateQuestionMeta(codeRef.current, sid, meta.openedAt, seconds).catch(console.error)
         }
       }
     }
   }, [])
 
   // Clear all votes for the current slide and return to question phase so audience can vote again.
-  // Also restarts the timer at the slide's configured duration so everyone gets a fresh attempt.
+  // Uses resetSlideAndTimer which bumps the reset counter AND updates timerEndsAt in a single
+  // Firestore write — the audience receives both changes in one snapshot so there is no race
+  // window where alreadySubmitted=false but timerExpired=true (which would lock them on "Time's up!").
   const handleResetVotes = useCallback(async () => {
     if (!isRealSession || !isQuestion) return
     setIsResetting(true)
     try {
-      await resetSlideVotes(code, (slide as QSlide).id)
+      const qSlide    = slide as QSlide
+      const timerSecs = qSlide.timer  // configured timer (undefined = no timer)
+
+      // Atomic: delete responses + bump resetCount + restart/clear timer in one write
+      await resetSlideAndTimer(code, qSlide.id, timerSecs)
+
+      // Sync presenter's local timer state
+      if (timerSecs) {
+        setTimerEndsAt(Date.now() + timerSecs * 1000)
+        setTimerDuration(timerSecs)
+      } else {
+        setTimerEndsAt(null)
+        setTimerDuration(null)
+      }
+      setShowTimerMenu(false)
       setShowResetConfirm(false)
+
       // Return to question phase so audience sees the voting form again
       if (phase === 'results') {
         setTransType('phase')
         setDirection(-1)
         setPhase('question')
       }
-      // Restart timer at the slide's configured duration (if one was set)
-      const timerSecs = (slide as QSlide).timer
-      if (timerSecs) handleStartTimer(timerSecs)
+
+      // Refresh questionMeta for this slide so round-2 speed scoring uses the
+      // correct openedAt + duration rather than stale values from round 1.
+      if (isQuiz) {
+        const openedAt = Date.now()
+        questionMetaRef.current[qSlide.id] = { openedAt, duration: timerSecs ?? null }
+        updateQuestionMeta(code, qSlide.id, openedAt, timerSecs ?? null).catch(console.error)
+      }
     } catch (e) {
       console.error('[alaya-pulse] resetSlideVotes failed:', e)
     } finally {
       setIsResetting(false)
     }
-  }, [isRealSession, isQuestion, code, slide, phase, handleStartTimer])
+  }, [isRealSession, isQuestion, code, slide, phase, isQuiz])
 
   // ── Reactions subscription ────────────────────────────────────────────
   useEffect(() => {
