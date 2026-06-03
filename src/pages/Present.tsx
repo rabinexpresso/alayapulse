@@ -2981,6 +2981,8 @@ function LeaderboardSlideView({
 }) {
   const [leaderboard, setLeaderboard] = useState<{ name: string; score: number }[]>([])
   const [revealCount, setRevealCount] = useState(0)
+  // Prevents the "No scores yet" placeholder flashing before data arrives
+  const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
     if (sessionCode === 'DEMO') {
@@ -2991,6 +2993,7 @@ function LeaderboardSlideView({
         { name: 'Anonymous', score: 250 },
         { name: 'Marcus L.', score: 210 },
       ])
+      setLoaded(true)
       return
     }
     Promise.all([
@@ -3003,8 +3006,9 @@ function LeaderboardSlideView({
         const meta = (sessionData?.questionMeta ?? questionMeta) as Record<string, { openedAt: number; duration: number | null }>
         const board = calculateQuizLeaderboard(responses, deck, meta)
         setLeaderboard(board.slice(0, 10))
+        setLoaded(true)
       })
-      .catch(console.error)
+      .catch(() => { setLoaded(true) })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionCode])
 
@@ -3050,7 +3054,7 @@ function LeaderboardSlideView({
         <Trophy className="size-9 text-golden-sun drop-shadow-[0_0_18px_rgba(255,199,9,0.55)]" />
       </motion.div>
 
-      {leaderboard.length === 0 ? (
+      {!loaded ? null : leaderboard.length === 0 ? (
         <div className="relative flex flex-1 items-center justify-center">
           <p className="text-white/30">No scores yet — no quiz questions have been answered.</p>
         </div>
