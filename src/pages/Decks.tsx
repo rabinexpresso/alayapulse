@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, Trash2, Monitor, Cloud, LogOut, Clock, Layers, ArrowRightLeft, FileText, Download, Upload, Copy, Search, X as XIcon } from 'lucide-react'
+import { Plus, Trash2, Monitor, Cloud, LogOut, Clock, Layers, ArrowRightLeft, FileText, Download, Upload, Copy, Search, X as XIcon, ChevronDown, Check } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
 import { cn } from '@/lib/utils'
 import {
@@ -48,13 +48,29 @@ export default function Decks() {
   // localStorage) when "Remove from device" is clicked from the sign-in screen.
   const [storageKey,    setStorageKey]    = useState(0)
   const [searchQuery,   setSearchQuery]   = useState('')
-  const importRef = useRef<HTMLInputElement>(null)
+  const importRef      = useRef<HTMLInputElement>(null)
+  const accountMenuRef = useRef<HTMLDivElement>(null)
+  const [accountMenuOpen,       setAccountMenuOpen]       = useState(false)
+  const [selectedIds,           setSelectedIds]           = useState<Set<string>>(new Set())
+  const [confirmDeleteSelected, setConfirmDeleteSelected] = useState(false)
 
   const filteredDecks = useMemo(() =>
     searchQuery.trim()
       ? decks.filter(d => d.title.toLowerCase().includes(searchQuery.toLowerCase()))
       : decks,
   [decks, searchQuery])
+
+  // Close account dropdown on outside click
+  useEffect(() => {
+    if (!accountMenuOpen) return
+    function handleClick(e: MouseEvent) {
+      if (accountMenuRef.current && !accountMenuRef.current.contains(e.target as Node)) {
+        setAccountMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [accountMenuOpen])
 
   // Track Firebase auth state
   useEffect(() => {
@@ -191,6 +207,36 @@ export default function Decks() {
     }
   }
 
+  /* ── Multi-select ─────────────────────────────────────────────────────── */
+
+  function handleToggleSelect(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set())
+  }
+
+  async function handleDeleteSelected() {
+    setDeleting(true)
+    try {
+      for (const id of selectedIds) {
+        if (backend === 'browser') await browserDeleteDeck(id)
+        else await cloudDeleteDeck(id)
+      }
+      setDecks(prev => prev.filter(d => !selectedIds.has(d.id)))
+      setSelectedIds(new Set())
+    } finally {
+      setDeleting(false)
+      setConfirmDeleteSelected(false)
+    }
+  }
+
   /* ── Open deck in editor ──────────────────────────────────────────────── */
 
   async function handleOpen(deck: Deck) {
@@ -256,136 +302,155 @@ export default function Decks() {
   return (
     <main className="min-h-screen bg-midnight-sky-50/60">
 
-      {/* ── Dark navy header + title hero ─────────────────────────────── */}
-      <div className="bg-midnight-sky-900">
-        {/* Nav bar */}
-        <header className="sticky top-0 z-10 border-b border-white/10 bg-midnight-sky-900/95 backdrop-blur-md">
-          <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
-            <Link to="/"><AlayaMark className="text-white" /></Link>
+      {/* ── Slim sticky nav ─────────────────────────────────────────────── */}
+      <header className="sticky top-0 z-10 border-b border-white/10 bg-midnight-sky-900/95 backdrop-blur-md">
+        <div className="mx-auto flex max-w-6xl items-center gap-4 px-6 py-3">
 
-            <div className="flex items-center gap-2">
-              {/* Storage badge */}
-              {backend === 'browser' ? (
-                <span className="flex items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-medium text-white/70">
-                  <Monitor className="size-3" />
-                  This browser
-                </span>
-              ) : user ? (
-                <div className="flex items-center gap-2.5 rounded-full border border-white/15 bg-white/10 pl-1 pr-3 py-1">
-                  {user.photoURL ? (
-                    <img src={user.photoURL} alt={user.displayName ?? ''} className="size-6 rounded-full" />
-                  ) : (
-                    <div className="flex size-6 items-center justify-center rounded-full bg-hot-pink/20 text-[10px] font-bold text-hot-pink">
-                      {user.displayName?.[0] ?? '?'}
-                    </div>
-                  )}
-                  <span className="text-xs font-medium text-white/80">
-                    {user.displayName?.split(' ')[0]}
-                  </span>
-                </div>
-              ) : null}
+          {/* Logo */}
+          <Link to="/"><AlayaMark className="shrink-0 text-white" /></Link>
 
-              {backend === 'browser' && (
-                <button
-                  onClick={handleSwitchStorage}
-                  className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs text-white/40 transition hover:bg-white/10 hover:text-white/70"
-                >
-                  <ArrowRightLeft className="size-3" />
-                  Change
-                </button>
-              )}
-
-              {backend === 'cloud' && user && (
-                <div className="flex items-center gap-0.5">
-                  <button
-                    onClick={handleSignOut}
-                    className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs text-white/65 transition hover:bg-white/10 hover:text-white"
-                  >
-                    <LogOut className="size-3" />
-                    Sign out
-                  </button>
-                  <button
-                    onClick={handleRemoveAccount}
-                    title="Sign out and remove this Google account from the device — use this on shared laptops"
-                    className="rounded-full px-2.5 py-1.5 text-[10px] text-white/45 transition hover:bg-red-500/10 hover:text-red-400"
-                  >
-                    Remove
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </header>
-
-        {/* Title hero */}
-        <div className="mx-auto max-w-6xl px-6 pb-5 pt-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight text-white">My Decks</h1>
-              <p className="mt-1 text-sm font-light text-white/50">
-                {loading ? 'Loading…' : decks.length > 0
-                  ? `${filteredDecks.length} of ${decks.length} ${decks.length === 1 ? 'deck' : 'decks'}`
-                  : 'No decks yet'}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              {/* Import deck from .apulse.json */}
-              <input
-                ref={importRef}
-                type="file"
-                accept=".json,.apulse"
-                className="hidden"
-                onChange={e => { const f = e.target.files?.[0]; if (f) handleImportDeck(f); e.target.value = '' }}
-              />
-              <motion.button
-                onClick={() => importRef.current?.click()}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.97 }}
-                title="Import a deck shared by a colleague (.apulse.json)"
-                className="flex items-center gap-2 rounded-2xl border border-white/20 bg-white/8 px-4 py-2.5 text-sm font-semibold text-white/70 transition hover:bg-white/15 hover:text-white"
-              >
-                <Upload className="size-4" />
-                Import deck
-              </motion.button>
-
-              <motion.button
-                onClick={() => navigate('/create')}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.97 }}
-                className="flex items-center gap-2 rounded-2xl bg-hot-pink px-5 py-2.5 text-sm font-semibold text-white shadow-[0_4px_24px_-4px] shadow-hot-pink/60 transition-shadow hover:shadow-[0_4px_32px_-2px] hover:shadow-hot-pink/80"
-              >
-                <Plus className="size-4" />
-                New deck
-              </motion.button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Page body ───────────────────────────────────────────────────── */}
-      <div className="mx-auto max-w-6xl px-6 pb-16 pt-8">
-
-        {/* Search bar — only shown when there are decks to search */}
-        {decks.length > 0 && (
-          <div className="relative mb-7 max-w-sm">
-            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-midnight-sky-400" />
+          {/* Search — centred, fills available space */}
+          <div className="relative mx-auto w-full max-w-md">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-white/35" />
             <input
               type="text"
               placeholder="Search decks…"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              className="w-full rounded-xl border border-midnight-sky-200 bg-white py-2.5 pl-9 pr-9 text-sm text-midnight-sky-800 placeholder:text-midnight-sky-400 focus:border-hot-pink focus:outline-none focus:ring-2 focus:ring-hot-pink/20"
+              className="w-full rounded-xl border border-white/10 bg-white/8 py-2 pl-9 pr-8 text-sm text-white placeholder:text-white/50 transition focus:border-white/25 focus:bg-white/12 focus:outline-none"
             />
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-midnight-sky-400 hover:text-midnight-sky-700"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/70"
               >
                 <XIcon className="size-3.5" />
               </button>
             )}
           </div>
-        )}
+
+          {/* Account button + dropdown */}
+          <div ref={accountMenuRef} className="relative shrink-0">
+            <button
+              onClick={() => setAccountMenuOpen(v => !v)}
+              className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/8 px-2.5 py-1.5 text-xs font-medium text-white/70 transition hover:bg-white/15 hover:text-white"
+            >
+              {backend === 'cloud' && user ? (
+                <>
+                  {user.photoURL
+                    ? <img src={user.photoURL} alt="" className="size-5 rounded-full" />
+                    : <div className="flex size-5 items-center justify-center rounded-full bg-hot-pink/20 text-[9px] font-bold text-hot-pink">{user.displayName?.[0] ?? '?'}</div>
+                  }
+                  <span>{user.displayName?.split(' ')[0]}</span>
+                </>
+              ) : (
+                <>
+                  <Monitor className="size-3.5" />
+                  <span>This browser</span>
+                </>
+              )}
+              <ChevronDown className={cn('size-3 transition-transform duration-200', accountMenuOpen && 'rotate-180')} />
+            </button>
+
+            <AnimatePresence>
+              {accountMenuOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: -6, scale: 0.97 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -6, scale: 0.97 }}
+                  transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
+                  className="absolute right-0 top-full mt-2 w-52 overflow-hidden rounded-2xl border border-white/10 bg-midnight-sky-800 py-1 shadow-2xl"
+                >
+                  {backend === 'cloud' && user ? (
+                    <>
+                      <div className="border-b border-white/10 px-4 py-3">
+                        <p className="text-xs font-semibold text-white/90">{user.displayName}</p>
+                        <p className="truncate text-[11px] text-white/45">{user.email}</p>
+                      </div>
+                      <button
+                        onClick={() => { setAccountMenuOpen(false); handleSignOut() }}
+                        className="flex w-full items-center gap-2.5 px-4 py-2.5 text-xs text-white/65 transition hover:bg-white/8 hover:text-white"
+                      >
+                        <LogOut className="size-3.5" />
+                        Sign out
+                      </button>
+                      <button
+                        onClick={() => { setAccountMenuOpen(false); handleRemoveAccount() }}
+                        title="Sign out and remove this Google account from the device — use this on shared laptops"
+                        className="flex w-full items-center gap-2.5 px-4 py-2.5 text-xs text-red-400/80 transition hover:bg-red-500/10 hover:text-red-400"
+                      >
+                        <XIcon className="size-3.5" />
+                        Remove from device
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <div className="border-b border-white/10 px-4 py-3">
+                        <p className="text-xs font-semibold text-white/90">This browser</p>
+                        <p className="text-[11px] text-white/45">Saved on this device only</p>
+                      </div>
+                      <button
+                        onClick={() => { setAccountMenuOpen(false); handleSwitchStorage() }}
+                        className="flex w-full items-center gap-2.5 px-4 py-2.5 text-xs text-white/65 transition hover:bg-white/8 hover:text-white"
+                      >
+                        <ArrowRightLeft className="size-3.5" />
+                        Change storage
+                      </button>
+                    </>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+        </div>
+      </header>
+
+      {/* ── Page body ───────────────────────────────────────────────────── */}
+      <div className="mx-auto max-w-6xl px-6 pb-16 pt-6">
+
+        {/* Page header row — title + count + action buttons */}
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-midnight-sky-900">My Decks</h1>
+            <p className="mt-0.5 text-[11px] text-midnight-sky-600">
+              {loading ? 'Loading…' : decks.length > 0
+                ? searchQuery.trim()
+                  ? `${filteredDecks.length} of ${decks.length} ${decks.length === 1 ? 'deck' : 'decks'}`
+                  : `${decks.length} ${decks.length === 1 ? 'deck' : 'decks'}`
+                : 'No decks yet'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              ref={importRef}
+              type="file"
+              accept=".json,.apulse"
+              className="hidden"
+              onChange={e => { const f = e.target.files?.[0]; if (f) handleImportDeck(f); e.target.value = '' }}
+            />
+            <motion.button
+              onClick={() => importRef.current?.click()}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.97 }}
+              title="Import a deck shared by a colleague (.apulse.json)"
+              className="flex items-center gap-2 rounded-2xl border border-midnight-sky-200 bg-white px-4 py-2 text-sm font-semibold text-midnight-sky-600 shadow-sm transition hover:border-midnight-sky-300 hover:bg-midnight-sky-50 hover:text-midnight-sky-900"
+            >
+              <Upload className="size-4" />
+              Import deck
+            </motion.button>
+
+            <motion.button
+              onClick={() => navigate('/create')}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.97 }}
+              className="flex items-center gap-2 rounded-2xl bg-hot-pink px-4 py-2 text-sm font-semibold text-white shadow-[0_4px_24px_-4px] shadow-hot-pink/60 transition-shadow hover:shadow-[0_4px_32px_-2px] hover:shadow-hot-pink/80"
+            >
+              <Plus className="size-4" />
+              New deck
+            </motion.button>
+          </div>
+        </div>
 
         {/* Deck grid / empty / loading */}
         {loading ? (
@@ -417,6 +482,9 @@ export default function Decks() {
                   onDelete={() => setConfirmDelete(deck.id)}
                   onExport={() => downloadDeckJSON(deck.title, deck.slides as unknown[])}
                   onDuplicate={() => handleDuplicateDeck(deck)}
+                  isSelected={selectedIds.has(deck.id)}
+                  onToggleSelect={() => handleToggleSelect(deck.id)}
+                  inSelectionMode={selectedIds.size > 0}
                 />
               </motion.div>
             ))}
@@ -424,13 +492,58 @@ export default function Decks() {
         )}
       </div>
 
-      {/* ── Delete confirm modal ─────────────────────────────────────────── */}
+      {/* ── Multi-select floating action bar ───────────────────────────── */}
+      <AnimatePresence>
+        {selectedIds.size > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-white/10 bg-midnight-sky-900 px-5 py-3 shadow-2xl"
+          >
+            <span className="text-sm font-medium text-white/80">
+              {selectedIds.size} {selectedIds.size === 1 ? 'deck' : 'decks'} selected
+            </span>
+            <div className="h-4 w-px bg-white/20" />
+            <button
+              onClick={() => setConfirmDeleteSelected(true)}
+              className="flex items-center gap-1.5 rounded-xl bg-red-500/20 px-3 py-1.5 text-xs font-semibold text-red-400 transition hover:bg-red-500/30 hover:text-red-300"
+            >
+              <Trash2 className="size-3.5" />
+              Delete {selectedIds.size === 1 ? 'deck' : 'decks'}
+            </button>
+            <button
+              onClick={clearSelection}
+              title="Cancel selection"
+              className="rounded-lg p-1 text-white/40 transition hover:text-white/70"
+            >
+              <XIcon className="size-4" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Delete single deck modal ─────────────────────────────────────── */}
       <AnimatePresence>
         {confirmDelete && (
           <DeleteModal
             loading={deleting}
             onConfirm={() => handleDelete(confirmDelete)}
             onCancel={() => setConfirmDelete(null)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── Delete selected decks modal ──────────────────────────────────── */}
+      <AnimatePresence>
+        {confirmDeleteSelected && (
+          <DeleteModal
+            loading={deleting}
+            title={`Delete ${selectedIds.size} ${selectedIds.size === 1 ? 'deck' : 'decks'}?`}
+            description={`This cannot be undone. ${selectedIds.size === 1 ? 'The selected deck' : `All ${selectedIds.size} selected decks`} and their slides will be permanently removed.`}
+            onConfirm={handleDeleteSelected}
+            onCancel={() => setConfirmDeleteSelected(false)}
           />
         )}
       </AnimatePresence>
@@ -832,12 +945,15 @@ function buildDeckPreviewHtml(html: string, slideIndex: number): string {
   return html + script
 }
 
-function DeckCard({ deck, onOpen, onDelete, onExport, onDuplicate }: {
-  deck:        Deck
-  onOpen:      () => void
-  onDelete:    () => void
-  onExport:    () => void
-  onDuplicate: () => void
+function DeckCard({ deck, onOpen, onDelete, onExport, onDuplicate, isSelected, onToggleSelect, inSelectionMode }: {
+  deck:            Deck
+  onOpen:          () => void
+  onDelete:        () => void
+  onExport:        () => void
+  onDuplicate:     () => void
+  isSelected:      boolean
+  onToggleSelect:  () => void
+  inSelectionMode: boolean
 }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const slides     = deck.slides as any[]
@@ -847,9 +963,14 @@ function DeckCard({ deck, onOpen, onDelete, onExport, onDuplicate }: {
 
   return (
     <motion.div
-      whileHover={{ y: -4 }}
+      whileHover={{ y: isSelected ? 0 : -4 }}
       transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-      className="group flex flex-col overflow-hidden rounded-2xl bg-white ring-1 ring-midnight-sky-100/80 shadow-[0_2px_12px_-2px_rgba(0,0,121,0.06)] transition-shadow duration-200 hover:shadow-[0_16px_48px_-8px_rgba(0,0,121,0.16)] hover:ring-midnight-sky-200"
+      className={cn(
+        'group flex flex-col overflow-hidden rounded-2xl bg-white ring-1 transition-all duration-200',
+        isSelected
+          ? 'ring-2 ring-hot-pink/60 shadow-[0_0_0_4px_rgba(255,0,101,0.12)]'
+          : 'ring-midnight-sky-100/80 shadow-[0_2px_12px_-2px_rgba(0,0,121,0.06)] hover:shadow-[0_16px_48px_-8px_rgba(0,0,121,0.16)] hover:ring-midnight-sky-200',
+      )}
     >
       {/* Thumbnail — preview of the first slide */}
       <button
@@ -858,43 +979,68 @@ function DeckCard({ deck, onOpen, onDelete, onExport, onDuplicate }: {
       >
         <DeckThumbnail slides={slides} />
 
-        {/* Hover overlay */}
-        <div className="absolute inset-0 flex items-center justify-center bg-midnight-sky-900/0 transition-all duration-300 group-hover:bg-midnight-sky-900/40">
-          <span className="translate-y-2 rounded-xl bg-white px-4 py-2 text-xs font-semibold text-midnight-sky-900 opacity-0 shadow-lg transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
-            Open deck
-          </span>
-        </div>
+        {/* Hover overlay — hidden in selection mode */}
+        {!inSelectionMode && (
+          <div className="absolute inset-0 flex items-center justify-center bg-midnight-sky-900/0 transition-all duration-300 group-hover:bg-midnight-sky-900/40">
+            <span className="translate-y-2 rounded-xl bg-white px-4 py-2 text-xs font-semibold text-midnight-sky-900 opacity-0 shadow-lg transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
+              Open deck
+            </span>
+          </div>
+        )}
 
-        {/* Slide count badge */}
-        <span className="absolute left-2.5 top-2.5 rounded-lg bg-black/40 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur-sm">
+        {/* Selection checkbox — top left */}
+        <button
+          onClick={e => { e.stopPropagation(); onToggleSelect() }}
+          title={isSelected ? 'Deselect' : 'Select'}
+          className={cn(
+            'absolute left-2 top-2 z-10 flex size-5 items-center justify-center rounded-md border-2 backdrop-blur-sm transition-all duration-200',
+            isSelected
+              ? 'border-hot-pink bg-hot-pink opacity-100'
+              : cn(
+                  'border-white/80 bg-black/25',
+                  inSelectionMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+                ),
+          )}
+        >
+          {isSelected && <Check className="size-3 text-white" />}
+        </button>
+
+        {/* Slide count badge — bottom left */}
+        <span className="absolute bottom-2 left-2 rounded-lg bg-black/40 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur-sm">
           {slideCount} {slideCount === 1 ? 'slide' : 'slides'}
         </span>
 
-        {/* Duplicate button — appears on hover */}
-        <button
-          onClick={e => { e.stopPropagation(); onDuplicate() }}
-          title="Duplicate deck"
-          className="absolute right-[4.5rem] top-2.5 flex size-6 items-center justify-center rounded-lg bg-black/40 text-white/60 opacity-0 backdrop-blur-sm transition-all duration-200 hover:bg-sky-500/70 hover:text-white group-hover:opacity-100"
-        >
-          <Copy className="size-3" />
-        </button>
+        {/* Duplicate button — appears on hover, hidden in selection mode */}
+        {!inSelectionMode && (
+          <button
+            onClick={e => { e.stopPropagation(); onDuplicate() }}
+            title="Duplicate deck"
+            className="absolute right-[4.5rem] top-2.5 flex size-6 items-center justify-center rounded-lg bg-black/40 text-white/60 opacity-0 backdrop-blur-sm transition-all duration-200 hover:bg-sky-500/70 hover:text-white group-hover:opacity-100"
+          >
+            <Copy className="size-3" />
+          </button>
+        )}
 
-        {/* Export button — appears on hover */}
-        <button
-          onClick={e => { e.stopPropagation(); onExport() }}
-          title="Export deck for sharing"
-          className="absolute right-10 top-2.5 flex size-6 items-center justify-center rounded-lg bg-black/40 text-white/60 opacity-0 backdrop-blur-sm transition-all duration-200 hover:bg-midnight-sky-700/80 hover:text-white group-hover:opacity-100"
-        >
-          <Download className="size-3" />
-        </button>
+        {/* Export button — appears on hover, hidden in selection mode */}
+        {!inSelectionMode && (
+          <button
+            onClick={e => { e.stopPropagation(); onExport() }}
+            title="Export deck for sharing"
+            className="absolute right-10 top-2.5 flex size-6 items-center justify-center rounded-lg bg-black/40 text-white/60 opacity-0 backdrop-blur-sm transition-all duration-200 hover:bg-midnight-sky-700/80 hover:text-white group-hover:opacity-100"
+          >
+            <Download className="size-3" />
+          </button>
+        )}
 
-        {/* Delete button — top right, only on hover */}
-        <button
-          onClick={e => { e.stopPropagation(); onDelete() }}
-          className="absolute right-2.5 top-2.5 flex size-6 items-center justify-center rounded-lg bg-black/40 text-white/60 opacity-0 backdrop-blur-sm transition-all duration-200 hover:bg-red-500/80 hover:text-white group-hover:opacity-100"
-        >
-          <Trash2 className="size-3" />
-        </button>
+        {/* Delete button — hidden in selection mode (use floating bar instead) */}
+        {!inSelectionMode && (
+          <button
+            onClick={e => { e.stopPropagation(); onDelete() }}
+            className="absolute right-2.5 top-2.5 flex size-6 items-center justify-center rounded-lg bg-black/40 text-white/60 opacity-0 backdrop-blur-sm transition-all duration-200 hover:bg-red-500/80 hover:text-white group-hover:opacity-100"
+          >
+            <Trash2 className="size-3" />
+          </button>
+        )}
       </button>
 
       {/* Info */}
@@ -1015,10 +1161,12 @@ function LoadingGrid() {
    Delete confirmation modal
    ───────────────────────────────────────────────────────────────────────── */
 
-function DeleteModal({ onConfirm, onCancel, loading }: {
-  onConfirm: () => void
-  onCancel:  () => void
-  loading:   boolean
+function DeleteModal({ onConfirm, onCancel, loading, title, description }: {
+  onConfirm:    () => void
+  onCancel:     () => void
+  loading:      boolean
+  title?:       string
+  description?: string
 }) {
   return (
     <motion.div
@@ -1036,9 +1184,9 @@ function DeleteModal({ onConfirm, onCancel, loading }: {
         onClick={e => e.stopPropagation()}
         className="w-full max-w-sm rounded-3xl bg-white p-7 shadow-2xl"
       >
-        <h3 className="text-lg font-semibold text-midnight-sky-900">Delete this deck?</h3>
+        <h3 className="text-lg font-semibold text-midnight-sky-900">{title ?? 'Delete this deck?'}</h3>
         <p className="mt-2 text-sm font-light text-midnight-sky-500">
-          This cannot be undone. The deck and all its slides will be permanently removed.
+          {description ?? 'This cannot be undone. The deck and all its slides will be permanently removed.'}
         </p>
         <div className="mt-6 flex gap-3">
           <button

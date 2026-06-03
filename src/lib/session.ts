@@ -599,3 +599,49 @@ export async function resetSlideVotes(
     [`resetCounts.${slideId}`]: increment(1),
   })
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Reactions — live icon bursts sent by audience during content slides
+   ───────────────────────────────────────────────────────────────────────── */
+
+export type ReactionType = 'heart' | 'thumbsup' | 'bulb' | 'zap'
+
+export interface Reaction {
+  id:        string
+  type:      ReactionType
+  x:         number   // 0.0–1.0 horizontal start position
+  createdAt: number
+}
+
+/** Audience: write one reaction to Firestore. */
+export async function sendReaction(
+  sessionCode: string,
+  type:        ReactionType,
+  x:           number,
+): Promise<void> {
+  const ref = collection(db, 'sessions', sessionCode.toUpperCase(), 'reactions')
+  await addDoc(ref, { type, x, createdAt: Date.now() })
+}
+
+/** Presenter: stream reactions created after `since` (ms epoch).
+ *  Calls onNew for each incoming document. Returns unsubscribe fn. */
+export function subscribeToReactions(
+  sessionCode: string,
+  since:       number,
+  onNew:       (r: Reaction) => void,
+): () => void {
+  const ref = collection(db, 'sessions', sessionCode.toUpperCase(), 'reactions')
+  return onSnapshot(ref, snap => {
+    snap.docChanges().forEach(change => {
+      if (change.type !== 'added') return
+      const d = change.doc.data()
+      if ((d.createdAt as number) < since) return
+      onNew({ id: change.doc.id, type: d.type as ReactionType, x: d.x as number, createdAt: d.createdAt as number })
+    })
+  })
+}
+
+/** Presenter: delete a reaction document once its animation finishes. */
+export async function deleteReaction(sessionCode: string, reactionId: string): Promise<void> {
+  await deleteDoc(doc(db, 'sessions', sessionCode.toUpperCase(), 'reactions', reactionId))
+}

@@ -16,10 +16,9 @@ import {
   Cloud, AlignLeft, AlignCenter, AlignRight, Star, Upload, Play,
   LayoutList, Bookmark, BookmarkCheck, Monitor, LayoutGrid,
   Video, Type, List, Quote, Users, BarChart2, PieChart,
-  Layers, X, Table2, Download, Check, Undo2, Redo2, Trophy, ImageIcon,
+  X, Table2, Check, Undo2, Redo2, Trophy, ImageIcon,
   ChevronUp, ChevronDown, ChevronsUp, ChevronsDown,
 } from 'lucide-react'
-import * as pdfjsLib from 'pdfjs-dist'
 import { AlayaMark } from '@/components/AlayaMark'
 import { PersistentHtmlIframe } from '@/components/PersistentHtmlIframe'
 import { cn } from '@/lib/utils'
@@ -32,13 +31,20 @@ import {
 } from '@/lib/deckStorage'
 
 /* ─────────────────────────────────────────────────────────────────────────
-   PDF.js worker — Vite resolves new URL() at build time, so the worker
-   file is automatically copied to /dist. No CDN dependency needed.
+   PDF.js — lazy-loaded on first PDF import so the 1.2 MB worker doesn't
+   hit users who never open the editor, or who open it but never import a PDF.
+   Cached after first load so subsequent imports are instant.
    ───────────────────────────────────────────────────────────────────────── */
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url,
-).href
+let _pdfjs: typeof import('pdfjs-dist') | null = null
+async function getPdfjs() {
+  if (_pdfjs) return _pdfjs
+  _pdfjs = await import('pdfjs-dist')
+  _pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+    'pdfjs-dist/build/pdf.worker.min.mjs',
+    import.meta.url,
+  ).href
+  return _pdfjs
+}
 
 /* ─────────────────────────────────────────────────────────────────────────
    Cloudinary — unsigned upload helper
@@ -243,7 +249,7 @@ type Slide = PdfSlide | ImageSlide | VideoSlide | HtmlSlide | QuestionSlide | Co
    ───────────────────────────────────────────────────────────────────────── */
 
 const QTYPES: { type: QType; label: string; icon: ReactNode; color: string; badge: string }[] = [
-  { type: 'mcq',       label: 'Multiple Choice', icon: <LayoutList className="size-4" />, color: 'text-sky-blue',    badge: 'MCQ' },
+  { type: 'mcq',       label: 'MCQ',             icon: <LayoutList className="size-4" />, color: 'text-sky-blue',    badge: 'MCQ' },
   { type: 'wordcloud', label: 'Word Cloud',       icon: <Cloud className="size-4" />,      color: 'text-fresh-green', badge: 'WC'  },
   { type: 'openended', label: 'Open-ended',       icon: <AlignLeft className="size-4" />,  color: 'text-golden-sun',  badge: 'OE'  },
   { type: 'rating',    label: 'Rating',           icon: <Star className="size-4" />,        color: 'text-hot-pink',    badge: 'RT'  },
@@ -406,7 +412,9 @@ export default function Create() {
   const [currentDeckId, setCurrentDeckId] = useState<string | undefined>(
     deckFromState?.id ?? (returnState.deckId as string | undefined),
   )
-  const [isQuiz, setIsQuiz] = useState<boolean>(deckFromState?.isQuiz ?? false)
+  const [isQuiz, setIsQuiz] = useState<boolean>(
+    deckFromState?.isQuiz ?? (returnState.isQuiz as boolean | undefined) ?? false,
+  )
   // Last live-poll results, either passed back from Present.tsx on session
   // end OR pre-loaded from My Decks via the navigate state. Saved alongside
   // the deck so the Results page can show them later.
@@ -657,6 +665,7 @@ export default function Create() {
       // ── PDF: rasterise each page to a JPEG ─────────────────────────────
       if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
         const buf = await file.arrayBuffer()
+        const pdfjsLib = await getPdfjs()
         const pdf = await pdfjsLib.getDocument({ data: buf }).promise
         const newSlides: PdfSlide[] = []
         for (let p = 1; p <= pdf.numPages; p++) {
@@ -1260,7 +1269,7 @@ export default function Create() {
                 disabled={isStarting}
                 className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl bg-hot-pink px-4 py-2 text-sm font-medium text-white shadow-[0_0_20px_-4px] shadow-hot-pink/50 transition-all hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/70 disabled:opacity-60"
               >
-                {isStarting ? <LoadingDots /> : <><Play className="size-3.5 fill-white" />Resume · {resumeCode}</>}
+                {isStarting ? <LoadingDots /> : <><Play className="size-3.5 fill-white" />Resume</>}
               </motion.button>
               <motion.button
                 onClick={startSession}
@@ -1268,7 +1277,7 @@ export default function Create() {
                 disabled={isStarting}
                 className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl bg-sky-blue px-3 py-2 text-sm font-semibold text-white shadow-[0_0_16px_-4px] shadow-sky-blue/50 transition-all hover:scale-[1.02] hover:shadow-[0_0_24px_-2px] hover:shadow-sky-blue/70 disabled:opacity-60"
               >
-                New Slide Show
+                New Show
               </motion.button>
             </>
           ) : (
@@ -1283,7 +1292,7 @@ export default function Create() {
                   : 'cursor-not-allowed bg-white/10 text-white/30',
               )}
             >
-              {isStarting ? <LoadingDots /> : <><Play className="size-3.5 fill-white" />Start session</>}
+              {isStarting ? <LoadingDots /> : <><Play className="size-3.5 fill-white" />Start Show</>}
             </motion.button>
           )}
 
@@ -1447,7 +1456,7 @@ function SlidePanel({
   })
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col overflow-hidden border-r border-white/8 bg-[#14142b]">
+    <aside className="flex w-48 shrink-0 flex-col overflow-hidden border-r border-white/8 bg-[#14142b]">
 
       {/* Import / Sorter button row */}
       <div className="shrink-0 border-b border-white/10 p-3">
@@ -1457,7 +1466,7 @@ function SlidePanel({
             disabled={isImporting}
             className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#f97316] py-2.5 text-xs font-semibold text-white shadow-sm transition-all hover:bg-[#ea6c0a] active:scale-95 disabled:opacity-40"
           >
-            {isImporting ? <LoadingDots /> : <><Download className="size-3.5" />Import / Merge</>}
+            {isImporting ? <LoadingDots /> : 'Import / Merge'}
           </button>
           <button
             onClick={onOpenSorter}
@@ -1495,10 +1504,9 @@ function SlidePanel({
                   <button
                     key={q.type}
                     onClick={() => onAddQuestion(q.type)}
-                    className="flex flex-col items-center gap-1.5 rounded-xl border border-white/10 p-3 text-white/75 transition-all hover:border-white/25 hover:bg-white/10 hover:text-white"
+                    className="flex items-center justify-center rounded-xl border border-white/10 px-2 py-2.5 text-[9px] font-medium text-white/75 transition-all hover:border-white/25 hover:bg-white/10 hover:text-white"
                   >
-                    <span className={cn('text-lg', q.color)}>{q.icon}</span>
-                    <span className="text-[9px] font-medium leading-none">{q.label}</span>
+                    {q.label}
                   </button>
                 ))}
               </div>
@@ -1512,10 +1520,9 @@ function SlidePanel({
                   <button
                     key={t.template}
                     onClick={() => onAddContent(t.template)}
-                    className="flex flex-col items-center gap-1.5 rounded-xl border border-white/10 p-3 text-white/75 transition-all hover:border-white/25 hover:bg-white/10 hover:text-white"
+                    className="flex items-center justify-center rounded-xl border border-white/10 px-1 py-2.5 text-[9px] font-medium text-white/75 transition-all hover:border-white/25 hover:bg-white/10 hover:text-white"
                   >
-                    <span className="text-white/80">{t.icon}</span>
-                    <span className="text-[9px] font-medium leading-none">{t.label}</span>
+                    {t.label}
                   </button>
                 ))}
               </div>
@@ -1524,20 +1531,18 @@ function SlidePanel({
               <p className="mb-1.5 px-0.5 text-[9px] font-semibold uppercase tracking-wider text-white/40">
                 Custom
               </p>
-              <div className="flex flex-col gap-1">
+              <div className="grid grid-cols-2 gap-1.5">
                 <button
                   onClick={() => onAddCanvas()}
-                  className="flex w-full items-center gap-2 rounded-xl border border-white/10 px-3 py-2.5 text-white/75 transition-all hover:border-white/25 hover:bg-white/10 hover:text-white"
+                  className="flex items-center justify-center rounded-xl border border-white/10 px-2 py-2.5 text-[9px] font-medium text-white/75 transition-all hover:border-white/25 hover:bg-white/10 hover:text-white"
                 >
-                  <Layers className="size-3.5 shrink-0 text-sky-blue/70" />
-                  <span className="text-[9px] font-medium">Custom Slide</span>
+                  Custom Slide
                 </button>
                 <button
                   onClick={() => onAddLeaderboard()}
-                  className="flex w-full items-center gap-2 rounded-xl border border-white/10 px-3 py-2.5 text-white/75 transition-all hover:border-white/25 hover:bg-white/10 hover:text-white"
+                  className="flex items-center justify-center rounded-xl border border-white/10 px-2 py-2.5 text-[9px] font-medium text-white/75 transition-all hover:border-white/25 hover:bg-white/10 hover:text-white"
                 >
-                  <Trophy className="size-3.5 shrink-0 text-hot-pink/70" />
-                  <span className="text-[9px] font-medium">Leaderboard</span>
+                  Leaderboard
                 </button>
               </div>
             </div>
@@ -1609,10 +1614,9 @@ function SlidePanel({
                         <button
                           key={q.type}
                           onClick={() => onAddQuestion(q.type, selectedId ?? undefined)}
-                          className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[10px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
+                          className="flex items-center justify-center rounded-lg px-2 py-1 text-[10px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
                         >
-                          <span className={cn('shrink-0', q.color)}>{q.icon}</span>
-                          <span className="truncate">{q.label.split(' ')[0]}</span>
+                          {q.label}
                         </button>
                       ))}
                     </div>
@@ -1626,28 +1630,27 @@ function SlidePanel({
                         <button
                           key={t.template}
                           onClick={() => onAddContent(t.template, selectedId ?? undefined)}
-                          className="flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-[10px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
+                          className="flex items-center justify-center rounded-lg px-1 py-1 text-[10px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
                         >
-                          <span className="shrink-0 text-white/80">{t.icon}</span>
-                          <span className="truncate">{t.label}</span>
+                          {t.label}
                         </button>
                       ))}
                     </div>
                   </div>
-                  <button
-                    onClick={() => onAddCanvas(selectedId ?? undefined)}
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-[10px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
-                  >
-                    <Layers className="size-3.5 shrink-0 text-sky-blue/70" />
-                    <span>Custom Slide</span>
-                  </button>
-                  <button
-                    onClick={() => onAddLeaderboard(selectedId ?? undefined)}
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-[10px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
-                  >
-                    <Trophy className="size-3.5 shrink-0 text-hot-pink/70" />
-                    <span>Leaderboard</span>
-                  </button>
+                  <div className="grid grid-cols-2 gap-1">
+                    <button
+                      onClick={() => onAddCanvas(selectedId ?? undefined)}
+                      className="flex items-center justify-center rounded-lg px-2 py-1 text-[10px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
+                    >
+                      Custom Slide
+                    </button>
+                    <button
+                      onClick={() => onAddLeaderboard(selectedId ?? undefined)}
+                      className="flex items-center justify-center rounded-lg px-2 py-1 text-[10px] text-white/75 transition-all hover:bg-white/10 hover:text-white"
+                    >
+                      Leaderboard
+                    </button>
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -1923,7 +1926,7 @@ function SlideThumbnail({
         onClick={onSelect}
         {...listeners}
         className={cn(
-          'relative flex w-full items-start gap-1.5 rounded-xl px-1.5 py-1.5 text-left transition-all cursor-grab active:cursor-grabbing',
+          'relative flex w-full items-start gap-1.5 rounded-xl px-1.5 py-1 text-left transition-all cursor-grab active:cursor-grabbing',
           isSelected ? 'bg-white/15 ring-1 ring-hot-pink/70' : 'hover:bg-white/8',
         )}
       >
@@ -2179,10 +2182,9 @@ function AddBetweenButton({
                 <button
                   key={q.type}
                   onClick={() => onAdd(q.type)}
-                  className="flex flex-col items-center gap-1 rounded-lg p-2 text-white/60 transition-all hover:bg-white/10 hover:text-white"
+                  className="flex items-center justify-center rounded-lg px-1 py-1.5 text-[9px] font-medium text-white/60 transition-all hover:bg-white/10 hover:text-white"
                 >
-                  <span className={cn('text-base', q.color)}>{q.icon}</span>
-                  <span className="text-[9px] font-medium leading-none">{q.label}</span>
+                  {q.label}
                 </button>
               ))}
             </div>
@@ -2193,27 +2195,26 @@ function AddBetweenButton({
                   <button
                     key={t.template}
                     onClick={() => onAddContent(t.template)}
-                    className="flex flex-col items-center gap-1 rounded-lg p-2 text-white/60 transition-all hover:bg-white/10 hover:text-white"
+                    className="flex items-center justify-center rounded-lg px-1 py-1.5 text-[9px] font-medium text-white/60 transition-all hover:bg-white/10 hover:text-white"
                   >
-                    <span>{t.icon}</span>
-                    <span className="text-[9px] font-medium leading-none">{t.label}</span>
+                    {t.label}
                   </button>
                 ))}
               </div>
-              <button
-                onClick={onAddCanvas}
-                className="mt-1 flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[9px] font-medium text-white/60 transition-all hover:bg-white/10 hover:text-white"
-              >
-                <Layers className="size-3 shrink-0 text-sky-blue/70" />
-                Custom Slide
-              </button>
-              <button
-                onClick={onAddLeaderboard}
-                className="mt-0.5 flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[9px] font-medium text-white/60 transition-all hover:bg-white/10 hover:text-white"
-              >
-                <Trophy className="size-3 shrink-0 text-hot-pink/70" />
-                Leaderboard
-              </button>
+              <div className="mt-1 grid grid-cols-2 gap-1">
+                <button
+                  onClick={onAddCanvas}
+                  className="flex items-center justify-center rounded-lg px-1 py-1.5 text-[9px] font-medium text-white/60 transition-all hover:bg-white/10 hover:text-white"
+                >
+                  Custom Slide
+                </button>
+                <button
+                  onClick={onAddLeaderboard}
+                  className="flex items-center justify-center rounded-lg px-1 py-1.5 text-[9px] font-medium text-white/60 transition-all hover:bg-white/10 hover:text-white"
+                >
+                  Leaderboard
+                </button>
+              </div>
             </div>
           </motion.div>
         )}
@@ -2590,8 +2591,9 @@ function SlideEditor({ slide, onUpdate, onSplitHtml, onPushHistory }: {
 
 async function fileToImageDataUrl(file: File): Promise<string> {
   if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-    const buf  = await file.arrayBuffer()
-    const pdf  = await pdfjsLib.getDocument({ data: buf }).promise
+    const buf      = await file.arrayBuffer()
+    const pdfjsLib = await getPdfjs()
+    const pdf      = await pdfjsLib.getDocument({ data: buf }).promise
     const page = await pdf.getPage(1)
     const vp   = page.getViewport({ scale: 2.0 })
     const canvas  = document.createElement('canvas')

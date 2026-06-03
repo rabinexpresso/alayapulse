@@ -1,12 +1,30 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Check, Send, LogOut, Clock } from 'lucide-react'
+import { Check, Send, LogOut, Clock, Heart, ThumbsUp, Lightbulb, Zap } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
-  subscribeToSession, submitResponse, joinAsViewer,
-  type Session, type QType,
+  subscribeToSession, submitResponse, joinAsViewer, sendReaction,
+  type Session, type QType, type ReactionType,
 } from '@/lib/session'
+
+/* ── Reaction config ───────────────────────────────────────────────────── */
+
+const REACTION_CONFIG = [
+  { type: 'heart'    as ReactionType, Icon: Heart,      color: 'text-hot-pink',    bg: 'bg-hot-pink/15',    label: 'Love it'  },
+  { type: 'thumbsup' as ReactionType, Icon: ThumbsUp,   color: 'text-sky-blue',    bg: 'bg-sky-blue/15',    label: 'Agree'    },
+  { type: 'bulb'     as ReactionType, Icon: Lightbulb,  color: 'text-golden-sun',  bg: 'bg-golden-sun/15',  label: 'Idea'     },
+  { type: 'zap'      as ReactionType, Icon: Zap,        color: 'text-fresh-green', bg: 'bg-fresh-green/15', label: 'Energy'   },
+]
+
+// Fixed x lanes in the right ~20% of the presenter screen — one lane per reaction type.
+// A tiny ±2% jitter is added per send so same-type reactions don't stack exactly.
+const REACTION_X: Record<ReactionType, number> = {
+  heart:    0.77,
+  thumbsup: 0.83,
+  bulb:     0.89,
+  zap:      0.95,
+}
 
 /* ─────────────────────────────────────────────────────────────────────────
    Vote page — the screen every audience member sees on their phone.
@@ -70,6 +88,8 @@ export default function Vote() {
   // Timer countdown — read from session.timerEndsAt, computed client-side
   const [timerSecsLeft,   setTimerSecsLeft]   = useState<number | null>(null)
   const timerIntervalRef  = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Cooldown tracker — prevents reaction spam (800ms per reaction type)
+  const lastReactionRef   = useRef<Partial<Record<ReactionType, number>>>({})
 
   // Leave the room — clear locally stored submitted-slide markers so the
   // attendee can vote fresh if they later rejoin a different session.
@@ -300,6 +320,16 @@ export default function Vote() {
     }
   }
 
+  // ── Reactions ──────────────────────────────────────────────────────────
+  const handleReaction = async (type: ReactionType) => {
+    if (!sessionCode) return
+    const now  = Date.now()
+    const last = lastReactionRef.current[type] ?? 0
+    if (now - last < 800) return   // 800ms cooldown per reaction type
+    lastReactionRef.current[type] = now
+    try { await sendReaction(sessionCode, type, REACTION_X[type] + (Math.random() - 0.5) * 0.04) } catch { /* ignore */ }
+  }
+
   // ── Waiting state: non-interactive slides (pdf, image, video, leaderboard)
   const isWaiting      = !slideData || !INTERACTIVE_TYPES.has((slideData as { type: string }).type) || (slideData as { type: string }).type === 'leaderboard'
   const isResultsPhase = session.currentPhase === 'results'
@@ -315,7 +345,7 @@ export default function Vote() {
     : 0
 
   return (
-    <main className="flex min-h-screen flex-col bg-white">
+    <main className="flex min-h-screen flex-col bg-white" style={{ paddingBottom: '72px' }}>
       {/* Top progress bar (question progress) */}
       <motion.div
         className="h-1 shrink-0 bg-hot-pink"
@@ -565,6 +595,23 @@ export default function Vote() {
             )}
           </motion.div>
         </AnimatePresence>
+      </div>
+
+      {/* ── Reaction bar — always visible, no pill housing ──────────────── */}
+      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 flex justify-center pb-4">
+        <div className="pointer-events-auto flex items-center gap-3">
+          {REACTION_CONFIG.map(r => (
+            <motion.button
+              key={r.type}
+              onClick={() => handleReaction(r.type)}
+              whileTap={{ scale: 0.75 }}
+              className="flex size-10 items-center justify-center rounded-xl transition-all active:scale-90"
+              title={r.label}
+            >
+              <r.Icon className={cn('size-5', r.color)} strokeWidth={2} />
+            </motion.button>
+          ))}
+        </div>
       </div>
     </main>
   )

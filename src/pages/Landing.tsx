@@ -9,25 +9,28 @@ import { AlayaMark } from '@/components/AlayaMark'
 
 export default function Landing() {
   return (
-    <main className="relative overflow-hidden bg-midnight-sky-900 text-white">
-      <GradientOrbs />
-
-      {/* Subtle grid texture */}
-      <div
-        className="pointer-events-none absolute inset-0 opacity-[0.04]"
-        style={{
-          backgroundImage:
-            'linear-gradient(to right, white 1px, transparent 1px), linear-gradient(to bottom, white 1px, transparent 1px)',
-          backgroundSize: '64px 64px',
-        }}
-      />
-
+    <div className="bg-midnight-sky-900 text-white">
+      {/* Nav lives outside overflow-hidden so sticky works correctly */}
       <Nav />
-      <Hero />
-      <HowItWorks />
-      <Features />
-      <FooterStrip />
-    </main>
+      <main className="relative overflow-hidden">
+        <GradientOrbs />
+
+        {/* Subtle grid texture */}
+        <div
+          className="pointer-events-none absolute inset-0 opacity-[0.04]"
+          style={{
+            backgroundImage:
+              'linear-gradient(to right, white 1px, transparent 1px), linear-gradient(to bottom, white 1px, transparent 1px)',
+            backgroundSize: '64px 64px',
+          }}
+        />
+
+        <Hero />
+        <HowItWorks />
+        <Features />
+        <FooterStrip />
+      </main>
+    </div>
   )
 }
 
@@ -37,8 +40,8 @@ export default function Landing() {
 
 function Nav() {
   return (
-    <header className="relative z-20">
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5 sm:px-10">
+    <header className="sticky top-0 z-20 border-b border-white/5 bg-midnight-sky-900/80 backdrop-blur-md">
+      <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 sm:px-10">
         <Link to="/">
           <AlayaMark className="text-white" />
         </Link>
@@ -396,14 +399,24 @@ function GradientOrbs() {
 
 function FooterStrip() {
   return (
-    <div className="relative z-10 border-t border-white/5">
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5 text-xs font-light text-white/40 sm:px-10">
-        <span>Built by Alaya · for teams that lead</span>
-        <div className="hidden items-center gap-5 sm:flex">
-          <Link to="/join" className="transition hover:text-white/70">Join a session</Link>
-          <Link to="/decks" className="transition hover:text-white/70">Create a session</Link>
+    <footer className="relative z-10 border-t border-white/10">
+      {/* Main footer row — logo + links */}
+      <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-8 sm:px-10">
+        <Link to="/"><AlayaMark className="text-white" /></Link>
+        <nav className="hidden items-center gap-6 text-sm font-light text-white/55 sm:flex">
+          <a href="#how"    className="transition hover:text-white">How it works</a>
+          <a href="#features" className="transition hover:text-white">Features</a>
+          <Link to="/join"  className="transition hover:text-white">Join a session</Link>
+          <Link to="/decks" className="transition hover:text-white">Create a session</Link>
+        </nav>
+      </div>
+      {/* Copyright strip */}
+      <div className="border-t border-white/5">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 text-[11px] font-light text-white/40 sm:px-10">
+          <span>Built by Alaya · for teams that lead</span>
+          <span>© 2026 Alaya</span>
         </div>
       </div>
-    </div>
+    </footer>
   )
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { PersistentHtmlIframe } from '@/components/PersistentHtmlIframe'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -6,14 +6,24 @@ import {
   ChevronLeft, ChevronRight, X,
   BarChart2, ChevronDown, ChevronUp, Clock,
   Eye, EyeOff, Pin, Check, RotateCcw, Trophy, Crown,
+  Heart, ThumbsUp, Lightbulb, Zap,
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { cn } from '@/lib/utils'
 import {
   updateSessionState, endSession, subscribeToSlideResponses, subscribeToViewerCount,
   fetchAllSessionResponses, getSessionByCode, startTimer, clearTimer, resetSlideVotes, updateQuestionMeta,
-  type Response as FirestoreResponse,
+  subscribeToReactions, deleteReaction,
+  type Response as FirestoreResponse, type Reaction, type ReactionType,
 } from '@/lib/session'
+
+/* ── Shared reaction config (icons + brand colours) ──────────────────── */
+const REACTION_CONFIG: { type: ReactionType; Icon: React.FC<{ className?: string; strokeWidth?: number }>; bg: string; iconColor: string }[] = [
+  { type: 'heart',    Icon: Heart,     bg: 'bg-hot-pink/15',    iconColor: 'text-hot-pink'    },
+  { type: 'thumbsup', Icon: ThumbsUp,  bg: 'bg-sky-blue/15',    iconColor: 'text-sky-blue'    },
+  { type: 'bulb',     Icon: Lightbulb, bg: 'bg-golden-sun/15',  iconColor: 'text-golden-sun'  },
+  { type: 'zap',      Icon: Zap,       bg: 'bg-fresh-green/15', iconColor: 'text-fresh-green' },
+]
 import type {
   DeckResults, ResultQuestion, ResultQuestionType, ResultResponse,
 } from '@/lib/deckStorage'
@@ -293,6 +303,9 @@ export default function Present() {
   // ── Re-vote / Reset ────────────────────────────────────────────────────
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [isResetting,      setIsResetting]      = useState(false)
+  // ── Reactions ──────────────────────────────────────────────────────────
+  const [particles,        setParticles]        = useState<Reaction[]>([])
+  const mountTimeRef       = useRef(Date.now())
   // Refs so callbacks always read current values without stale closures.
   // isQuestion/code are not yet computed at this point — initialised with dummies,
   // then kept in sync via useEffects further down (after those values are computed).
@@ -416,6 +429,24 @@ export default function Present() {
       setIsResetting(false)
     }
   }, [isRealSession, isQuestion, code, slide, phase])
+
+  // ── Reactions subscription ────────────────────────────────────────────
+  useEffect(() => {
+    if (!isRealSession) return
+    const since = mountTimeRef.current
+    return subscribeToReactions(code, since, reaction => {
+      setParticles(prev => [...prev, reaction])
+      // Clean up Firestore doc after animation finishes
+      setTimeout(() => {
+        deleteReaction(code, reaction.id).catch(() => {})
+      }, 3000)
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [code, isRealSession])
+
+  const removeParticle = useCallback((id: string) => {
+    setParticles(prev => prev.filter(p => p.id !== id))
+  }, [])
 
   // ── Navigation ────────────────────────────────────────────────────────
   const goNext = useCallback(() => {
@@ -568,9 +599,9 @@ export default function Present() {
         {canGoPrev && (
           <button
             onClick={goPrev}
-            className="absolute left-0 top-0 z-20 flex h-full w-20 items-center justify-start pl-4 opacity-0 transition-opacity hover:opacity-100"
+            className="absolute left-0 top-0 z-20 flex h-full w-20 items-center justify-start pl-4 opacity-0 transition-opacity hover:opacity-100 [will-change:opacity]"
           >
-            <div className="rounded-full bg-black/30 p-3 backdrop-blur-sm transition hover:bg-black/50">
+            <div className="rounded-full bg-black/30 p-3 transition hover:bg-black/50">
               <ChevronLeft className="size-6 text-white" />
             </div>
           </button>
@@ -580,9 +611,9 @@ export default function Present() {
         {canGoNext && (
           <button
             onClick={goNext}
-            className="absolute right-0 top-0 z-20 flex h-full w-20 items-center justify-end pr-4 opacity-0 transition-opacity hover:opacity-100"
+            className="absolute right-0 top-0 z-20 flex h-full w-20 items-center justify-end pr-4 opacity-0 transition-opacity hover:opacity-100 [will-change:opacity]"
           >
-            <div className="rounded-full bg-black/30 p-3 backdrop-blur-sm transition hover:bg-black/50">
+            <div className="rounded-full bg-black/30 p-3 transition hover:bg-black/50">
               <ChevronRight className="size-6 text-white" />
             </div>
           </button>
@@ -597,6 +628,13 @@ export default function Present() {
             onExpire={handleTimerExpire}
           />
         )}
+      </div>
+
+      {/* ── Reaction particles — float up from bottom, fade at 40% height ── */}
+      <div className="pointer-events-none fixed inset-0 z-25 overflow-hidden">
+        {particles.map(p => (
+          <ReactionParticle key={p.id} reaction={p} onComplete={() => removeParticle(p.id)} />
+        ))}
       </div>
 
       {/* ── HUD — floating info overlay at bottom ───────────────────── */}
@@ -948,6 +986,7 @@ export default function Present() {
                       deckId: stateDeckId,
                       lastResults,
                       selectedSlideId: deck[current]?.id,
+                      isQuiz,
                     } })
                   }}
                   className="flex-1 rounded-xl bg-hot-pink py-3 text-sm font-medium text-white shadow-[0_0_20px_-4px] shadow-hot-pink/50 transition hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/70"
@@ -960,6 +999,37 @@ export default function Present() {
         )}
       </AnimatePresence>
     </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Reaction particle — floats up from the bottom of the presenter screen,
+   drifts slightly, and fades out before reaching the slide content area.
+   ───────────────────────────────────────────────────────────────────────── */
+
+function ReactionParticle({ reaction, onComplete }: { reaction: Reaction; onComplete: () => void }) {
+  const config = REACTION_CONFIG.find(r => r.type === reaction.type) ?? REACTION_CONFIG[0]
+  // Random horizontal drift so particles don't stack
+  const drift  = useMemo(() => (Math.random() - 0.5) * 40, [])
+
+  return (
+    <motion.div
+      className="absolute bottom-0"
+      style={{ left: `${reaction.x * 100}%` }}
+      initial={{ y: 0, x: 0, opacity: 1, scale: 0.2 }}
+      animate={{
+        y:       [0, -60, -120, -200, -window.innerHeight * 0.42],
+        x:       [0, drift * 0.3, drift * 0.7, drift, drift * 1.1],
+        opacity: [0, 1,  1,      1,    0],
+        scale:   [0.2, 1.3, 1.1, 1.0,  0.85],
+      }}
+      transition={{ duration: 2.4, ease: 'easeOut', times: [0, 0.08, 0.25, 0.7, 1] }}
+      onAnimationComplete={onComplete}
+    >
+      <span style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.45))' }}>
+        <config.Icon className={cn('size-7', config.iconColor)} strokeWidth={2} />
+      </span>
+    </motion.div>
   )
 }
 
