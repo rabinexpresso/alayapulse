@@ -25,6 +25,7 @@ const SLIDE_CONFIG: Record<string, {
   rating:      { Icon: Star,         label: 'Rating',       color: 'text-hot-pink'     },
   content:     { Icon: FileText,     label: 'Content',      color: 'text-midnight-sky-400' },
   leaderboard: { Icon: Trophy,       label: 'Leaderboard',  color: 'text-golden-sun'   },
+  html:        { Icon: FileText,     label: 'HTML',         color: 'text-midnight-sky-400' },
 }
 
 const CHIP_COLORS: Record<string, string> = {
@@ -34,6 +35,7 @@ const CHIP_COLORS: Record<string, string> = {
   rating:      'bg-hot-pink/10 text-hot-pink',
   content:     'bg-midnight-sky-100 text-midnight-sky-500',
   leaderboard: 'bg-golden-sun/10 text-golden-sun',
+  html:        'bg-midnight-sky-100 text-midnight-sky-600',
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -152,13 +154,10 @@ export default function Shared() {
 
   /* ── Slide list helpers ───────────────────────────────────────────────── */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const slides      = shared.slides as any[]
-  const PREVIEW_MAX = 6
-  const previewSlides = slides.slice(0, PREVIEW_MAX)
-  const remaining     = Math.max(0, slides.length - PREVIEW_MAX)
+  const slides = shared.slides as any[]
 
   // Unique interactive types for the chips row
-  const INTERACTIVE = new Set(['mcq', 'wordcloud', 'openended', 'rating'])
+  const INTERACTIVE = new Set(['mcq', 'wordcloud', 'openended', 'rating', 'html'])
   const typeSet = [...new Set(slides.map((s: any) => s.type as string).filter(t => INTERACTIVE.has(t)))]
 
   /* ── Preview page ─────────────────────────────────────────────────────── */
@@ -182,11 +181,11 @@ export default function Shared() {
           className="flex flex-col gap-8"
         >
           {/* Shared by */}
-          <div className="flex items-center gap-2 text-sm font-light text-midnight-sky-500">
+          <div className="flex items-center gap-2 text-sm text-midnight-sky-700">
             <span className="flex size-6 items-center justify-center rounded-full bg-midnight-sky-100">
-              <Users className="size-3.5 text-midnight-sky-400" />
+              <Users className="size-3.5 text-midnight-sky-500" />
             </span>
-            Shared by <span className="font-medium text-midnight-sky-700">{shared.createdBy}</span>
+            Shared by <span className="font-semibold text-midnight-sky-900">{shared.createdBy}</span>
           </div>
 
           {/* Deck title + chips */}
@@ -195,7 +194,7 @@ export default function Shared() {
               {shared.title}
             </h1>
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="text-sm text-midnight-sky-400">{slides.length} slide{slides.length !== 1 ? 's' : ''}</span>
+              <span className="text-sm font-medium text-midnight-sky-600">{slides.length} slide{slides.length !== 1 ? 's' : ''}</span>
               {typeSet.map(t => (
                 <span key={t} className={cn('rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide', CHIP_COLORS[t] ?? 'bg-midnight-sky-100 text-midnight-sky-500')}>
                   {SLIDE_CONFIG[t]?.label ?? t}
@@ -206,10 +205,11 @@ export default function Shared() {
 
           {/* Slide preview list */}
           <div className="overflow-hidden rounded-2xl border border-midnight-sky-100 bg-midnight-sky-50/50">
-            {previewSlides.map((slide: any, i: number) => {
+            {slides.map((slide: any, i: number) => {
               const cfg  = SLIDE_CONFIG[slide.type as string]
               const Icon = cfg?.Icon ?? FileText
               const text = getSlideText(slide)
+              const displayText = text || (slide.type === 'html' ? `Slide ${i + 1}` : (cfg?.label ?? slide.type))
               return (
                 <div
                   key={i}
@@ -222,11 +222,9 @@ export default function Shared() {
                     <Icon className="size-4" />
                   </span>
                   <div className="min-w-0 flex-1">
-                    {text ? (
-                      <p className="line-clamp-2 text-sm font-medium text-midnight-sky-800">{text}</p>
-                    ) : (
-                      <p className="text-sm font-medium text-midnight-sky-400">{cfg?.label ?? slide.type}</p>
-                    )}
+                    <p className={cn('line-clamp-2 text-sm font-medium', text ? 'text-midnight-sky-800' : 'text-midnight-sky-500')}>
+                      {displayText}
+                    </p>
                   </div>
                   <span className={cn(
                     'shrink-0 rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide',
@@ -237,11 +235,6 @@ export default function Shared() {
                 </div>
               )
             })}
-            {remaining > 0 && (
-              <div className="border-t border-midnight-sky-100 px-4 py-3 text-sm font-light text-midnight-sky-400">
-                …and {remaining} more slide{remaining !== 1 ? 's' : ''}
-              </div>
-            )}
           </div>
 
           {/* CTA */}
@@ -316,7 +309,7 @@ export default function Shared() {
                       </>
                     )}
                   </button>
-                  <p className="mt-2 text-center text-xs font-light text-midnight-sky-400">
+                  <p className="mt-2 text-center text-xs text-midnight-sky-600">
                     You'll get your own editable copy — changes won't affect the original
                   </p>
                 </motion.div>

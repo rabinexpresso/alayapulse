@@ -444,13 +444,14 @@ export async function browserDeleteResults(deckId: string): Promise<void> {
    ───────────────────────────────────────────────────────────────────────── */
 
 export interface SharedDeck {
-  shareId:   string
-  title:     string
-  slides:    unknown[]
-  deckId:    string      // original deck's ID (for reference only)
-  createdBy: string      // display name or email of the sharer
-  createdAt: number      // unix ms
-  isQuiz?:   boolean
+  shareId:     string
+  title:       string
+  slides:      unknown[]
+  deckId:      string      // original deck's ID (for reference only)
+  createdBy:   string      // display name or email of the sharer
+  createdAt:   number      // unix ms
+  isQuiz?:     boolean
+  htmlAssets?: Record<string, string>  // fileName → html content, stored once
 }
 
 const SHARE_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789'
@@ -463,16 +464,32 @@ function makeShareId(): string {
 
 /** Write a snapshot of the deck to sharedDecks/{shareId}. Returns the shareId. */
 export async function createSharedDeck(deck: Deck): Promise<string> {
-  const user    = auth.currentUser
+  const user = auth.currentUser
+
+  // HTML slides: store raw html once per fileName, replace per-slide html with a ref key.
+  // This avoids storing the same large HTML string 30× (which would exceed Firestore's 1MB limit).
+  const htmlAssets: Record<string, string> = {}
+  type RawSlide = Record<string, unknown>
+  const compressedSlides = (deck.slides as RawSlide[]).map(slide => {
+    if (slide.type === 'html' && typeof slide.html === 'string') {
+      const key = (slide.fileName as string) ?? 'html'
+      htmlAssets[key] = slide.html
+      const { html: _dropped, ...rest } = slide
+      return { ...rest, _htmlRef: key }
+    }
+    return slide
+  })
+
   const shareId = makeShareId()
   await setDoc(doc(db, 'sharedDecks', shareId), stripUndefined({
     shareId,
-    title:     deck.title,
-    slides:    deck.slides,
-    deckId:    deck.id,
-    createdBy: user?.displayName ?? user?.email ?? 'A colleague',
-    createdAt: Date.now(),
+    title:      deck.title,
+    slides:     compressedSlides,
+    deckId:     deck.id,
+    createdBy:  user?.displayName ?? user?.email ?? 'A colleague',
+    createdAt:  Date.now(),
     ...(deck.isQuiz ? { isQuiz: true } : {}),
+    ...(Object.keys(htmlAssets).length > 0 ? { htmlAssets } : {}),
   }))
   return shareId
 }
@@ -481,7 +498,21 @@ export async function createSharedDeck(deck: Deck): Promise<string> {
 export async function getSharedDeck(shareId: string): Promise<SharedDeck | null> {
   const snap = await getDoc(doc(db, 'sharedDecks', shareId))
   if (!snap.exists()) return null
-  return snap.data() as SharedDeck
+  const data = snap.data() as SharedDeck & { htmlAssets?: Record<string, string> }
+
+  // Reconstruct full html on each slide from the deduplicated asset map
+  if (data.htmlAssets) {
+    type RawSlide = Record<string, unknown>
+    data.slides = (data.slides as RawSlide[]).map(slide => {
+      if (slide.type === 'html' && slide._htmlRef) {
+        const { _htmlRef, ...rest } = slide
+        return { ...rest, html: data.htmlAssets![_htmlRef as string] ?? '' }
+      }
+      return slide
+    })
+  }
+
+  return data
 }
 
 /** Backend-agnostic save/load — picks the right backend based on storage preference. */

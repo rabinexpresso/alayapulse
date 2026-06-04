@@ -1069,6 +1069,7 @@ function DeckCard({ deck, onOpen, onDelete, onExport, onShare, onDuplicate, isSe
   // Share dropdown state
   const [shareMenuOpen, setShareMenuOpen] = useState(false)
   const [shareState,    setShareState]    = useState<'idle' | 'loading' | 'copied'>('idle')
+  const [shareError,    setShareError]    = useState<string | null>(null)
   const shareMenuRef = useRef<HTMLDivElement>(null)
 
   // Close on outside click
@@ -1086,12 +1087,18 @@ function DeckCard({ deck, onOpen, onDelete, onExport, onShare, onDuplicate, isSe
   const handleCopyLink = async () => {
     setShareMenuOpen(false)
     setShareState('loading')
+    setShareError(null)
     try {
       await onShare()
       setShareState('copied')
       setTimeout(() => setShareState('idle'), 2200)
-    } catch {
+    } catch (e) {
       setShareState('idle')
+      const msg = e instanceof Error && e.message === 'html-slides-too-large'
+        ? 'HTML slides can\'t be shared via link — use Export file instead.'
+        : 'Couldn\'t create link. Try again.'
+      setShareError(msg)
+      setTimeout(() => setShareError(null), 5000)
     }
   }
 
@@ -1208,6 +1215,13 @@ function DeckCard({ deck, onOpen, onDelete, onExport, onShare, onDuplicate, isSe
             <Download className="size-3.5 text-midnight-sky-400" />
             Export file
           </button>
+        </div>
+      )}
+
+      {/* Share error tooltip */}
+      {shareError && (
+        <div className="absolute right-2 top-12 z-50 max-w-[180px] rounded-xl bg-midnight-sky-900 px-3 py-2 text-[11px] leading-snug text-white shadow-lg">
+          {shareError}
         </div>
       )}
 
