@@ -22,6 +22,13 @@ service cloud.firestore {
       }
     }
 
+    // Shared deck links — public read (anyone with the URL can preview),
+    // authenticated write (only signed-in users can create share links).
+    match /sharedDecks/{shareId} {
+      allow read:  if true;
+      allow write: if request.auth != null;
+    }
+
     // User decks — only the owner can read/write their own decks.
     // The {document=**} wildcard covers nested sub-docs (e.g. the
     // results/latest doc that holds saved poll results) so they

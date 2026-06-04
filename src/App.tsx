@@ -10,6 +10,7 @@ const Present = lazy(() => import('@/pages/Present'))
 const Join    = lazy(() => import('@/pages/Join'))
 const Vote    = lazy(() => import('@/pages/Vote'))
 const Results = lazy(() => import('@/pages/Results'))
+const Shared  = lazy(() => import('@/pages/Shared'))
 
 // Minimal branded spinner shown while a page chunk downloads (<100ms on fast wifi)
 function PageLoader() {
@@ -34,6 +35,7 @@ function App() {
           <Route path="/join"                element={<Join />} />
           <Route path="/vote/:sessionCode"   element={<Vote />} />
           <Route path="/results/:deckId"     element={<Results />} />
+          <Route path="/shared/:shareId"    element={<Shared />} />
         </Routes>
       </Suspense>
     </BrowserRouter>

@@ -436,6 +436,54 @@ export async function browserDeleteResults(deckId: string): Promise<void> {
   try { await idb.delete(IDB_RESULTS, deckId) } catch { /* ignore */ }
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Shared deck links
+   sharedDecks/{shareId} — public read, authenticated write.
+   Stores a snapshot of the deck at share time. Editing the original
+   deck later does NOT affect the shared link.
+   ───────────────────────────────────────────────────────────────────────── */
+
+export interface SharedDeck {
+  shareId:   string
+  title:     string
+  slides:    unknown[]
+  deckId:    string      // original deck's ID (for reference only)
+  createdBy: string      // display name or email of the sharer
+  createdAt: number      // unix ms
+  isQuiz?:   boolean
+}
+
+const SHARE_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789'
+
+function makeShareId(): string {
+  return Array.from({ length: 8 }, () =>
+    SHARE_CHARS[Math.floor(Math.random() * SHARE_CHARS.length)],
+  ).join('')
+}
+
+/** Write a snapshot of the deck to sharedDecks/{shareId}. Returns the shareId. */
+export async function createSharedDeck(deck: Deck): Promise<string> {
+  const user    = auth.currentUser
+  const shareId = makeShareId()
+  await setDoc(doc(db, 'sharedDecks', shareId), stripUndefined({
+    shareId,
+    title:     deck.title,
+    slides:    deck.slides,
+    deckId:    deck.id,
+    createdBy: user?.displayName ?? user?.email ?? 'A colleague',
+    createdAt: Date.now(),
+    ...(deck.isQuiz ? { isQuiz: true } : {}),
+  }))
+  return shareId
+}
+
+/** Fetch a shared deck by its shareId. Returns null if not found. */
+export async function getSharedDeck(shareId: string): Promise<SharedDeck | null> {
+  const snap = await getDoc(doc(db, 'sharedDecks', shareId))
+  if (!snap.exists()) return null
+  return snap.data() as SharedDeck
+}
+
 /** Backend-agnostic save/load — picks the right backend based on storage preference. */
 export async function saveResults(
   backend: StorageBackend, deckId: string, results: DeckResults,

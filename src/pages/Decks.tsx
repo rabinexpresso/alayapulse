@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, Trash2, Monitor, Cloud, LogOut, Clock, Layers, ArrowRightLeft, FileText, Download, Upload, Copy, Search, X as XIcon, ChevronDown, Check } from 'lucide-react'
+import { Plus, Trash2, Monitor, Cloud, LogOut, Clock, Layers, ArrowRightLeft, FileText, Download, Upload, Copy, Search, X as XIcon, ChevronDown, Check, Share2, Link2 } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
 import { cn } from '@/lib/utils'
 import {
@@ -12,6 +12,7 @@ import {
   onAuthStateChanged, auth,
   loadResults,
   getRememberMe, setRememberMe, getCachedUser, saveCachedUser, clearCachedUser,
+  createSharedDeck,
   type StorageBackend, type Deck, type User, type CachedUser,
 } from '@/lib/deckStorage'
 
@@ -580,6 +581,11 @@ export default function Decks() {
                   onDelete={() => setConfirmDelete(deck.id)}
                   onExport={() => downloadDeckJSON(deck.title, deck.slides as unknown[])}
                   onDuplicate={() => handleDuplicateDeck(deck)}
+                  onShare={async () => {
+                    const shareId = await createSharedDeck(deck)
+                    const url = `${window.location.origin}/shared/${shareId}`
+                    await navigator.clipboard.writeText(url)
+                  }}
                   isSelected={selectedIds.has(deck.id)}
                   onToggleSelect={() => handleToggleSelect(deck.id)}
                   inSelectionMode={selectedIds.size > 0}
@@ -1043,11 +1049,12 @@ function buildDeckPreviewHtml(html: string, slideIndex: number): string {
   return html + script
 }
 
-function DeckCard({ deck, onOpen, onDelete, onExport, onDuplicate, isSelected, onToggleSelect, inSelectionMode }: {
+function DeckCard({ deck, onOpen, onDelete, onExport, onShare, onDuplicate, isSelected, onToggleSelect, inSelectionMode }: {
   deck:            Deck
   onOpen:          () => void
   onDelete:        () => void
   onExport:        () => void
+  onShare:         () => Promise<void>
   onDuplicate:     () => void
   isSelected:      boolean
   onToggleSelect:  () => void
@@ -1059,12 +1066,41 @@ function DeckCard({ deck, onOpen, onDelete, onExport, onDuplicate, isSelected, o
   const qTypes     = [...new Set(qSlides.map(s => s.type as string))]
   const slideCount = slides.length
 
+  // Share dropdown state
+  const [shareMenuOpen, setShareMenuOpen] = useState(false)
+  const [shareState,    setShareState]    = useState<'idle' | 'loading' | 'copied'>('idle')
+  const shareMenuRef = useRef<HTMLDivElement>(null)
+
+  // Close on outside click
+  useEffect(() => {
+    if (!shareMenuOpen) return
+    const handler = (e: MouseEvent) => {
+      if (shareMenuRef.current && !shareMenuRef.current.contains(e.target as Node)) {
+        setShareMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [shareMenuOpen])
+
+  const handleCopyLink = async () => {
+    setShareMenuOpen(false)
+    setShareState('loading')
+    try {
+      await onShare()
+      setShareState('copied')
+      setTimeout(() => setShareState('idle'), 2200)
+    } catch {
+      setShareState('idle')
+    }
+  }
+
   return (
     <motion.div
       whileHover={{ y: isSelected ? 0 : -4 }}
       transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
       className={cn(
-        'group flex flex-col overflow-hidden rounded-2xl bg-white ring-1 transition-all duration-200',
+        'group relative flex flex-col overflow-visible rounded-2xl bg-white ring-1 transition-all duration-200',
         isSelected
           ? 'ring-2 ring-hot-pink/60 shadow-[0_0_0_4px_rgba(255,0,101,0.12)]'
           : 'ring-midnight-sky-100/80 shadow-[0_2px_12px_-2px_rgba(0,0,121,0.06)] hover:shadow-[0_16px_48px_-8px_rgba(0,0,121,0.16)] hover:ring-midnight-sky-200',
@@ -1073,7 +1109,7 @@ function DeckCard({ deck, onOpen, onDelete, onExport, onDuplicate, isSelected, o
       {/* Thumbnail — preview of the first slide */}
       <button
         onClick={onOpen}
-        className="relative aspect-video w-full overflow-hidden bg-midnight-sky-900"
+        className="relative aspect-video w-full overflow-hidden rounded-t-2xl bg-midnight-sky-900"
       >
         <DeckThumbnail slides={slides} />
 
@@ -1119,14 +1155,23 @@ function DeckCard({ deck, onOpen, onDelete, onExport, onDuplicate, isSelected, o
           </button>
         )}
 
-        {/* Export button — appears on hover, hidden in selection mode */}
+        {/* Share button — replaces old export button; opens dropdown with Copy link + Export file */}
         {!inSelectionMode && (
           <button
-            onClick={e => { e.stopPropagation(); onExport() }}
-            title="Export deck for sharing"
-            className="absolute right-10 top-2.5 flex size-6 items-center justify-center rounded-lg bg-black/40 text-white/60 opacity-0 backdrop-blur-sm transition-all duration-200 hover:bg-midnight-sky-700/80 hover:text-white group-hover:opacity-100"
+            onClick={e => { e.stopPropagation(); setShareMenuOpen(v => !v) }}
+            title="Share deck"
+            className={cn(
+              'absolute right-10 top-2.5 flex size-6 items-center justify-center rounded-lg backdrop-blur-sm transition-all duration-200 group-hover:opacity-100',
+              shareState === 'copied'
+                ? 'bg-fresh-green/70 text-white opacity-100'
+                : shareState === 'loading'
+                ? 'bg-black/40 text-white opacity-100'
+                : 'bg-black/40 text-white/60 opacity-0 hover:bg-hot-pink/70 hover:text-white',
+            )}
           >
-            <Download className="size-3" />
+            {shareState === 'copied'  ? <Check   className="size-3" /> :
+             shareState === 'loading' ? <Share2  className="size-3 animate-pulse" /> :
+                                        <Share2  className="size-3" />}
           </button>
         )}
 
@@ -1140,6 +1185,31 @@ function DeckCard({ deck, onOpen, onDelete, onExport, onDuplicate, isSelected, o
           </button>
         )}
       </button>
+
+      {/* Share dropdown — rendered outside overflow-hidden thumbnail so it isn't clipped */}
+      {shareMenuOpen && !inSelectionMode && (
+        <div
+          ref={shareMenuRef}
+          onClick={e => e.stopPropagation()}
+          className="absolute right-8 top-9 z-50 min-w-[148px] overflow-hidden rounded-xl border border-midnight-sky-100 bg-white shadow-[0_8px_24px_-4px_rgba(0,0,121,0.14)]"
+        >
+          <button
+            onClick={handleCopyLink}
+            className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-xs font-medium text-midnight-sky-700 transition hover:bg-hot-pink/5 hover:text-hot-pink"
+          >
+            <Link2   className="size-3.5 text-hot-pink" />
+            Copy link
+          </button>
+          <div className="mx-3 border-t border-midnight-sky-100" />
+          <button
+            onClick={() => { setShareMenuOpen(false); onExport() }}
+            className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-xs font-medium text-midnight-sky-700 transition hover:bg-midnight-sky-50"
+          >
+            <Download className="size-3.5 text-midnight-sky-400" />
+            Export file
+          </button>
+        </div>
+      )}
 
       {/* Info */}
       <div className="flex flex-1 flex-col px-4 py-3.5">
