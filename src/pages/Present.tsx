@@ -6,7 +6,6 @@ import {
   ChevronLeft, ChevronRight, X,
   BarChart2, ChevronDown, ChevronUp, Clock,
   Eye, EyeOff, Pin, Check, RotateCcw, Trophy, Crown,
-  Heart, ThumbsUp, Lightbulb, Zap,
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { cn } from '@/lib/utils'
@@ -18,11 +17,12 @@ import {
 } from '@/lib/session'
 
 /* ── Shared reaction config (icons + brand colours) ──────────────────── */
-const REACTION_CONFIG: { type: ReactionType; Icon: React.FC<{ className?: string; strokeWidth?: number }>; bg: string; iconColor: string }[] = [
-  { type: 'heart',    Icon: Heart,     bg: 'bg-hot-pink/15',    iconColor: 'text-hot-pink'    },
-  { type: 'thumbsup', Icon: ThumbsUp,  bg: 'bg-sky-blue/15',    iconColor: 'text-sky-blue'    },
-  { type: 'bulb',     Icon: Lightbulb, bg: 'bg-golden-sun/15',  iconColor: 'text-golden-sun'  },
-  { type: 'zap',      Icon: Zap,       bg: 'bg-fresh-green/15', iconColor: 'text-fresh-green' },
+const REACTION_CONFIG: { type: ReactionType; emoji: string }[] = [
+  { type: 'heart',    emoji: '❤️'  },
+  { type: 'mindblown',emoji: '🤯'  },
+  { type: 'haha',     emoji: '😂'  },
+  { type: 'wow',      emoji: '😮'  },
+  { type: 'thinking', emoji: '🤔'  },
 ]
 import type {
   DeckResults, ResultQuestion, ResultQuestionType, ResultResponse,
@@ -477,7 +477,7 @@ export default function Present() {
     if (!isRealSession) return
     const since = mountTimeRef.current
     return subscribeToReactions(code, since, reaction => {
-      setParticles(prev => [...prev, reaction])
+      setParticles(prev => prev.length >= 15 ? prev : [...prev, reaction])
       // Clean up Firestore doc after animation finishes
       setTimeout(() => {
         deleteReaction(code, reaction.id).catch(() => {})
@@ -1051,12 +1051,11 @@ export default function Present() {
 
 function ReactionParticle({ reaction, onComplete }: { reaction: Reaction; onComplete: () => void }) {
   const config = REACTION_CONFIG.find(r => r.type === reaction.type) ?? REACTION_CONFIG[0]
-  // Random horizontal drift so particles don't stack
-  const drift  = useMemo(() => (Math.random() - 0.5) * 40, [])
+  const drift  = useMemo(() => (Math.random() - 0.5) * 50, [])
 
   return (
     <motion.div
-      className="absolute bottom-0"
+      className="absolute bottom-0 select-none"
       style={{ left: `${reaction.x * 100}%` }}
       initial={{ y: 0, x: 0, opacity: 1, scale: 0.2 }}
       animate={{
@@ -1068,8 +1067,8 @@ function ReactionParticle({ reaction, onComplete }: { reaction: Reaction; onComp
       transition={{ duration: 2.4, ease: 'easeOut', times: [0, 0.08, 0.25, 0.7, 1] }}
       onAnimationComplete={onComplete}
     >
-      <span style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.45))' }}>
-        <config.Icon className={cn('size-7', config.iconColor)} strokeWidth={2} />
+      <span style={{ fontSize: '2.2rem', lineHeight: 1, filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.3))' }}>
+        {config.emoji}
       </span>
     </motion.div>
   )
@@ -1249,6 +1248,22 @@ const QSLIDE_COLORS: Record<string, QColorSet> = {
 }
 function qColors(theme?: string): QColorSet {
   return QSLIDE_COLORS[theme ?? 'navy'] ?? QSLIDE_COLORS.navy
+}
+
+/* Theme-aware accent colours for MCQ results bars.
+   Each pair is chosen so neither colour blends into the slide background. */
+type MCQAccents = { selected: string; correct: string }
+const MCQ_ACCENTS: Record<string, MCQAccents> = {
+  navy:        { selected: '#ff0065', correct: '#42db66' },  // hot-pink / fresh-green
+  pink:        { selected: '#00b0ff', correct: '#ffc709' },  // sky-blue  / golden-sun
+  sky:         { selected: '#ff0065', correct: '#ffc709' },  // hot-pink  / golden-sun
+  green:       { selected: '#ff0065', correct: '#ffc709' },  // hot-pink  / golden-sun
+  golden:      { selected: '#ff0065', correct: '#00b0ff' },  // hot-pink  / sky-blue
+  white:       { selected: '#ff0065', correct: '#42db66' },  // hot-pink  / fresh-green
+  transparent: { selected: '#ff0065', correct: '#42db66' },
+}
+function mcqAccents(theme?: string): MCQAccents {
+  return MCQ_ACCENTS[theme ?? 'navy'] ?? MCQ_ACCENTS.navy
 }
 
 function ContentSlideView({ slide }: { slide: ContentSlide }) {
@@ -1904,15 +1919,21 @@ function ResultsSlideView({
       return next
     })
 
-  // For non-navy themes, charts/text need a dark surface to stay readable.
-  // Word cloud is exempt — it floats directly on the slide bg with its own palette.
-  const needsDarkPanel = (slide.theme ?? 'navy') !== 'navy' && slide.type !== 'wordcloud'
+  // MCQ and rating handle their own theming — no dark panel needed.
+  // Word cloud floats directly on the slide bg with its own palette.
+  const needsDarkPanel = (slide.theme ?? 'navy') !== 'navy'
+    && slide.type !== 'wordcloud'
+    && slide.type !== 'mcq'
+    && slide.type !== 'rating'
+    && slide.type !== 'openended'
 
-  const vizWrap = needsDarkPanel && slide.type !== 'openended' && slide.type !== 'rating'
+  const vizWrap = needsDarkPanel
     ? 'mt-6 flex-1 overflow-y-auto rounded-2xl bg-midnight-sky-900/95 px-8 py-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
     : slide.type === 'wordcloud'
       ? 'mt-2 flex-1 min-h-0 overflow-hidden'
-      : 'mt-6 flex-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+      : slide.type === 'rating'
+        ? 'mt-6 flex-1 min-h-0 flex flex-col overflow-hidden'
+        : 'mt-6 flex-1 overflow-hidden'
 
   return (
     <div
@@ -1940,12 +1961,11 @@ function ResultsSlideView({
           <motion.button
             whileTap={{ scale: 0.95 }}
             onClick={() => setAnswerRevealed(v => !v)}
-            className={cn(
-              'mt-0.5 flex shrink-0 items-center gap-2 rounded-xl border px-3.5 py-1.5 text-sm font-semibold transition-all',
-              answerRevealed
-                ? 'border-fresh-green/50 bg-fresh-green/15 text-fresh-green'
-                : 'border-white/20 bg-white/10 text-white/70 hover:border-white/40 hover:bg-white/20',
-            )}
+            className="mt-0.5 flex shrink-0 items-center gap-2 rounded-xl border px-3.5 py-1.5 text-sm font-semibold transition-all"
+            style={answerRevealed
+              ? { borderColor: `${mcqAccents(slide.theme).correct}80`, backgroundColor: `${mcqAccents(slide.theme).correct}22`, color: mcqAccents(slide.theme).correct }
+              : { borderColor: `${c.fg}33`, backgroundColor: `${c.fg}18`, color: `${c.fg}b3` }
+            }
           >
             {answerRevealed ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
             {answerRevealed ? 'Hide answer' : 'Reveal answer'}
@@ -1963,6 +1983,7 @@ function ResultsSlideView({
             vizType={slide.vizType ?? 'bar'}
             correctAnswers={slide.correctAnswers}
             revealed={answerRevealed}
+            theme={slide.theme}
           />
         )}
         {slide.type === 'wordcloud' && <WordCloudResults words={cloudWords} slideTheme={slide.theme} />}
@@ -2001,42 +2022,38 @@ function ResultsSlideView({
 // Shared palette for pie / donut segments
 const VIZ_COLORS = ['#ff0065', '#00b0ff', '#42db66', '#ffc709', '#a855f7', '#f97316']
 
-function MCQResults({ options, votes, respondentCount, vizType = 'bar', correctAnswers, revealed }: {
+function MCQResults({ options, votes, respondentCount, vizType = 'bar', correctAnswers, revealed, theme }: {
   options:          string[]
   votes:            number[]
   respondentCount?: number
   vizType?:         'bar' | 'pie' | 'donut'
   correctAnswers?:  number[]
   revealed?:        boolean
+  theme?:           string
 }) {
   if (vizType === 'pie')   return <MCQPieChart   options={options} votes={votes} respondentCount={respondentCount} correctAnswers={correctAnswers} revealed={revealed} />
   if (vizType === 'donut') return <MCQDonutChart options={options} votes={votes} respondentCount={respondentCount} correctAnswers={correctAnswers} revealed={revealed} />
-  return <MCQBarChart options={options} votes={votes} respondentCount={respondentCount} correctAnswers={correctAnswers} revealed={revealed} />
+  return <MCQBarChart options={options} votes={votes} respondentCount={respondentCount} correctAnswers={correctAnswers} revealed={revealed} theme={theme} />
 }
 
 /* ── Bar chart — stacked layout: full-width label on top, bar below ───── */
 
-function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed }: {
+function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed, theme }: {
   options: string[]; votes: number[]
   respondentCount?: number
   correctAnswers?: number[]; revealed?: boolean
+  theme?: string
 }) {
-  // For single-select, respondentCount === sum(votes). For multi-select, use respondentCount
-  // so bars show "% of people who chose this" rather than "% of all selections".
-  const total = respondentCount ?? votes.reduce((s, v) => s + v, 0)
-  const maxV  = Math.max(...votes, 1)
+  const total   = respondentCount ?? votes.reduce((s, v) => s + v, 0)
+  const maxV    = Math.max(...votes, 1)
   const corrSet = new Set(correctAnswers ?? [])
-  // Compact layout when there are many options so all fit without scrolling
-  const dense = options.length >= 5
+  const dense   = options.length >= 5
+  const c       = qColors(theme)
+  const acc     = mcqAccents(theme)
 
-  // After the initial entrance animation, live vote updates should animate
-  // immediately — no stagger delay that would make bars feel unresponsive.
   const mountedRef = useRef(false)
   useEffect(() => { mountedRef.current = true }, [])
 
-  // Brief flash-reveal window: fires once when the correct answer is first shown.
-  // Correct bars get a scale-pulse; wrong bars dim with a short lag so the
-  // correct answer has a moment to shine before the others fade out.
   const [flashReveal, setFlashReveal] = useState(false)
   const prevRevealedRef = useRef(false)
   useEffect(() => {
@@ -2051,11 +2068,20 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
   return (
     <div className={cn('flex flex-col', dense ? 'gap-2' : 'gap-5')}>
       {options.map((opt, i) => {
-        const v          = votes[i] ?? 0
-        const pct        = total > 0 ? Math.round((v / total) * 100) : 0
-        const isWinner   = v > 0 && v === maxV
-        const isCorrect  = revealed && corrSet.has(i)
-        const isWrong    = revealed && corrSet.size > 0 && !corrSet.has(i)
+        const v         = votes[i] ?? 0
+        const pct       = total > 0 ? Math.round((v / total) * 100) : 0
+        const isWinner  = v > 0 && v === maxV
+        const isCorrect = revealed && corrSet.has(i)
+        const isWrong   = revealed && corrSet.size > 0 && !corrSet.has(i)
+
+        const accentColor   = isCorrect ? acc.correct : isWinner ? acc.selected : null
+        const badgeBg       = accentColor ?? `${c.fg}18`
+        const badgeFg       = accentColor ? '#ffffff' : `${c.fg}80`
+        const labelColor    = accentColor ?? `${c.fg}a6`
+        const pctColor      = accentColor ?? `${c.fg}80`
+        const barFill       = accentColor ?? `${c.fg}40`
+        const barTrack      = `${c.fg}18`
+
         return (
           <motion.div
             key={i}
@@ -2063,7 +2089,6 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
             animate={{
               opacity: isWrong ? 0.28 : 1,
               x: 0,
-              // Correct answer pops on reveal; wrong answers hold for 250ms first
               scale: flashReveal && isCorrect ? [1, 1.03, 1] : 1,
             }}
             transition={{
@@ -2077,41 +2102,34 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
           >
             {/* Row 1: badge + full-width label + percentage */}
             <div className={cn('flex items-center', dense ? 'gap-3' : 'gap-4')}>
-              <span className={cn(
-                'flex shrink-0 items-center justify-center rounded-xl font-bold',
-                dense ? 'size-8 text-xs' : 'size-10 text-sm',
-                isCorrect ? 'bg-fresh-green text-white' : isWinner ? 'bg-hot-pink text-white' : 'bg-white/10 text-white/50',
-              )}>
+              <span
+                className={cn('flex shrink-0 items-center justify-center rounded-xl font-bold', dense ? 'size-8 text-xs' : 'size-10 text-sm')}
+                style={{ backgroundColor: badgeBg, color: badgeFg }}
+              >
                 {isCorrect ? <Check className={dense ? 'size-4' : 'size-5'} strokeWidth={2.5} /> : String.fromCharCode(65 + i)}
               </span>
-              <span className={cn(
-                'min-w-0 flex-1 break-words font-medium leading-snug',
-                dense ? 'text-sm' : 'text-base',
-                isCorrect ? 'text-fresh-green' : isWinner ? 'text-white' : 'text-white/65',
-              )}>
+              <span
+                className={cn('min-w-0 flex-1 break-words font-medium leading-snug', dense ? 'text-sm' : 'text-base')}
+                style={{ color: labelColor }}
+              >
                 {opt}
               </span>
               <motion.span
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.45 + i * 0.18 + 0.7, duration: 0.25 }}
-                className={cn(
-                  'shrink-0 text-right font-bold tabular-nums',
-                  dense ? 'text-xl' : 'text-2xl',
-                  isCorrect ? 'text-fresh-green' : isWinner ? 'text-hot-pink' : 'text-white/50',
-                )}
+                className={cn('shrink-0 text-right font-bold tabular-nums', dense ? 'text-xl' : 'text-2xl')}
+                style={{ color: pctColor }}
               >
                 {pct}%
               </motion.span>
             </div>
-            {/* Row 2: bar indented to align under the label text */}
+            {/* Row 2: bar */}
             <div className={dense ? 'pl-11' : 'pl-14'}>
-              <div className={cn('relative overflow-hidden rounded-xl bg-white/10', dense ? 'h-[10px]' : 'h-7')}>
+              <div className={cn('relative overflow-hidden rounded-xl', dense ? 'h-[10px]' : 'h-7')} style={{ backgroundColor: barTrack }}>
                 <motion.div
-                  className={cn(
-                    'absolute inset-y-0 left-0 rounded-xl',
-                    isCorrect ? 'bg-fresh-green' : isWinner ? 'bg-hot-pink' : 'bg-white/25',
-                  )}
+                  className="absolute inset-y-0 left-0 rounded-xl"
+                  style={{ backgroundColor: barFill }}
                   initial={{ width: '0%' }}
                   animate={{ width: `${pct}%` }}
                   transition={mountedRef.current
@@ -2702,7 +2720,7 @@ function RatingResults({ params, avgs, distributions, ratingMax = 5, leftLabels 
   const order = params.map((_, i) => i).sort((a, b) => (avgs[b] ?? 0) - (avgs[a] ?? 0))
 
   return (
-    <div className={cn('flex flex-col', dense ? 'gap-1' : 'gap-3.5')}>
+    <div className={cn('flex h-full flex-col', dense ? 'gap-1' : 'gap-2')}>
       {order.map((idx, rank) => (
         <RatingRow
           key={idx}
@@ -2744,7 +2762,6 @@ function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, darkBg = fa
 }) {
   const displayed  = useCountUp(Math.round(avg * 10), 950) / 10
   const maxCount   = Math.max(...dist, 1)
-  const BAR_MAX_PX = dense ? 12 : 36
   const hasEndLabels = !!leftLabel || !!rightLabel
   const badge = rank !== undefined ? { ...RANK_BADGE_STYLE, label: rankOrdinal(rank) } : null
 
@@ -2754,15 +2771,15 @@ function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, darkBg = fa
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.5, delay, ease: [0.16, 1, 0.3, 1] }}
       className={cn(
-        'rounded-2xl border backdrop-blur-sm',
+        'flex min-h-0 flex-1 flex-col rounded-2xl border backdrop-blur-sm',
         darkBg
           ? (rank === 0 ? 'border-golden-sun/30 bg-midnight-sky-900/75' : 'border-midnight-sky-700/60 bg-midnight-sky-900/65')
           : (rank === 0 ? 'border-golden-sun/30 bg-golden-sun/5'        : 'border-white/10 bg-white/5'),
-        dense ? 'px-3 py-1.5' : 'px-6 py-4',
+        dense ? 'px-3 py-1.5' : 'px-6 py-3',
       )}
     >
       {/* Top row: rank badge + parameter label + animated average */}
-      <div className={cn('flex items-center justify-between gap-3', dense ? 'mb-1' : 'mb-3')}>
+      <div className={cn('flex shrink-0 items-center justify-between gap-3', dense ? 'mb-1' : 'mb-2')}>
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {badge && (
             <span className={cn(
@@ -2791,35 +2808,31 @@ function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, darkBg = fa
         </div>
       </div>
 
-      {/* Distribution mini-histogram — one bar per scale value (0..N).
-          Each bar carries an explicit count label above so the presenter
-          can see "2 voted 10, 1 voted 0" at a glance. */}
-      <div className="flex items-end gap-1" style={{ height: BAR_MAX_PX + (dense ? 18 : 30) }}>
+      {/* Distribution mini-histogram — fills remaining row height */}
+      <div className="flex min-h-0 flex-1 items-end gap-1">
         {dist.map((count, bucketIdx) => {
-          const barH = count > 0 ? Math.max((count / maxCount) * BAR_MAX_PX, 3) : 0
+          const barPct = count > 0 ? Math.max((count / maxCount) * 100, 5) : 0
           return (
-            <div key={bucketIdx} className="flex flex-1 flex-col items-center gap-0.5">
-              {/* Vote count above bar — only rendered when > 0 so empty
-                  buckets don't add noise */}
+            <div key={bucketIdx} className="flex h-full flex-1 flex-col items-center justify-end gap-0.5">
               <motion.span
                 key={`c-${bucketIdx}-${count}`}
                 initial={{ opacity: 0, y: -4 }}
                 animate={{ opacity: count > 0 ? 1 : 0, y: 0 }}
                 transition={{ duration: 0.25, delay: delay + bucketIdx * 0.04 + 0.5 }}
-                className={cn('font-bold tabular-nums', dense ? 'text-[9px]' : 'text-[11px]', count > 0 ? 'text-white' : 'text-transparent')}
+                className={cn('shrink-0 font-bold tabular-nums', dense ? 'text-[9px]' : 'text-[11px]', count > 0 ? 'text-white' : 'text-transparent')}
               >
                 {count > 0 ? count : ''}
               </motion.span>
-              <div className="flex w-full items-end" style={{ height: BAR_MAX_PX }}>
+              <div className="flex w-full min-h-0 flex-1 items-end">
                 <motion.div
                   className="w-full rounded-t-sm"
                   style={{ backgroundColor: ratingBarColor(bucketIdx, dist.length) }}
-                  initial={{ height: 0 }}
-                  animate={{ height: barH }}
+                  initial={{ height: '0%' }}
+                  animate={{ height: `${barPct}%` }}
                   transition={{ duration: 0.7, delay: delay + bucketIdx * 0.04, ease: [0.16, 1, 0.3, 1] }}
                 />
               </div>
-              <span className={cn('font-medium tabular-nums', dense ? 'text-[9px]' : 'text-[10px]', count > 0 ? 'text-white/75' : 'text-white/40')}>{bucketIdx}</span>
+              <span className={cn('shrink-0 font-medium tabular-nums', dense ? 'text-[9px]' : 'text-[10px]', count > 0 ? 'text-white/75' : 'text-white/40')}>{bucketIdx}</span>
             </div>
           )
         })}
@@ -2969,8 +2982,9 @@ function calculateQuizLeaderboard(
   responses: FirestoreResponse[],
   slides: AnySlide[],
   questionMeta: Record<string, { openedAt: number; duration: number | null }>,
-): { name: string; score: number }[] {
+): { name: string; score: number; emoji?: string }[] {
   const totals: Record<string, number> = {}
+  const emojis: Record<string, string> = {}
   for (const slide of slides) {
     if (slide.type !== 'mcq') continue
     const qs = slide as QSlide
@@ -2982,6 +2996,7 @@ function calculateQuizLeaderboard(
       const name = r.respondentName || 'Anonymous'
       // Ensure every respondent appears on the leaderboard even if they score 0
       if (!(name in totals)) totals[name] = 0
+      if (r.respondentEmoji) emojis[name] = r.respondentEmoji
       // Prefer stored quiz points (calculated on the audience device at submission time).
       // Fall back to recalculation from timestamps for older sessions that lack quizPoints.
       if (r.quizPoints !== undefined) {
@@ -3008,7 +3023,7 @@ function calculateQuizLeaderboard(
     }
   }
   return Object.entries(totals)
-    .map(([name, score]) => ({ name, score }))
+    .map(([name, score]) => ({ name, score, emoji: emojis[name] }))
     .sort((a, b) => b.score - a.score)
 }
 
@@ -3021,7 +3036,7 @@ function LeaderboardSlideView({
   deck:         AnySlide[]
   questionMeta: Record<string, { openedAt: number; duration: number | null }>
 }) {
-  const [leaderboard, setLeaderboard] = useState<{ name: string; score: number }[]>([])
+  const [leaderboard, setLeaderboard] = useState<{ name: string; score: number; emoji?: string }[]>([])
   const [revealCount, setRevealCount] = useState(0)
   // Prevents the "No scores yet" placeholder flashing before data arrives
   const [loaded, setLoaded] = useState(false)
@@ -3029,11 +3044,11 @@ function LeaderboardSlideView({
   useEffect(() => {
     if (sessionCode === 'DEMO') {
       setLeaderboard([
-        { name: 'Sarah M.',  score: 380 },
-        { name: 'James T.',  score: 340 },
-        { name: 'Priya K.',  score: 290 },
-        { name: 'Anonymous', score: 250 },
-        { name: 'Marcus L.', score: 210 },
+        { name: 'Sarah M.',  score: 380, emoji: '🦁' },
+        { name: 'James T.',  score: 340, emoji: '🧙' },
+        { name: 'Priya K.',  score: 290, emoji: '🦸' },
+        { name: 'Anonymous', score: 250, emoji: '🐯' },
+        { name: 'Marcus L.', score: 210, emoji: '🚀' },
       ])
       setLoaded(true)
       return
@@ -3150,6 +3165,16 @@ function LeaderboardSlideView({
                     {rank}
                   </span>
                 )}
+
+                {/* Emoji avatar */}
+                <motion.span
+                  initial={{ scale: 0, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ type: 'spring', stiffness: 380, damping: 16, delay: 0.08 }}
+                  className={cn('shrink-0 leading-none', isWinner ? 'text-3xl' : isPodium ? 'text-2xl' : 'text-xl')}
+                >
+                  {entry.emoji ?? '👤'}
+                </motion.span>
 
                 <div className="flex flex-1 flex-col gap-1.5">
                   <span

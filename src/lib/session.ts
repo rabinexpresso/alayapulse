@@ -3,7 +3,7 @@ import {
   collection, query, where, serverTimestamp, deleteField, increment,
   type Timestamp,
 } from 'firebase/firestore'
-import { db } from './firebase'
+import { db, auth } from './firebase'
 
 /* ─────────────────────────────────────────────────────────────────────────
    Shared types
@@ -149,12 +149,13 @@ export interface Session {
 }
 
 export interface Response {
-  slideId:       string
-  type:          QType
-  value:         string
-  respondentName?: string
-  submittedAt:   Timestamp
-  quizPoints?:   { answer: number; speed: number }
+  slideId:        string
+  type:           QType
+  value:          string
+  respondentName?:  string
+  respondentEmoji?: string
+  submittedAt:    Timestamp
+  quizPoints?:    { answer: number; speed: number }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -307,6 +308,7 @@ export async function createSession(title: string, rawSlides: any[], isQuiz?: bo
       currentPhase: 'question',
       status:       'active',
       createdAt:    serverTimestamp(),
+      ownerId:      auth.currentUser?.uid ?? null,
       ...(isQuiz ? { isQuiz: true } : {}),
     })
     return code
@@ -468,11 +470,12 @@ export async function updateQuestionMeta(
    ───────────────────────────────────────────────────────────────────────── */
 
 export interface SubmitPayload {
-  slideId:         string
-  type:            QType
-  value:           string
-  respondentName?: string
-  quizPoints?:     { answer: number; speed: number }
+  slideId:          string
+  type:             QType
+  value:            string
+  respondentName?:  string
+  respondentEmoji?: string
+  quizPoints?:      { answer: number; speed: number }
 }
 
 export async function submitResponse(
@@ -523,7 +526,7 @@ export async function fetchAllSessionResponses(sessionCode: string): Promise<Res
    Returns an unsubscribe/cleanup function.
    ───────────────────────────────────────────────────────────────────────── */
 
-export function joinAsViewer(sessionCode: string): () => void {
+export function joinAsViewer(sessionCode: string, name?: string, emoji?: string): () => void {
   // Reuse the same ID across refreshes so we don't double-count
   let viewerId = sessionStorage.getItem('alaya-viewer-id')
   if (!viewerId) {
@@ -532,7 +535,12 @@ export function joinAsViewer(sessionCode: string): () => void {
   }
 
   const ref = doc(db, 'sessions', sessionCode.toUpperCase(), 'viewers', viewerId)
-  setDoc(ref, { joinedAt: serverTimestamp(), lastSeen: serverTimestamp() })
+  setDoc(ref, {
+    joinedAt:  serverTimestamp(),
+    lastSeen:  serverTimestamp(),
+    ...(name  ? { name  } : {}),
+    ...(emoji ? { emoji } : {}),
+  })
     .catch(err => console.error('[alaya-pulse] joinAsViewer: failed to register presence', err))
 
   // Heartbeat every 30 s keeps the presence alive on slow browsers
@@ -651,7 +659,7 @@ export async function resetSlideAndTimer(
    Reactions — live icon bursts sent by audience during content slides
    ───────────────────────────────────────────────────────────────────────── */
 
-export type ReactionType = 'heart' | 'thumbsup' | 'bulb' | 'zap'
+export type ReactionType = 'heart' | 'mindblown' | 'haha' | 'wow' | 'thinking'
 
 export interface Reaction {
   id:        string

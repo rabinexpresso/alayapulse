@@ -14,12 +14,42 @@ import { cn } from '@/lib/utils'
 
 const CODE_LENGTH = 6
 
+/* ── Emoji avatar picker ─────────────────────────────────────────────────── */
+
+const EMOJI_CATEGORIES = {
+  faces:      ['😎','🤩','🥳','😏','🤓','🤠','🫡','😤','🥸','😇','🤑','🤯','🥶','🤫','🫠'],
+  animals:    ['🦁','🐯','🦊','🦝','🦅','🐬','🦈','🐉','🦋','🐺','🦄','🦓','🐸','🐧','🦉','🦩','🐙','🦑','🐊','🦀','🐆','🦏'],
+  characters: ['🧙','🦸','🥷','🤴','👸','🧑‍🎤','🧑‍🚀','🧑‍🍳','🧑‍💻','🕵️','🧝','🧛','🤺','🧑‍🎨','🧑‍🔬','🧑‍🏫','🧑‍⚖️','🎅','🧑‍🌾','🧑‍🚒','🫅','🧑‍✈️'],
+  nature:     ['🔥','🌊','⚡','🌙','⭐','🌈','☀️','💎','🌸','🍀','🌋','🫧','🌺','🌵','🍄','🪐'],
+  food:       ['🍕','🍔','🌮','🍜','🍣','🍰','🍩','🍦','🍎','🥑','🌶️','🧀','🍟','🍱','🥗','🍫'],
+  sports:     ['⚽','🏀','🎾','🏊','🏋️','⛷️','🤸','🎮','🎲','🏆','🎯','🚴','🏄','🥊','🏇','🧗'],
+  arts:       ['🎨','🎭','🎸','🎵','🎤','🎬','📸','🎻','🥁','🎹','🖌️','✏️','📚','🎪','🎡','🎠'],
+  travel:     ['✈️','🌍','🏖️','🏔️','🌴','🗺️','🚢','🏕️','🗼','🏙️','🚂','🌅','🗽','🏯','🎑','🏝️'],
+} as const
+
+type EmojiCat = keyof typeof EMOJI_CATEGORIES
+
+const ALL_EMOJIS: string[] = (Object.values(EMOJI_CATEGORIES) as unknown as string[][]).flat()
+
+const CATEGORY_META: { key: EmojiCat; label: string; icon: string }[] = [
+  { key: 'faces',      label: 'Faces',      icon: '😎' },
+  { key: 'animals',    label: 'Animals',    icon: '🦁' },
+  { key: 'characters', label: 'Characters', icon: '🧙' },
+  { key: 'nature',     label: 'Nature',     icon: '🔥' },
+  { key: 'food',       label: 'Food',       icon: '🍕' },
+  { key: 'sports',     label: 'Sports',     icon: '⚽' },
+  { key: 'arts',       label: 'Arts',       icon: '🎨' },
+  { key: 'travel',     label: 'Travel',     icon: '✈️' },
+]
+
 export default function Join() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
 
   const [code, setCode] = useState<string[]>(Array(CODE_LENGTH).fill(''))
   const [name, setName] = useState('')
+  const [selectedEmoji, setSelectedEmoji] = useState<string | null>(null)
+  const [activeCat, setActiveCat] = useState<EmojiCat>('animals')
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [errorMsg, setErrorMsg] = useState('')
 
@@ -111,6 +141,7 @@ export default function Join() {
     if (!codeComplete) return
     setStatus('loading')
     const sessionCode = code.join('')
+    const emoji = selectedEmoji ?? ALL_EMOJIS[Math.floor(Math.random() * ALL_EMOJIS.length)]
 
     try {
       const session = await getSessionByCode(sessionCode)
@@ -125,7 +156,9 @@ export default function Join() {
         return
       }
       setStatus('idle')
-      navigate(`/vote/${session.code}${name ? `?name=${encodeURIComponent(name)}` : ''}`)
+      const params = new URLSearchParams({ emoji })
+      if (name) params.set('name', name)
+      navigate(`/vote/${session.code}?${params}`)
     } catch {
       setStatus('error')
       setErrorMsg('Something went wrong — please try again.')
@@ -211,6 +244,66 @@ export default function Join() {
                 'disabled:opacity-50',
               )}
             />
+          </div>
+
+          {/* Emoji avatar picker */}
+          <div className="mt-6">
+            <div className="mb-2 flex items-center justify-between">
+              <label className="text-sm font-medium text-midnight-sky-800">
+                Pick your avatar
+                <span className="ml-1 font-light text-midnight-sky-500">(optional)</span>
+              </label>
+              {selectedEmoji && (
+                <span className="flex size-9 items-center justify-center rounded-full border border-hot-pink/40 bg-hot-pink/5 text-lg leading-none">
+                  {selectedEmoji}
+                </span>
+              )}
+            </div>
+
+            {/* Category tabs — 2 rows × 4 columns grid, no scrolling */}
+            <div className="mb-2 grid grid-cols-4 gap-1.5">
+              {CATEGORY_META.map(cat => (
+                <button
+                  key={cat.key}
+                  onClick={() => setActiveCat(cat.key)}
+                  className={cn(
+                    'flex flex-col items-center justify-center gap-0.5 rounded-xl border py-2 text-xs font-semibold transition-all',
+                    activeCat === cat.key
+                      ? 'border-hot-pink bg-hot-pink/8 text-hot-pink'
+                      : 'border-midnight-sky-200 bg-midnight-sky-50 text-midnight-sky-500 hover:border-midnight-sky-300 hover:text-midnight-sky-700',
+                  )}
+                >
+                  <span className="text-base leading-none">{cat.icon}</span>
+                  <span className="text-[10px] leading-tight">{cat.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Emoji grid */}
+            <div className="max-h-[180px] overflow-y-auto rounded-2xl border border-midnight-sky-200 bg-midnight-sky-50 p-2.5 [scrollbar-width:thin]">
+              <div className="grid grid-cols-7 gap-1">
+                {EMOJI_CATEGORIES[activeCat].map(emoji => (
+                  <motion.button
+                    key={emoji}
+                    onClick={() => setSelectedEmoji(emoji === selectedEmoji ? null : emoji)}
+                    whileTap={{ scale: 0.85 }}
+                    animate={selectedEmoji === emoji ? { scale: [1, 1.15, 1] } : {}}
+                    transition={{ duration: 0.2, ease: [0.34, 1.56, 0.64, 1] }}
+                    className={cn(
+                      'flex aspect-square items-center justify-center rounded-xl border-2 text-2xl leading-none transition-all',
+                      selectedEmoji === emoji
+                        ? 'border-hot-pink bg-hot-pink/8'
+                        : 'border-transparent hover:bg-midnight-sky-100',
+                    )}
+                  >
+                    {emoji}
+                  </motion.button>
+                ))}
+              </div>
+            </div>
+            <p className="mt-1.5 text-center text-[11px] text-midnight-sky-400">
+              No preference? We'll pick one for you.
+            </p>
           </div>
 
           {/* Join button */}

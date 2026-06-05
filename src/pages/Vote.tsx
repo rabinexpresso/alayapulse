@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Check, Send, LogOut, Clock, Heart, ThumbsUp, Lightbulb, Zap } from 'lucide-react'
+import { Check, Send, LogOut, Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   subscribeToSession, submitResponse, joinAsViewer, sendReaction,
@@ -11,20 +11,12 @@ import {
 /* ── Reaction config ───────────────────────────────────────────────────── */
 
 const REACTION_CONFIG = [
-  { type: 'heart'    as ReactionType, Icon: Heart,      color: 'text-hot-pink',    bg: 'bg-hot-pink/15',    label: 'Love it'  },
-  { type: 'thumbsup' as ReactionType, Icon: ThumbsUp,   color: 'text-sky-blue',    bg: 'bg-sky-blue/15',    label: 'Agree'    },
-  { type: 'bulb'     as ReactionType, Icon: Lightbulb,  color: 'text-golden-sun',  bg: 'bg-golden-sun/15',  label: 'Idea'     },
-  { type: 'zap'      as ReactionType, Icon: Zap,        color: 'text-fresh-green', bg: 'bg-fresh-green/15', label: 'Energy'   },
+  { type: 'heart'     as ReactionType, emoji: '❤️', label: 'Love it'    },
+  { type: 'mindblown' as ReactionType, emoji: '🤯', label: 'Mind blown' },
+  { type: 'haha'      as ReactionType, emoji: '😂', label: 'Haha'       },
+  { type: 'wow'       as ReactionType, emoji: '😮', label: 'Wow'        },
+  { type: 'thinking'  as ReactionType, emoji: '🤔', label: 'Hmm...'     },
 ]
-
-// Fixed x lanes in the right ~20% of the presenter screen — one lane per reaction type.
-// A tiny ±2% jitter is added per send so same-type reactions don't stack exactly.
-const REACTION_X: Record<ReactionType, number> = {
-  heart:    0.77,
-  thumbsup: 0.83,
-  bulb:     0.89,
-  zap:      0.95,
-}
 
 /* ─────────────────────────────────────────────────────────────────────────
    Vote page — the screen every audience member sees on their phone.
@@ -36,6 +28,7 @@ export default function Vote() {
   const { sessionCode } = useParams<{ sessionCode: string }>()
   const [searchParams]  = useSearchParams()
   const attendeeName    = searchParams.get('name') ?? ''
+  const attendeeEmoji   = searchParams.get('emoji') ?? ''
   const navigate        = useNavigate()
 
   const [session,        setSession]        = useState<Session | null | undefined>(undefined)
@@ -108,7 +101,8 @@ export default function Vote() {
   // Register presence so the presenter can see how many people are watching
   useEffect(() => {
     if (!sessionCode) return
-    return joinAsViewer(sessionCode)
+    return joinAsViewer(sessionCode, attendeeName || undefined, attendeeEmoji || undefined)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionCode])
 
   // Countdown from session.timerEndsAt — each client computes locally from the absolute timestamp
@@ -261,10 +255,11 @@ export default function Vote() {
     try {
       const effectiveName = quizName || attendeeName || 'Anonymous'
       await submitResponse(sessionCode!, {
-        slideId: slideData.id,
-        type:    slideData.type as QType,
+        slideId:          slideData.id,
+        type:             slideData.type as QType,
         value,
-        respondentName: effectiveName,
+        respondentName:   effectiveName,
+        ...(attendeeEmoji ? { respondentEmoji: attendeeEmoji } : {}),
         ...(quizPoints ? { quizPoints } : {}),
       })
 
@@ -327,7 +322,7 @@ export default function Vote() {
     const last = lastReactionRef.current[type] ?? 0
     if (now - last < 800) return   // 800ms cooldown per reaction type
     lastReactionRef.current[type] = now
-    try { await sendReaction(sessionCode, type, REACTION_X[type] + (Math.random() - 0.5) * 0.04) } catch { /* ignore */ }
+    try { await sendReaction(sessionCode, type, 0.45 + Math.random() * 0.50) } catch { /* ignore */ }
   }
 
   // ── Waiting state: non-interactive slides (pdf, image, video, leaderboard)
@@ -404,9 +399,10 @@ export default function Vote() {
           alaya <span className="text-hot-pink">pulse</span>
         </span>
         <div className="flex items-center gap-3">
-          {attendeeName && (
-            <span className="text-sm font-medium text-midnight-sky-600">
-              Hi, {attendeeName}
+          {(attendeeName || attendeeEmoji) && (
+            <span className="flex items-center gap-1.5 text-sm font-medium text-midnight-sky-600">
+              {attendeeEmoji && <span className="text-base leading-none">{attendeeEmoji}</span>}
+              {attendeeName && <>Hi, {attendeeName}</>}
             </span>
           )}
           <button
@@ -608,7 +604,7 @@ export default function Vote() {
               className="flex size-10 items-center justify-center rounded-xl transition-all active:scale-90"
               title={r.label}
             >
-              <r.Icon className={cn('size-5', r.color)} strokeWidth={2} />
+              <span className="select-none text-2xl leading-none">{r.emoji}</span>
             </motion.button>
           ))}
         </div>

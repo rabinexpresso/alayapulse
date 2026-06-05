@@ -75,6 +75,75 @@ function buildDemoDeck(): Deck {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
+   Template library — 5 hardcoded starter decks
+   ───────────────────────────────────────────────────────────────────────── */
+
+const SLIDE_TYPE_META: Record<string, { label: string; chip: string }> = {
+  mcq:       { label: 'MCQ',        chip: 'bg-sky-blue/15 text-sky-blue'       },
+  wordcloud: { label: 'Word Cloud', chip: 'bg-fresh-green/15 text-fresh-green' },
+  openended: { label: 'Open Ended', chip: 'bg-golden-sun/15 text-golden-sun'   },
+  rating:    { label: 'Rating',     chip: 'bg-hot-pink/15 text-hot-pink'       },
+}
+
+const DECK_TEMPLATES = [
+  {
+    id: 'team-checkin',
+    name: 'Team Check-in',
+    description: "Warm up the room and gauge the group's mood",
+    slides: [
+      { type: 'wordcloud', question: 'In one word, how are you feeling today?',        options: [] },
+      { type: 'rating',    question: 'How is your energy level right now?',            options: ['Energy level'], leftLabels: ['Low'],            rightLabels: ['High']            },
+      { type: 'openended', question: "What's one thing on your mind this week?",       options: [] },
+    ],
+  },
+  {
+    id: 'training-assessment',
+    name: 'Training Assessment',
+    description: 'Test knowledge and collect questions after a session',
+    slides: [
+      { type: 'mcq',       question: 'Which approach works best when handling a difficult client?',       options: ['Stay calm and listen', 'Escalate immediately', 'Offer a solution first', 'Follow the script'] },
+      { type: 'mcq',       question: "What's the most important step when onboarding a new client?",     options: ['Set clear expectations', 'Review all documentation', 'Introduce the team', 'Schedule a follow-up'] },
+      { type: 'mcq',       question: 'When should you escalate an issue to your manager?',               options: ['When it affects the client outcome', 'After 24 hours', 'Only if the client complains', "When you're unsure"] },
+      { type: 'rating',    question: 'How confident are you with what we covered today?',                options: ['Confidence'],      leftLabels: ['Not confident'],    rightLabels: ['Very confident']    },
+      { type: 'openended', question: "What's one question you still have after this session?",           options: [] },
+    ],
+  },
+  {
+    id: 'workshop-icebreaker',
+    name: 'Workshop Icebreaker',
+    description: 'Break the ice and get people energised before diving in',
+    slides: [
+      { type: 'wordcloud', question: 'Describe yourself in one word',                                              options: [] },
+      { type: 'mcq',       question: 'If you could have one superpower at work, what would it be?',               options: ['Read minds', 'Stop time', 'Infinite energy', 'Predict the future'] },
+      { type: 'openended', question: "What's one thing you're hoping to get from today's workshop?",              options: [] },
+    ],
+  },
+  {
+    id: 'quick-survey',
+    name: 'Quick Survey',
+    description: 'Gather structured feedback from the team fast',
+    slides: [
+      { type: 'rating',    question: 'How satisfied are you with your current workload?',        options: ['Workload'],       leftLabels: ['Overwhelmed'],      rightLabels: ['Just right'] },
+      { type: 'mcq',       question: 'How often do you feel supported by your team?',            options: ['Always', 'Most of the time', 'Sometimes', 'Rarely'] },
+      { type: 'rating',    question: 'How well does the team communicate overall?',              options: ['Communication'],  leftLabels: ['Needs work'],       rightLabels: ['Excellent']  },
+      { type: 'mcq',       question: "What would most improve your day-to-day experience?",     options: ['Clearer processes', 'More collaboration', 'Better tools', 'More flexibility'] },
+      { type: 'openended', question: "Any other feedback you'd like to share?",                 options: [] },
+    ],
+  },
+  {
+    id: 'team-retrospective',
+    name: 'Team Retrospective',
+    description: "Reflect on what worked, what didn't, and what's next",
+    slides: [
+      { type: 'wordcloud', question: 'In one word, how would you describe this sprint?',                    options: [] },
+      { type: 'openended', question: 'What went well that we should keep doing?',                          options: [] },
+      { type: 'openended', question: "What didn't go well and should we change?",                          options: [] },
+      { type: 'rating',    question: "How would you rate the team's overall performance?",                 options: ['Team performance'], leftLabels: ['Needs improvement'], rightLabels: ['Exceptional'] },
+    ],
+  },
+]
+
+/* ─────────────────────────────────────────────────────────────────────────
    My Decks page — saved presentations library
    ───────────────────────────────────────────────────────────────────────── */
 
@@ -92,9 +161,11 @@ export default function Decks() {
   // localStorage) when "Remove from device" is clicked from the sign-in screen.
   const [storageKey,    setStorageKey]    = useState(0)
   const [searchQuery,   setSearchQuery]   = useState('')
-  const importRef      = useRef<HTMLInputElement>(null)
-  const accountMenuRef = useRef<HTMLDivElement>(null)
+  const importRef         = useRef<HTMLInputElement>(null)
+  const accountMenuRef    = useRef<HTMLDivElement>(null)
+  const templatePickerRef = useRef<HTMLDivElement>(null)
   const [accountMenuOpen,       setAccountMenuOpen]       = useState(false)
+  const [showTemplatePicker,    setShowTemplatePicker]    = useState(false)
   const [selectedIds,           setSelectedIds]           = useState<Set<string>>(new Set())
   const [confirmDeleteSelected, setConfirmDeleteSelected] = useState(false)
   // Welcome banner — shown after demo deck is created, dismissed once user closes it
@@ -119,6 +190,18 @@ export default function Decks() {
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
   }, [accountMenuOpen])
+
+  // Close template picker on outside click
+  useEffect(() => {
+    if (!showTemplatePicker) return
+    function handleClick(e: MouseEvent) {
+      if (templatePickerRef.current && !templatePickerRef.current.contains(e.target as Node)) {
+        setShowTemplatePicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [showTemplatePicker])
 
   // Track Firebase auth state
   useEffect(() => {
@@ -312,6 +395,16 @@ export default function Decks() {
     navigate('/create', { state: { deck, lastResults } })
   }
 
+  /* ── Template picker ─────────────────────────────────────────────────── */
+
+  function handleSelectTemplate(template: typeof DECK_TEMPLATES[number] | null) {
+    setShowTemplatePicker(false)
+    if (!template) { navigate('/create'); return }
+    const mkId = () => Math.random().toString(36).slice(2, 10)
+    const slides = template.slides.map(s => ({ ...s, id: mkId() }))
+    navigate('/create', { state: { slides, deckTitle: template.name } })
+  }
+
   /* ── Import deck from .apulse.json file ───────────────────────────────── */
 
   const handleImportDeck = useCallback((file: File) => {
@@ -366,7 +459,20 @@ export default function Decks() {
     <main className="min-h-screen bg-midnight-sky-50/60">
 
       {/* ── Slim sticky nav ─────────────────────────────────────────────── */}
+      {/* NOTE: no overflow-hidden here — it would clip the account dropdown that
+          opens below the header. The shimmer is clipped by its own wrapper below. */}
       <header className="sticky top-0 z-10 border-b border-white/10 bg-midnight-sky-900/95 backdrop-blur-md">
+        {/* Shimmer — wrapped in an overflow-hidden layer so it stays inside the
+            header bounds without clipping the dropdown menu. */}
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <motion.div
+            aria-hidden
+            className="absolute inset-y-0 left-0 w-1/2"
+            style={{ background: 'linear-gradient(105deg, transparent 0%, rgba(255,255,255,0.13) 50%, transparent 100%)' }}
+            animate={{ x: ['-100%', '200%'] }}
+            transition={{ duration: 1.8, ease: [0.4, 0, 0.2, 1], repeat: Infinity, repeatDelay: 7, delay: 2 }}
+          />
+        </div>
         <div className="mx-auto flex max-w-6xl items-center gap-4 px-6 py-3">
 
           {/* Logo */}
@@ -503,15 +609,75 @@ export default function Decks() {
               Import deck
             </motion.button>
 
-            <motion.button
-              onClick={() => navigate('/create')}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.97 }}
-              className="flex items-center gap-2 rounded-2xl bg-hot-pink px-4 py-2 text-sm font-semibold text-white shadow-[0_4px_24px_-4px] shadow-hot-pink/60 transition-shadow hover:shadow-[0_4px_32px_-2px] hover:shadow-hot-pink/80"
-            >
-              <Plus className="size-4" />
-              New deck
-            </motion.button>
+            <div ref={templatePickerRef} className="relative">
+              <motion.button
+                onClick={() => setShowTemplatePicker(v => !v)}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.97 }}
+                className="flex items-center gap-2 rounded-2xl bg-hot-pink px-4 py-2 text-sm font-semibold text-white shadow-[0_4px_24px_-4px] shadow-hot-pink/60 transition-shadow hover:shadow-[0_4px_32px_-2px] hover:shadow-hot-pink/80"
+              >
+                <Plus className="size-4" />
+                New deck
+              </motion.button>
+
+              {/* Template picker dropdown */}
+              <AnimatePresence>
+                {showTemplatePicker && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -8, scale: 0.97 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -8, scale: 0.97 }}
+                    transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                    className="absolute right-0 top-full z-40 mt-2 w-80 overflow-hidden rounded-2xl border border-midnight-sky-100 bg-white shadow-xl shadow-midnight-sky-200/40"
+                  >
+                    {/* Start from scratch */}
+                    <button
+                      onClick={() => handleSelectTemplate(null)}
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left transition hover:bg-midnight-sky-50"
+                    >
+                      <span className="flex size-7 shrink-0 items-center justify-center rounded-xl bg-midnight-sky-100">
+                        <Plus className="size-3.5 text-midnight-sky-600" />
+                      </span>
+                      <div>
+                        <p className="text-sm font-semibold text-midnight-sky-900">Start from scratch</p>
+                        <p className="text-xs text-midnight-sky-600">Blank deck — build it your way</p>
+                      </div>
+                    </button>
+
+                    <div className="mx-4 border-t border-midnight-sky-100" />
+
+                    <p className="px-4 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-widest text-midnight-sky-500">
+                      Templates
+                    </p>
+
+                    {DECK_TEMPLATES.map(template => {
+                      const uniqueTypes = [...new Set(template.slides.map(s => s.type))]
+                      return (
+                        <button
+                          key={template.id}
+                          onClick={() => handleSelectTemplate(template)}
+                          className="flex w-full flex-col gap-1 px-4 py-2 text-left transition hover:bg-midnight-sky-50"
+                        >
+                          <p className="text-sm font-semibold text-midnight-sky-900">{template.name}</p>
+                          <p className="text-xs leading-snug text-midnight-sky-600">{template.description}</p>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {uniqueTypes.map(type => {
+                              const meta = SLIDE_TYPE_META[type]
+                              return meta ? (
+                                <span key={type} className={cn('rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide', meta.chip)}>
+                                  {meta.label}
+                                </span>
+                              ) : null
+                            })}
+                            <span className="text-[10px] text-midnight-sky-500">· {template.slides.length} slides</span>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
         </div>
 

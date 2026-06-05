@@ -54,12 +54,20 @@ async function getPdfjs() {
 const CLOUDINARY_CLOUD  = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME  as string
 const CLOUDINARY_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET as string
 
-async function uploadToCloudinary(base64DataUrl: string): Promise<string> {
+// Session-scoped cache: data URL → Cloudinary https:// URL.
+// Prevents re-uploading the same image on subsequent saves or auto-saves.
+const _cloudinaryCache = new Map<string, string>()
+
+async function uploadToCloudinary(base64DataUrl: string, folder?: string): Promise<string> {
+  const cached = _cloudinaryCache.get(base64DataUrl)
+  if (cached) return cached
+
   // Convert base64 data URL → Blob → proper file upload (avoids filename/slash issues)
   const blob = await fetch(base64DataUrl).then(r => r.blob())
   const form = new FormData()
   form.append('file', blob, `slide-${uid()}.jpg`)
   form.append('upload_preset', CLOUDINARY_PRESET)
+  if (folder) form.append('folder', folder)
 
   const res  = await fetch(
     `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/image/upload`,
@@ -70,43 +78,64 @@ async function uploadToCloudinary(base64DataUrl: string): Promise<string> {
     const reason = data?.error?.message ?? `HTTP ${res.status}`
     throw new Error(`Cloudinary: ${reason}`)
   }
-  return data.secure_url as string
+  const cloudUrl = data.secure_url as string
+  _cloudinaryCache.set(base64DataUrl, cloudUrl)
+  return cloudUrl
+}
+
+/** Returns true if any slide still holds a base64 data URL that needs uploading. */
+function slidesHaveDataUrls(slides: Slide[]): boolean {
+  for (const slide of slides) {
+    if (slide.type === 'canvas') {
+      const cs = slide as CanvasSlide
+      if (cs.bg?.type === 'image' && cs.bg.value?.startsWith('data:')) return true
+      if (cs.elements?.some(el => el.kind === 'image' && el.imgUrl?.startsWith('data:'))) return true
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if ((slide as any).imgUrl?.startsWith('data:')) return true
+    }
+  }
+  return false
 }
 
 /** Replaces base64 imgUrls / video data URLs with Cloudinary URLs before cloud-saving. */
-async function toCloudinarySlides(slides: Slide[]): Promise<Slide[]> {
+async function toCloudinarySlides(slides: Slide[], userId?: string): Promise<Slide[]> {
+  const folder = userId ? `images/${userId}` : undefined
   return Promise.all(
     slides.map(async slide => {
       // PDF slides: upload base64 images to Cloudinary
       if (slide.type === 'pdf') {
         if (!slide.imgUrl || slide.imgUrl.startsWith('https://')) return slide
-        const cloudUrl = await uploadToCloudinary(slide.imgUrl)
+        const cloudUrl = await uploadToCloudinary(slide.imgUrl, folder)
         return { ...slide, imgUrl: cloudUrl }
       }
       // Image slides: upload base64 data URLs to Cloudinary
       if (slide.type === 'image') {
         if (slide.imgUrl.startsWith('https://')) return slide
-        const cloudUrl = await uploadToCloudinary(slide.imgUrl)
+        const cloudUrl = await uploadToCloudinary(slide.imgUrl, folder)
         return { ...slide, imgUrl: cloudUrl }
       }
       // Video slides: strip from cloud saves (data URLs too large)
       if (slide.type === 'video') {
         return { ...slide, videoUrl: '' }
       }
-      // Canvas (custom) slides — each image element stores a base64 imgUrl.
-      // Walk every element and upload any data URLs to Cloudinary.
+      // Canvas (custom) slides — upload background image and any image elements.
       if (slide.type === 'canvas') {
         const cs = slide as CanvasSlide
+        let bg = cs.bg
+        if (bg?.type === 'image' && bg.value?.startsWith('data:')) {
+          bg = { ...bg, value: await uploadToCloudinary(bg.value, folder) }
+        }
         const newElements = await Promise.all(
           cs.elements.map(async el => {
             if (el.kind === 'image' && el.imgUrl.startsWith('data:')) {
-              const cloudUrl = await uploadToCloudinary(el.imgUrl)
+              const cloudUrl = await uploadToCloudinary(el.imgUrl, folder)
               return { ...el, imgUrl: cloudUrl }
             }
             return el
           }),
         )
-        return { ...cs, elements: newElements } as CanvasSlide
+        return { ...cs, bg, elements: newElements } as CanvasSlide
       }
       // Question slides + content slides — may have a reference/background imgUrl.
       // If it's still a base64 data URL (not yet uploaded), push it to Cloudinary now
@@ -114,7 +143,7 @@ async function toCloudinarySlides(slides: Slide[]): Promise<Slide[]> {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const s = slide as any
       if (s.imgUrl && typeof s.imgUrl === 'string' && s.imgUrl.startsWith('data:')) {
-        const cloudUrl = await uploadToCloudinary(s.imgUrl)
+        const cloudUrl = await uploadToCloudinary(s.imgUrl, folder)
         return { ...slide, imgUrl: cloudUrl }
       }
       return slide
@@ -552,14 +581,8 @@ export default function Create() {
     if (!b) { setShowSaveModal(true); return null }
     setIsSaving(true)
     try {
-      // For cloud saves: upload any base64 PDF images to Cloudinary first
-      const slidesToSave = b === 'cloud'
-        ? await toCloudinarySlides(slides)
-        : slides
-
-      // If saving a NEW deck (no id yet), auto-disambiguate the title against existing decks.
-      // Existing decks keep whatever title the user typed — no surprise renames on update.
-      // Cloud saves run this AFTER sign-in so the listing reflects the right user's decks.
+      // Authenticate first so auth.currentUser?.uid is set before uploading images —
+      // this ensures images land in the user's folder in Cloudinary.
       const needsAuthForCloud = b === 'cloud'
       if (needsAuthForCloud) {
         const existingUser = await waitForAuth()
@@ -569,6 +592,8 @@ export default function Create() {
           setStorageBackend_('cloud')
         }
       }
+      // If saving a NEW deck (no id yet), auto-disambiguate the title against existing decks.
+      // Existing decks keep whatever title the user typed — no surprise renames on update.
       const finalTitle = currentDeckId
         ? deckTitle
         : await getUniqueDeckTitle(deckTitle || 'Untitled session', b, currentDeckId)
@@ -576,6 +601,20 @@ export default function Create() {
         // Reflect the new unique title in the input so the user can see what was saved
         setDeckTitle(finalTitle)
       }
+
+      // Upload images after auth (user ID confirmed).
+      // Track whether data URLs existed BEFORE uploading so we know whether to
+      // write https:// URLs back into React state. This prevents an auto-save loop:
+      // setSlides → useEffect → auto-save → setSlides → … Only fires once, when
+      // there are actual data URLs to replace. After that, slides hold https:// URLs
+      // and hadDataUrls is false, so setSlides is never called again.
+      const userSlug = auth.currentUser?.email?.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-')
+                    ?? auth.currentUser?.uid
+      const hadDataUrls = b === 'cloud' && slidesHaveDataUrls(slides)
+      const slidesToSave = b === 'cloud'
+        ? await toCloudinarySlides(slides, userSlug)
+        : slides
+      if (hadDataUrls) setSlides(slidesToSave)
 
       const deck: Deck = {
         id:        currentDeckId ?? uid(),
@@ -1015,7 +1054,9 @@ export default function Create() {
       // Upload any base64 images (PDF/question/content/canvas) to Cloudinary FIRST.
       // The session doc has a hard 1 MB Firestore limit, so we must store short
       // https:// URLs — never raw base64 — or large images silently break.
-      const cloudSlides = await toCloudinarySlides(slides)
+      const userSlug = auth.currentUser?.email?.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-')
+                    ?? auth.currentUser?.uid
+      const cloudSlides = await toCloudinarySlides(slides, userSlug)
       setSlides(cloudSlides) // lock cloud URLs into the editor so we don't re-upload
       const code = await createSession(deckTitle, cloudSlides, isQuiz)
       navigate(`/present/${code}`, { state: { slides: cloudSlides, deckTitle, sessionCode: code, startSlide, deckId: currentDeckId, isQuiz } })
@@ -1038,7 +1079,9 @@ export default function Create() {
     const startSlide = Math.max(0, slides.findIndex(s => s.id === selectedId))
     try {
       // Upload base64 images to Cloudinary first (1 MB Firestore doc limit).
-      const cloudSlides = await toCloudinarySlides(slides)
+      const userSlug = auth.currentUser?.email?.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-')
+                    ?? auth.currentUser?.uid
+      const cloudSlides = await toCloudinarySlides(slides, userSlug)
       setSlides(cloudSlides)
       // Resync slides first so audience index matches presenter's deck
       await updateSessionSlides(resumeCode, cloudSlides, isQuiz)
@@ -1072,7 +1115,15 @@ export default function Create() {
       )}
 
       {/* ── Top bar ─────────────────────────────────────────────────── */}
-      <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-midnight-sky-900 px-5">
+      <header className="relative flex h-14 shrink-0 items-center justify-between gap-3 overflow-hidden border-b border-white/10 bg-midnight-sky-900 px-5">
+        {/* Shimmer */}
+        <motion.div
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 left-0 w-1/2"
+          style={{ background: 'linear-gradient(105deg, transparent 0%, rgba(255,255,255,0.13) 50%, transparent 100%)' }}
+          animate={{ x: ['-100%', '200%'] }}
+          transition={{ duration: 1.8, ease: [0.4, 0, 0.2, 1], repeat: Infinity, repeatDelay: 7, delay: 2 }}
+        />
 
         <div className="flex shrink-0 items-center gap-3">
           <button

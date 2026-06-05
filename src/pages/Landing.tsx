@@ -40,7 +40,15 @@ export default function Landing() {
 
 function Nav() {
   return (
-    <header className="sticky top-0 z-20 border-b border-white/5 bg-midnight-sky-900/80 backdrop-blur-md">
+    <header className="sticky top-0 z-20 overflow-hidden border-b border-white/5 bg-midnight-sky-900/80 backdrop-blur-md">
+      {/* Shimmer */}
+      <motion.div
+        aria-hidden
+        className="pointer-events-none absolute inset-y-0 left-0 w-1/2"
+        style={{ background: 'linear-gradient(105deg, transparent 0%, rgba(255,255,255,0.13) 50%, transparent 100%)' }}
+        animate={{ x: ['-100%', '200%'] }}
+        transition={{ duration: 1.8, ease: [0.4, 0, 0.2, 1], repeat: Infinity, repeatDelay: 7, delay: 2 }}
+      />
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 sm:px-10">
         <Link to="/">
           <AlayaMark className="text-white" />
