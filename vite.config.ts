@@ -7,7 +7,8 @@ import path from 'node:path'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
-    host: true, // listen on all interfaces so phones on the same WiFi can connect
+    host: true,
+    port: process.env.PORT ? parseInt(process.env.PORT) : 5173,
   },
   resolve: {
     alias: {

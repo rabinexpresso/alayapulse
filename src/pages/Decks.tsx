@@ -1276,7 +1276,7 @@ function DeckCard({ deck, onOpen, onDelete, onExport, onShare, onDuplicate, isSe
         'group relative flex flex-col overflow-visible rounded-2xl bg-white ring-1 transition-all duration-200',
         isSelected
           ? 'ring-2 ring-hot-pink/60 shadow-[0_0_0_4px_rgba(255,0,101,0.12)]'
-          : 'ring-midnight-sky-100/80 shadow-[0_2px_12px_-2px_rgba(0,0,121,0.06)] hover:shadow-[0_16px_48px_-8px_rgba(0,0,121,0.16)] hover:ring-midnight-sky-200',
+          : 'ring-midnight-sky-100/80 shadow-[0_2px_12px_-2px_rgba(0,0,121,0.06)] hover:ring-2 hover:ring-sky-blue/50 hover:shadow-[0_8px_32px_-4px_rgba(0,176,255,0.28)]',
       )}
     >
       {/* Thumbnail — preview of the first slide */}

@@ -18,6 +18,7 @@ import {
   Video, Type, List, Quote, Users, BarChart2, PieChart,
   X, Table2, Check, Undo2, Redo2, Trophy, ImageIcon,
   ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, Clock,
+  Share2, Link2,
 } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
 import { PersistentHtmlIframe } from '@/components/PersistentHtmlIframe'
@@ -26,7 +27,7 @@ import {
   getStorageBackend, setStorageBackend,
   browserSaveDeck, cloudSaveDeck, getUniqueDeckTitle,
   signInWithGoogle, onAuthStateChanged, auth,
-  saveResults,
+  saveResults, createSharedDeck,
   type StorageBackend, type Deck, type User, type DeckResults,
 } from '@/lib/deckStorage'
 
@@ -136,6 +137,15 @@ async function toCloudinarySlides(slides: Slide[], userId?: string): Promise<Sli
           }),
         )
         return { ...cs, bg, elements: newElements } as CanvasSlide
+      }
+      // Leaderboard slides — upload background image if present
+      if (slide.type === 'leaderboard') {
+        const lb = slide as LeaderboardSlide
+        if (lb.bg?.type === 'image' && lb.bg.value?.startsWith('data:')) {
+          const cloudUrl = await uploadToCloudinary(lb.bg.value, folder)
+          return { ...lb, bg: { ...lb.bg, value: cloudUrl } }
+        }
+        return slide
       }
       // Question slides + content slides — may have a reference/background imgUrl.
       // If it's still a base64 data URL (not yet uploaded), push it to Cloudinary now
@@ -270,7 +280,7 @@ interface CanvasImageEl extends CanvasBaseEl {
 }
 type CanvasEl = CanvasTextEl | CanvasTableEl | CanvasImageEl
 interface CanvasSlide { id: string; type: 'canvas'; bg: CanvasBg; elements: CanvasEl[] }
-interface LeaderboardSlide { id: string; type: 'leaderboard' }
+interface LeaderboardSlide { id: string; type: 'leaderboard'; bg?: CanvasBg }
 type CanvasLayout = 'blank' | 'title-only' | 'title-body' | 'two-columns'
 
 type Slide = PdfSlide | ImageSlide | VideoSlide | HtmlSlide | QuestionSlide | ContentSlide | CanvasSlide | LeaderboardSlide
@@ -467,6 +477,11 @@ export default function Create() {
   const [savedToast,     setSavedToast]      = useState(false)
   const [saveError,      setSaveError]       = useState<string | null>(null)
   const [sessionError,   setSessionError]    = useState<string | null>(null)
+  // Share dropdown state
+  const [shareMenuOpen, setShareMenuOpen] = useState(false)
+  const [shareState,    setShareState]    = useState<'idle' | 'loading' | 'copied'>('idle')
+  const [shareError,    setShareError]    = useState<string | null>(null)
+  const shareMenuRef = useRef<HTMLDivElement>(null)
   // Auto-split toast — appears briefly after importing an HTML deck that
   // was detected as a multi-slide slideshow. Lets the user undo if the
   // detection was wrong (e.g. the file isn't actually a slideshow).
@@ -678,6 +693,54 @@ export default function Create() {
     setStorageBackend_('cloud')
     await saveDeck('cloud')
   }
+
+  // Close share dropdown when clicking outside
+  useEffect(() => {
+    if (!shareMenuOpen) return
+    const handler = (e: MouseEvent) => {
+      if (shareMenuRef.current && !shareMenuRef.current.contains(e.target as Node)) {
+        setShareMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [shareMenuOpen])
+
+  // Share — auto-saves to cloud first so images land in Cloudinary, then creates a shareable link
+  const handleCopyLink = async () => {
+    setShareMenuOpen(false)
+    setShareState('loading')
+    setShareError(null)
+    try {
+      // Auto-save to cloud (uploads any data-URL images to Cloudinary, returns the deck ID)
+      const savedId = await saveDeck('cloud')
+      if (!savedId) { setShareState('idle'); return }
+      // Re-process slides through toCloudinarySlides — cache means no re-upload,
+      // just resolves any remaining data URLs to their cached Cloudinary https:// URLs
+      const userSlug = auth.currentUser?.email?.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-')
+                    ?? auth.currentUser?.uid
+      const processedSlides = await toCloudinarySlides(slides, userSlug)
+      const shareDeck: Deck = {
+        id:        savedId,
+        title:     deckTitle,
+        slides:    processedSlides as unknown[],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        ...(isQuiz ? { isQuiz: true } : {}),
+      }
+      const shareId = await createSharedDeck(shareDeck)
+      const url = `${window.location.origin}/shared/${shareId}`
+      await navigator.clipboard.writeText(url)
+      setShareState('copied')
+      setTimeout(() => setShareState('idle'), 2200)
+    } catch (err) {
+      setShareState('idle')
+      const msg = err instanceof Error ? err.message : 'Unknown error'
+      setShareError(`Couldn't create link — ${msg}`)
+      setTimeout(() => setShareError(null), 5000)
+    }
+  }
+
   // addMenuAfter = id of slide to insert after; undefined = menu closed
 
   const selectedSlide = slides.find(s => s.id === selectedId) ?? null
@@ -1115,15 +1178,17 @@ export default function Create() {
       )}
 
       {/* ── Top bar ─────────────────────────────────────────────────── */}
-      <header className="relative flex h-14 shrink-0 items-center justify-between gap-3 overflow-hidden border-b border-white/10 bg-midnight-sky-900 px-5">
-        {/* Shimmer */}
-        <motion.div
-          aria-hidden
-          className="pointer-events-none absolute inset-y-0 left-0 w-1/2"
-          style={{ background: 'linear-gradient(105deg, transparent 0%, rgba(255,255,255,0.13) 50%, transparent 100%)' }}
-          animate={{ x: ['-100%', '200%'] }}
-          transition={{ duration: 1.8, ease: [0.4, 0, 0.2, 1], repeat: Infinity, repeatDelay: 7, delay: 2 }}
-        />
+      <header className="relative flex h-14 shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-midnight-sky-900 px-5">
+        {/* Shimmer — contained so dropdown menus aren't clipped */}
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <motion.div
+            aria-hidden
+            className="absolute inset-y-0 left-0 w-1/2"
+            style={{ background: 'linear-gradient(105deg, transparent 0%, rgba(255,255,255,0.13) 50%, transparent 100%)' }}
+            animate={{ x: ['-100%', '200%'] }}
+            transition={{ duration: 1.8, ease: [0.4, 0, 0.2, 1], repeat: Infinity, repeatDelay: 7, delay: 2 }}
+          />
+        </div>
 
         <div className="flex shrink-0 items-center gap-3">
           <button
@@ -1240,21 +1305,56 @@ export default function Create() {
             )}
           </motion.button>
 
-          <motion.button
-            onClick={() => downloadDeckJSON(deckTitle, slides)}
-            disabled={slides.length === 0}
-            whileTap={slides.length > 0 ? { scale: 0.96 } : {}}
-            title={slides.length === 0 ? 'Add slides first' : 'Export deck as a file to share with colleagues'}
-            className={cn(
-              'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-medium transition-all duration-200',
-              slides.length > 0
-                ? 'border-white/20 bg-white/5 text-white/80 hover:border-white/40 hover:text-white'
-                : 'cursor-not-allowed border-white/10 text-white/30',
+          {/* Share dropdown — Copy link + Export JSON */}
+          <div ref={shareMenuRef} className="relative">
+            <motion.button
+              onClick={() => { if (slides.length > 0) setShareMenuOpen(v => !v) }}
+              disabled={slides.length === 0 || shareState === 'loading'}
+              whileTap={slides.length > 0 ? { scale: 0.96 } : {}}
+              title={slides.length === 0 ? 'Add slides first' : 'Share deck'}
+              className={cn(
+                'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-medium transition-all duration-200',
+                shareState === 'copied'
+                  ? 'border-fresh-green/40 bg-fresh-green/10 text-fresh-green'
+                  : shareState === 'loading'
+                  ? 'border-white/20 bg-white/5 text-white/50'
+                  : slides.length > 0
+                  ? 'border-white/20 bg-white/5 text-white/80 hover:border-white/40 hover:text-white'
+                  : 'cursor-not-allowed border-white/10 text-white/30',
+              )}
+            >
+              {shareState === 'copied'  ? <Check  className="size-3.5" /> :
+               shareState === 'loading' ? <Share2 className="size-3.5 animate-pulse" /> :
+                                          <Share2 className="size-3.5" />}
+              {shareState === 'copied' ? 'Copied!' : shareState === 'loading' ? 'Saving…' : 'Share'}
+              <ChevronDown className={cn('size-3 transition-transform duration-200', shareMenuOpen && 'rotate-180')} />
+            </motion.button>
+
+            {shareMenuOpen && slides.length > 0 && (
+              <div className="absolute right-0 top-full z-50 mt-1 min-w-[160px] overflow-hidden rounded-xl border border-white/10 bg-midnight-sky-900 py-1 shadow-xl">
+                <button
+                  onClick={handleCopyLink}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-white/80 transition-colors hover:bg-white/8 hover:text-white"
+                >
+                  <Link2 className="size-3.5" />
+                  Copy link
+                </button>
+                <button
+                  onClick={() => { setShareMenuOpen(false); downloadDeckJSON(deckTitle, slides) }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-white/80 transition-colors hover:bg-white/8 hover:text-white"
+                >
+                  <Upload className="size-3.5" />
+                  Download JSON
+                </button>
+              </div>
             )}
-          >
-            <Upload className="size-3.5" />
-            Export
-          </motion.button>
+
+            {shareError && (
+              <div className="absolute right-0 top-full z-50 mt-1 rounded-xl border border-red-400/30 bg-red-900/80 px-3 py-2 text-xs text-red-200 shadow-lg whitespace-nowrap">
+                {shareError}
+              </div>
+            )}
+          </div>
 
           {(() => {
             const hasResults = !!lastResults && lastResults.questions.length > 0
@@ -2612,18 +2712,34 @@ function SlideEditor({ slide, onUpdate, onSplitHtml, onPushHistory }: {
   }
 
   if (slide.type === 'leaderboard') {
+    const lb = slide as LeaderboardSlide
+    const lbBg = lb.bg ?? { type: 'color' as const, value: '#000079' }
+    const lbBgStyle: React.CSSProperties =
+      lbBg.type === 'color'    ? { backgroundColor: lbBg.value } :
+      lbBg.type === 'gradient' ? { backgroundImage: lbBg.value } :
+      { backgroundImage: `url(${lbBg.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
     return (
-      <div className="flex flex-1 items-center justify-center bg-midnight-sky-900 p-10">
-        <div className="flex flex-col items-center gap-4 text-center">
-          <div className="flex size-16 items-center justify-center rounded-2xl bg-hot-pink/10">
-            <Trophy className="size-8 text-hot-pink/60" />
+      <div className="scrollbar-panel flex flex-1 flex-col overflow-auto p-4 gap-3" style={{ background: '#f8f7f5' }}>
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-midnight-sky-500">Background</p>
+        <BgPanel
+          bg={lbBg}
+          onChange={bg => { onPushHistory?.(); onUpdate(slide.id, { bg } as Partial<LeaderboardSlide>) }}
+        />
+        {/* Mini preview */}
+        <div className="relative aspect-video w-full overflow-hidden rounded-2xl shadow-md" style={lbBgStyle}>
+          {/* Overlay glow orbs like the real leaderboard */}
+          <div aria-hidden className="pointer-events-none absolute inset-0">
+            <div className="absolute left-1/2 top-0 h-48 w-48 -translate-x-1/2 rounded-full bg-golden-sun/12 blur-[80px]" />
+            <div className="absolute bottom-0 left-[8%] h-32 w-32 rounded-full bg-hot-pink/12 blur-[60px]" />
+            <div className="absolute bottom-0 right-[8%] h-32 w-32 rounded-full bg-sky-blue/12 blur-[60px]" />
           </div>
-          <div>
-            <p className="text-base font-semibold text-white/70">Leaderboard slide</p>
-            <p className="mt-2 max-w-xs text-sm font-light leading-relaxed text-white/40">
-              Top 10 scores will appear here during a live quiz session.
-            </p>
-            <p className="mt-1 text-xs text-white/25">No settings needed.</p>
+          <div className="relative flex h-full flex-col items-center justify-center gap-3 text-center">
+            <div className="flex items-center gap-2">
+              <Trophy className="size-7 text-golden-sun drop-shadow-[0_0_12px_rgba(255,199,9,0.55)]" />
+              <span className="text-2xl font-extrabold tracking-tight text-white">LEADERBOARD</span>
+              <Trophy className="size-7 text-golden-sun drop-shadow-[0_0_12px_rgba(255,199,9,0.55)]" />
+            </div>
+            <p className="text-xs font-light text-white/50">Top 10 scores appear here during a live session</p>
           </div>
         </div>
       </div>

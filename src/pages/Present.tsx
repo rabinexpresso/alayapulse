@@ -132,7 +132,7 @@ interface CanvasTableEl extends CanvasBaseEl {
 interface CanvasImageEl extends CanvasBaseEl { kind: 'image'; imgUrl: string; objectFit: 'cover' | 'contain' }
 type CanvasEl = CanvasTextEl | CanvasTableEl | CanvasImageEl
 interface CanvasSlide  { id: string; type: 'canvas'; bg: CanvasBg; elements: CanvasEl[] }
-interface LeaderboardSlide { id: string; type: 'leaderboard' }
+interface LeaderboardSlide { id: string; type: 'leaderboard'; bg?: { type: 'color' | 'gradient' | 'image'; value: string } }
 
 type AnySlide = PdfSlide | ContentSlide | ImageSlide | VideoSlide | HtmlSlide | QSlide | CanvasSlide | LeaderboardSlide
 
@@ -1103,7 +1103,7 @@ function SlideContent({
   if (slide.type === 'html')         return null   // rendered by PersistentHtmlIframe layer
   if (slide.type === 'content')      return <ContentSlideView slide={slide as ContentSlide} />
   if (slide.type === 'canvas')       return <CanvasSlideView slide={slide as CanvasSlide} />
-  if (slide.type === 'leaderboard')  return <LeaderboardSlideView sessionCode={sessionCode} deck={deck} questionMeta={questionMeta} />
+  if (slide.type === 'leaderboard')  return <LeaderboardSlideView sessionCode={sessionCode} deck={deck} questionMeta={questionMeta} slide={slide as LeaderboardSlide} />
   if (phase === 'results')  return (
     <ResultsSlideView
       slide={slide}
@@ -3030,11 +3030,12 @@ function calculateQuizLeaderboard(
 const MEDAL_COLORS = ['#ffc709', '#c0c0c0', '#cd7f32']
 
 function LeaderboardSlideView({
-  sessionCode, deck, questionMeta,
+  sessionCode, deck, questionMeta, slide,
 }: {
   sessionCode:  string
   deck:         AnySlide[]
   questionMeta: Record<string, { openedAt: number; duration: number | null }>
+  slide?:       LeaderboardSlide
 }) {
   const [leaderboard, setLeaderboard] = useState<{ name: string; score: number; emoji?: string }[]>([])
   const [revealCount, setRevealCount] = useState(0)
@@ -3085,8 +3086,18 @@ function LeaderboardSlideView({
   // The winner (#1) is revealed last — fire confetti the moment they appear.
   const winnerRevealed = revealCount >= top10.length && top10.length > 0
 
+  const lbBg = slide?.bg
+  const lbBgStyle: React.CSSProperties = !lbBg
+    ? {}  // falls back to Tailwind bg-gradient-to-b class below
+    : lbBg.type === 'color'    ? { backgroundColor: lbBg.value }
+    : lbBg.type === 'gradient' ? { backgroundImage: lbBg.value }
+    : { backgroundImage: `url(${lbBg.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+
   return (
-    <div className="absolute inset-0 flex flex-col overflow-hidden bg-gradient-to-b from-midnight-sky-900 via-midnight-sky-900 to-[#1a0a3a] px-14 pt-12 pb-24">
+    <div
+      className={`absolute inset-0 flex flex-col overflow-hidden px-14 pt-12 pb-24${!lbBg ? ' bg-gradient-to-b from-midnight-sky-900 via-midnight-sky-900 to-[#1a0a3a]' : ''}`}
+      style={lbBgStyle}
+    >
 
       {/* Celebratory glow orbs behind everything */}
       <div aria-hidden className="pointer-events-none absolute inset-0">
