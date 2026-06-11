@@ -3,12 +3,13 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Download, Clock, Users, BarChart2, Cloud as CloudIcon,
-  TrendingUp, ChevronDown, ChevronUp, Star, AlertCircle, FileSpreadsheet,
+  TrendingUp, ChevronDown, ChevronUp, Star, AlertCircle,
+  Trash2, History, CheckCircle2, Table2, Check,
 } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
 import { cn } from '@/lib/utils'
 import {
-  loadResults, getStorageBackend, onAuthStateChanged, auth,
+  listResults, deleteResults, isResponseCorrect, getStorageBackend, onAuthStateChanged, auth,
   browserListDecks, cloudListDecks,
   type Deck, type DeckResults, type ResultQuestion, type ResultResponse,
   type StorageBackend,
@@ -25,28 +26,34 @@ export default function Results() {
   const navigate   = useNavigate()
 
   const backend = getStorageBackend()
-  const [results, setResults]   = useState<DeckResults | null | undefined>(undefined)
+  const [sessionsList, setSessionsList] = useState<DeckResults[] | null | undefined>(undefined)
+  const [selectedId, setSelectedId]     = useState<string | null>(null)
   const [deck,    setDeck]      = useState<Deck | null>(null)
   const [isDownloading, setDownloading]      = useState(false)
-  const [isDownloadingCsv, setDownloadingCsv] = useState(false)
+  const [isDownloadingXlsx, setDownloadingXlsx] = useState(false)
+  const [deleteConfirmId, setDeleteConfirmId]   = useState<string | null>(null)
+  const [isDeletingSession, setIsDeletingSession] = useState(false)
+  const [selectMode, setSelectMode]     = useState(false)
+  const [selectedIds, setSelectedIds]   = useState<Set<string>>(new Set())
+  const [showBulkConfirm, setShowBulkConfirm] = useState(false)
 
   /* Wait for auth before loading cloud data — Firebase restores auth
      asynchronously on page load. */
   useEffect(() => {
-    if (!deckId) { setResults(null); return }
+    if (!deckId) { setSessionsList(null); return }
     let cancelled = false
     async function load(activeBackend: StorageBackend) {
       try {
-        const [r, decks] = await Promise.all([
-          loadResults(activeBackend, deckId!),
+        const [list, decks] = await Promise.all([
+          listResults(activeBackend, deckId!),
           activeBackend === 'browser' ? browserListDecks() : cloudListDecks(),
         ])
         if (cancelled) return
-        setResults(r)
+        setSessionsList(list)
         setDeck(decks.find(d => d.id === deckId) ?? null)
       } catch (e) {
         console.error('Failed to load results:', e)
-        if (!cancelled) setResults(null)
+        if (!cancelled) setSessionsList(null)
       }
     }
 
@@ -67,7 +74,7 @@ export default function Results() {
   }, [deckId, backend])
 
   /* ── Loading state ───────────────────────────────────────────────── */
-  if (results === undefined) {
+  if (sessionsList === undefined) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center bg-white">
         <AlayaMark className="mb-8" />
@@ -85,8 +92,11 @@ export default function Results() {
     )
   }
 
+  // Selected session, falling back to the most recent one.
+  const results = sessionsList?.find(s => s.id === selectedId) ?? sessionsList?.[0] ?? null
+
   /* ── Empty state ─────────────────────────────────────────────────── */
-  if (!results || results.questions.length === 0) {
+  if (!sessionsList || sessionsList.length === 0 || !results || results.questions.length === 0) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center bg-white px-6 text-center">
         <AlayaMark className="mb-8" />
@@ -112,12 +122,19 @@ export default function Results() {
   /* ── Real results ────────────────────────────────────────────────── */
   const deckTitle    = deck?.title ?? 'Untitled session'
   const totalResponses = results.questions.reduce((s, q) => s + q.responseCount, 0)
-  // Overall participation: average per-question participation across all questions
-  const avgParticipation = results.audienceCount > 0
+  // Overall participation: average per-question participation, but only across
+  // questions that were actually shown (responseCount > 0), against the number
+  // of unique people who answered (falling back to peak audience if individual
+  // responses were trimmed).
+  const presentedQuestions = results.questions.filter(q => q.responseCount > 0)
+  const uniqueRespondents = new Set<string>()
+  presentedQuestions.forEach(q => q.responses.forEach(resp => uniqueRespondents.add(resp.name)))
+  const respondentCount = uniqueRespondents.size > 0 ? uniqueRespondents.size : results.audienceCount
+  const avgParticipation = presentedQuestions.length > 0
     ? Math.round(
-        (results.questions.reduce(
-          (s, q) => s + Math.min(100, (q.responseCount / Math.max(1, results.audienceCount)) * 100), 0
-        ) / Math.max(1, results.questions.length))
+        presentedQuestions.reduce(
+          (s, q) => s + Math.min(100, (q.responseCount / Math.max(1, respondentCount)) * 100), 0
+        ) / presentedQuestions.length
       )
     : 0
 
@@ -145,69 +162,90 @@ export default function Results() {
     }
   }
 
-  function handleDownloadCSV() {
+  async function handleDownloadExcel() {
     if (!results || !deck) return
-    setDownloadingCsv(true)
+    setDownloadingXlsx(true)
     try {
-      // Collapse newlines + extra whitespace to a single space so multi-paragraph
-      // question text doesn't break Excel/Sheets CSV row parsing.
-      const cleanCell = (s: string) => String(s).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()
-      const csvRow = (...cells: string[]) =>
-        cells.map(c => `"${cleanCell(c).replace(/"/g, '""')}"`).join(',')
+      // Lazy-load xlsx only when needed — keeps initial bundle small
+      const XLSX = await import('xlsx')
 
-      const lines: string[] = []
+      // ── Scorecard tab: one row per person, one column per question ────
+      const respondentNames = Array.from(new Set(
+        results.questions.flatMap(q => q.responses.map(r => r.name))
+      )).sort((a, b) => a.localeCompare(b))
 
-      // ── Metadata header ──────────────────────────────────────────────
-      lines.push(csvRow('Alaya Pulse Check — Results Export'))
-      lines.push(csvRow('Deck', deck.title))
-      lines.push(csvRow('Session code', results.sessionCode))
-      lines.push(csvRow('Date', formatTimestamp(results.conductedAt)))
-      lines.push(csvRow('Peak audience', String(results.audienceCount)))
-      lines.push(csvRow('Total responses', String(totalResponses)))
-      lines.push(csvRow('Avg participation', `${avgParticipation}%`))
-      lines.push('') // blank separator
+      const scorecardRows = respondentNames.map(name => {
+        const row: Record<string, string | number> = { Name: name }
+        results.questions.forEach((q, i) => {
+          const label = `Q${i + 1}`
+          const resps = q.responses.filter(r => r.name === name)
+          if (resps.length === 0) { row[label] = ''; return }
+          // A respondent can submit multiple values to word cloud / open-ended
+          // questions — list every one (joined) instead of only the first.
+          row[label] = resps.map(resp => {
+            let cell = formatResponseAsText(resp, q)
+            const correct = isResponseCorrect(resp, q)
+            if (correct !== null) cell += correct ? '  ✓' : '  ✗'
+            return cell
+          }).join('; ')
+        })
+        return row
+      })
 
-      // ── Column headers ───────────────────────────────────────────────
-      lines.push(csvRow('Question #', 'Question', 'Type', 'Respondent', 'Response', 'Time'))
-
-      // ── One row per individual response ─────────────────────────────
-      results.questions.forEach((q, qIdx) => {
-        const typeLabel = TYPE_LABELS[q.type] ?? q.type
-        if (q.responses.length === 0) {
-          lines.push(csvRow(
-            String(qIdx + 1),
-            q.question || '(Untitled question)',
-            typeLabel,
-            '—', '(no responses)', '',
-          ))
-        } else {
-          q.responses.forEach(r => {
-            lines.push(csvRow(
-              String(qIdx + 1),
-              q.question || '(Untitled question)',
-              typeLabel,
-              r.name,
-              formatResponseAsText(r, q),
-              formatTime(r.time),
-            ))
-          })
+      // ── Question summary tab ───────────────────────────────────────────
+      const summaryRows = results.questions.map((q, i) => {
+        const hasCorrectAnswer = q.type === 'mcq' && (q.correctAnswers?.length ?? 0) > 0
+        const correctCount = hasCorrectAnswer
+          ? q.responses.filter(r => isResponseCorrect(r, q) === true).length
+          : 0
+        const correctAnswerText = hasCorrectAnswer
+          ? (q.correctAnswers ?? []).slice().sort((a, b) => a - b)
+              .map(idx => `${String.fromCharCode(65 + idx)} — ${(q.options[idx] || '').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()}`)
+              .join('; ')
+          : ''
+        return {
+          'Q#':             i + 1,
+          'Question':       q.question || '(Untitled question)',
+          'Type':           TYPE_LABELS[q.type] ?? q.type,
+          'Correct Answer': correctAnswerText,
+          'Responses':      q.responseCount,
+          '% Correct':      hasCorrectAnswer ? `${Math.round((correctCount / Math.max(1, q.responseCount)) * 100)}%` : '',
         }
       })
 
-      const blob = new Blob([lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' })
-      const url  = URL.createObjectURL(blob)
-      const a    = document.createElement('a')
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(scorecardRows), 'Scorecard')
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Question summary')
+
       const safeTitle = deck.title.replace(/[^a-z0-9\-_ ]/gi, '').trim() || 'results'
       const date = new Date(results.conductedAt).toISOString().slice(0, 10)
-      a.href     = url
-      a.download = `${safeTitle} - ${date} results.csv`
-      a.click()
-      setTimeout(() => URL.revokeObjectURL(url), 10_000)
+      XLSX.writeFile(wb, `${safeTitle} - ${date} scorecard.xlsx`)
     } catch (e) {
-      console.error('CSV generation failed:', e)
-      alert('Could not generate CSV. Try again.')
+      console.error('Excel generation failed:', e)
+      alert('Could not generate Excel file. Try again.')
     } finally {
-      setDownloadingCsv(false)
+      setDownloadingXlsx(false)
+    }
+  }
+
+  async function handleDeleteSessions(ids: string[]) {
+    if (ids.length === 0 || !sessionsList) return
+    setIsDeletingSession(true)
+    try {
+      await Promise.all(ids.map(id => deleteResults(backend ?? 'browser', deckId!, id)))
+      const idSet = new Set(ids)
+      const remaining = sessionsList.filter(s => !idSet.has(s.id))
+      setSessionsList(remaining)
+      if (selectedId && idSet.has(selectedId)) setSelectedId(remaining[0]?.id ?? null)
+      setDeleteConfirmId(null)
+      setShowBulkConfirm(false)
+      setSelectedIds(new Set())
+      setSelectMode(false)
+    } catch (e) {
+      console.error('Failed to delete session results:', e)
+      alert(ids.length === 1 ? 'Could not delete this session. Try again.' : 'Could not delete the selected sessions. Try again.')
+    } finally {
+      setIsDeletingSession(false)
     }
   }
 
@@ -226,12 +264,12 @@ export default function Results() {
           <AlayaMark className="text-white" />
           <div className="flex-1" />
           <button
-            onClick={handleDownloadCSV}
-            disabled={isDownloadingCsv}
-            className="flex items-center gap-1.5 rounded-xl bg-sky-blue px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-blue/85 disabled:opacity-70"
+            onClick={handleDownloadExcel}
+            disabled={isDownloadingXlsx}
+            className="flex items-center gap-1.5 rounded-xl bg-fresh-green px-4 py-2 text-sm font-semibold text-white transition hover:bg-fresh-green/85 disabled:opacity-70"
           >
-            <FileSpreadsheet className="size-3.5" />
-            {isDownloadingCsv ? 'Exporting…' : 'Download CSV'}
+            <Table2 className="size-3.5" />
+            {isDownloadingXlsx ? 'Exporting…' : 'Download Excel'}
           </button>
           <button
             onClick={handleDownload}
@@ -258,7 +296,7 @@ export default function Results() {
           <h1 className="text-4xl font-bold tracking-tight text-midnight-sky-900 sm:text-5xl">
             {deckTitle}
           </h1>
-          <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-midnight-sky-500">
+          <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-midnight-sky-600">
             <span className="flex items-center gap-1.5">
               <Clock className="size-3.5" />
               {formatTimestamp(results.conductedAt)}
@@ -267,6 +305,91 @@ export default function Results() {
               <CloudIcon className="size-3.5" />
               Session <span className="font-mono font-semibold text-midnight-sky-700">{results.sessionCode}</span>
             </span>
+          </div>
+
+          {/* Session history — switch between past sessions for this deck */}
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <span className="flex items-center gap-1 text-xs font-medium uppercase tracking-wider text-midnight-sky-400">
+              <History className="size-3.5" />
+              {sessionsList.length > 1 ? 'Sessions' : 'Session'}
+            </span>
+            {sessionsList.map(s => {
+              const isActive  = s.id === results.id
+              const isChecked = selectedIds.has(s.id)
+              const highlighted = selectMode ? isChecked : isActive
+              return (
+                <div key={s.id} className="group relative">
+                  <button
+                    onClick={() => {
+                      if (selectMode) {
+                        setSelectedIds(prev => {
+                          const next = new Set(prev)
+                          next.has(s.id) ? next.delete(s.id) : next.add(s.id)
+                          return next
+                        })
+                      } else {
+                        setSelectedId(s.id)
+                      }
+                    }}
+                    title={formatTimestamp(s.conductedAt)}
+                    className={cn(
+                      'flex items-center gap-1.5 rounded-full border py-1.5 text-xs font-medium transition',
+                      selectMode ? 'pl-2.5 pr-3' : 'pl-3 pr-7',
+                      highlighted
+                        ? 'border-hot-pink bg-hot-pink/10 text-hot-pink'
+                        : 'border-midnight-sky-200 bg-white text-midnight-sky-500 hover:border-midnight-sky-300 hover:text-midnight-sky-700',
+                    )}
+                  >
+                    {selectMode && (
+                      <span className={cn(
+                        'flex size-3.5 shrink-0 items-center justify-center rounded-full border',
+                        isChecked ? 'border-hot-pink bg-hot-pink text-white' : 'border-midnight-sky-300 bg-white',
+                      )}>
+                        {isChecked && <Check className="size-2.5" />}
+                      </span>
+                    )}
+                    {formatShortDate(s.conductedAt)}
+                  </button>
+                  {!selectMode && (
+                    <button
+                      onClick={() => setDeleteConfirmId(s.id)}
+                      title="Delete this session's results"
+                      className="absolute right-1.5 top-1/2 flex size-4 -translate-y-1/2 items-center justify-center rounded-full text-midnight-sky-300 opacity-0 transition hover:text-red-500 group-hover:opacity-100"
+                    >
+                      <Trash2 className="size-3" />
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+            {sessionsList.length > 1 && (
+              selectMode ? (
+                <div className="flex items-center gap-2">
+                  {selectedIds.size > 0 && (
+                    <button
+                      onClick={() => setShowBulkConfirm(true)}
+                      className="flex items-center gap-1.5 rounded-full bg-red-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-red-600"
+                    >
+                      <Trash2 className="size-3" />
+                      Delete {selectedIds.size}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => { setSelectMode(false); setSelectedIds(new Set()) }}
+                    className="rounded-full border border-midnight-sky-200 px-3 py-1.5 text-xs font-medium text-midnight-sky-500 transition hover:bg-midnight-sky-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setSelectMode(true)}
+                  className="rounded-full border border-midnight-sky-200 px-3 py-1.5 text-xs font-medium text-midnight-sky-500 transition hover:border-midnight-sky-300 hover:text-midnight-sky-700"
+                >
+                  Select
+                </button>
+              )
+            )}
           </div>
         </motion.div>
 
@@ -322,6 +445,60 @@ export default function Results() {
           ))}
         </div>
       </section>
+
+      {/* Delete session confirmation (single or bulk) */}
+      <AnimatePresence>
+        {(deleteConfirmId || showBulkConfirm) && (() => {
+          const ids = deleteConfirmId ? [deleteConfirmId] : Array.from(selectedIds)
+          if (ids.length === 0) return null
+          const single = ids.length === 1 ? sessionsList.find(s => s.id === ids[0]) : null
+          const closeModal = () => { setDeleteConfirmId(null); setShowBulkConfirm(false) }
+          return (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 flex items-center justify-center bg-midnight-sky-900/50 px-4 backdrop-blur-sm"
+              onClick={closeModal}
+            >
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 12 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 12 }}
+                transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                onClick={e => e.stopPropagation()}
+                className="w-full max-w-sm rounded-2xl border border-midnight-sky-100 bg-white p-6 text-center shadow-2xl"
+              >
+                <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-full bg-red-50">
+                  <Trash2 className="size-5 text-red-500" />
+                </div>
+                <h3 className="text-lg font-semibold text-midnight-sky-900">
+                  {ids.length === 1 ? 'Delete this session?' : `Delete ${ids.length} sessions?`}
+                </h3>
+                <p className="mt-2 text-sm font-light text-midnight-sky-500">
+                  {single && <>{formatTimestamp(single.conductedAt)}<br /></>}
+                  This can't be undone.
+                </p>
+                <div className="mt-6 flex gap-3">
+                  <button
+                    onClick={closeModal}
+                    className="flex-1 rounded-xl border border-midnight-sky-200 py-2.5 text-sm font-medium text-midnight-sky-700 transition hover:bg-midnight-sky-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleDeleteSessions(ids)}
+                    disabled={isDeletingSession}
+                    className="flex-1 rounded-xl bg-red-500 py-2.5 text-sm font-medium text-white transition hover:bg-red-600 disabled:opacity-70"
+                  >
+                    {isDeletingSession ? 'Deleting…' : 'Delete'}
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )
+        })()}
+      </AnimatePresence>
     </main>
   )
 }
@@ -359,7 +536,7 @@ function StatCard({
         <span className="text-xs font-medium uppercase tracking-wider text-midnight-sky-500">{label}</span>
       </div>
       <p className="mt-3 text-3xl font-bold tabular-nums text-midnight-sky-900">{value}</p>
-      {sub && <p className="mt-1 text-[11px] font-light text-midnight-sky-400">{sub}</p>}
+      {sub && <p className="mt-1 text-[11px] font-light text-midnight-sky-500">{sub}</p>}
     </motion.div>
   )
 }
@@ -423,6 +600,18 @@ function QuestionResult({ index, question, audienceCount }: {
             <span className="font-semibold text-midnight-sky-700">{participation}%</span>
             <span>participation</span>
           </span>
+          {question.type === 'mcq' && (question.correctAnswers?.length ?? 0) > 0 && (
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 className="size-3 text-fresh-green" />
+              <span className="font-semibold text-fresh-green">
+                {Math.round(
+                  (question.responses.filter(r => isResponseCorrect(r, question) === true).length
+                    / Math.max(1, question.responseCount)) * 100
+                )}%
+              </span>
+              <span>answered correctly</span>
+            </span>
+          )}
         </div>
       </div>
 
@@ -480,26 +669,30 @@ function MCQVisual({ q }: { q: ResultQuestion }) {
   })
   const total = votes.reduce((s, v) => s + v, 0) || q.responseCount
   const maxV  = Math.max(...votes, 1)
+  const correctSet = new Set(q.correctAnswers ?? [])
 
   return (
     <div className="space-y-3">
       {q.options.map((opt, i) => {
         const v   = votes[i]
         const pct = total > 0 ? Math.round((v / total) * 100) : 0
-        const isWinner = v > 0 && v === maxV
+        const isWinner  = v > 0 && v === maxV
+        const isCorrect = correctSet.has(i)
         return (
           <div key={i} className="flex items-center gap-3">
             <span className={cn(
               'flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold',
               isWinner ? 'bg-hot-pink text-white' : 'bg-midnight-sky-100 text-midnight-sky-600',
+              isCorrect && 'ring-2 ring-fresh-green ring-offset-1',
             )}>
               {String.fromCharCode(65 + i)}
             </span>
             <span className={cn(
-              'w-32 shrink-0 truncate text-sm font-medium sm:w-48',
+              'flex w-32 shrink-0 items-center gap-1 text-sm font-medium sm:w-48',
               isWinner ? 'text-midnight-sky-900' : 'text-midnight-sky-700',
             )}>
-              {opt || `Option ${String.fromCharCode(65 + i)}`}
+              <span className="truncate">{opt || `Option ${String.fromCharCode(65 + i)}`}</span>
+              {isCorrect && <CheckCircle2 className="size-3.5 shrink-0 text-fresh-green" />}
             </span>
             <div className="relative h-7 min-w-0 flex-1 overflow-hidden rounded-lg bg-midnight-sky-100">
               <motion.div
@@ -694,7 +887,7 @@ function RatingVisual({ q }: { q: ResultQuestion }) {
                     </div>
                     <span className={cn(
                       'text-[9px] font-medium tabular-nums',
-                      count > 0 ? 'text-midnight-sky-600' : 'text-midnight-sky-300',
+                      count > 0 ? 'text-midnight-sky-600' : 'text-midnight-sky-500',
                     )}>{b}</span>
                   </div>
                 )
@@ -702,12 +895,12 @@ function RatingVisual({ q }: { q: ResultQuestion }) {
             </div>
 
             {/* Scale end labels (left/right anchor text) or default score labels */}
-            <div className="mt-1 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-midnight-sky-400">
+            <div className="mt-1 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-midnight-sky-600">
               <span className="truncate pr-2">{left || '0 (low)'}</span>
               <span className="truncate pl-2 text-right">{right || `${ratingMax} (high)`}</span>
             </div>
 
-            <p className="mt-2 text-[11px] font-light text-midnight-sky-400">
+            <p className="mt-2 text-[11px] font-light text-midnight-sky-600">
               Based on {cnts[i]} {cnts[i] === 1 ? 'response' : 'responses'} · numbers above bars = votes at that score
             </p>
           </div>
@@ -809,6 +1002,10 @@ function formatTimestamp(ts: number): string {
   })
 }
 
+function formatShortDate(ts: number): string {
+  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
@@ -821,6 +1018,20 @@ function formatTime(ts: number): string {
 function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckResults, totalResponses: number, avgParticipation: number) {
   const pageW = doc.internal.pageSize.getWidth()
   const margin = 40
+
+  // "alaya pulse" wordmark — top-right corner, one line tall
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(14)
+  const wordmarkAlaya = 'alaya'
+  const wordmarkPulse = ' pulse'
+  const wordmarkAlayaW = doc.getTextWidth(wordmarkAlaya)
+  const wordmarkPulseW = doc.getTextWidth(wordmarkPulse)
+  const wordmarkX = pageW - margin - (wordmarkAlayaW + wordmarkPulseW)
+  doc.setTextColor(0, 0, 0)
+  doc.text(wordmarkAlaya, wordmarkX, 40)
+  doc.setTextColor(255, 0, 101)
+  doc.text(wordmarkPulse, wordmarkX + wordmarkAlayaW, 40)
+  doc.setTextColor(0, 0, 0)
 
   // Cover
   doc.setFont('helvetica', 'bold')
@@ -902,11 +1113,27 @@ function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckRes
         indices.forEach(i => { if (!isNaN(i) && i >= 0 && i < q.options.length) votes[i]++ })
       })
       const total = votes.reduce((s, v) => s + v, 0) || q.responseCount
+      const correctSet = new Set(q.correctAnswers ?? [])
+
+      // "Correct answer: X" line, if a correct answer was marked — full
+      // option text isn't repeated here since it's shown in the table below.
+      if (correctSet.size > 0) {
+        const letters = [...correctSet].sort((a, b) => a - b).map(i => String.fromCharCode(65 + i)).join(', ')
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(11)
+        doc.setTextColor(0, 130, 70)
+        doc.text(`Correct answer${correctSet.size > 1 ? 's' : ''}: ${letters}`, margin, cursorY)
+        doc.setTextColor(0, 0, 0)
+        doc.setFont('helvetica', 'normal')
+        cursorY += 22
+      }
+
       // Normalise option text — strip newlines so long options wrap cleanly in the table cell
       const body = q.options.map((opt, i) => {
         const pct = total > 0 ? Math.round((votes[i] / total) * 100) : 0
         const cleanOpt = (opt || '-').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()
-        return [String.fromCharCode(65 + i), cleanOpt, String(votes[i]), `${pct}%`]
+        const label = correctSet.has(i) ? `${cleanOpt}  (correct)` : cleanOpt
+        return [String.fromCharCode(65 + i), label, String(votes[i]), `${pct}%`]
       })
       autoTable(doc, {
         startY: cursorY,
@@ -916,10 +1143,23 @@ function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckRes
         headStyles:   { fillColor: [0, 0, 121] },
         styles:       { fontSize: 10, cellPadding: 6, overflow: 'linebreak' },
         // Col 0 = letter (A/B…), Col 2 = Votes (needs ≥44pt so header doesn't wrap), Col 3 = %
-        columnStyles: { 0: { cellWidth: 18 }, 2: { cellWidth: 44, halign: 'center' }, 3: { cellWidth: 36, halign: 'center' } },
+        columnStyles: { 0: { cellWidth: 18 }, 2: { cellWidth: 44, halign: 'center' }, 3: { cellWidth: 42, halign: 'center' } },
         margin: { left: margin, right: margin },
       })
       cursorY = (doc as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? cursorY + 50
+
+      // "% answered correctly" line, if a correct answer was marked
+      if (correctSet.size > 0) {
+        const correctCount = q.responses.filter(resp => isResponseCorrect(resp, q) === true).length
+        const pctCorrect   = q.responseCount > 0 ? Math.round((correctCount / q.responseCount) * 100) : 0
+        cursorY += 20
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(11)
+        doc.setTextColor(0, 130, 70)
+        doc.text(`${pctCorrect}% answered correctly  (${correctCount} of ${q.responseCount})`, margin, cursorY)
+        doc.setTextColor(0, 0, 0)
+        doc.setFont('helvetica', 'normal')
+      }
     } else if (q.type === 'rating') {
       const ratingMax = q.ratingMax === 10 ? 10 : 5
       const sums = Array(q.options.length).fill(0)
@@ -971,25 +1211,23 @@ function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckRes
         })
         cursorY = (doc as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? cursorY + 50
       }
-    }
-
-    // Individual responses table (if any)
-    if (q.responses.length > 0) {
-      const body = q.responses.map(r => [
-        r.name,
-        formatResponseAsText(r, q),
-        formatTime(r.time),
-      ])
-      autoTable(doc, {
-        startY: cursorY + 20,
-        head:   [['Respondent', 'Response', 'Time']],
-        body,
-        theme:  'grid',
-        headStyles: { fillColor: [60, 60, 80] },
-        styles: { fontSize: 9, cellPadding: 5 },
-        columnStyles: { 1: { cellWidth: 'auto' } },
-        margin: { left: margin, right: margin },
-      })
+    } else if (q.type === 'openended') {
+      const body = q.responses
+        .filter(r => r.value.trim())
+        .map(r => [r.name, r.value.trim()])
+      if (body.length > 0) {
+        autoTable(doc, {
+          startY: cursorY,
+          head:   [['Respondent', 'Response']],
+          body,
+          theme:  'striped',
+          headStyles: { fillColor: [0, 0, 121] },
+          styles: { fontSize: 10, cellPadding: 6, overflow: 'linebreak' },
+          columnStyles: { 0: { cellWidth: 110 } },
+          margin: { left: margin, right: margin },
+        })
+        cursorY = (doc as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? cursorY + 50
+      }
     }
   })
 }

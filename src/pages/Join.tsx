@@ -142,6 +142,8 @@ export default function Join() {
     setStatus('loading')
     const sessionCode = code.join('')
     const emoji = selectedEmoji ?? ALL_EMOJIS[Math.floor(Math.random() * ALL_EMOJIS.length)]
+    // Persist the assigned emoji so Vote.tsx can recover it even if the URL param is lost
+    try { sessionStorage.setItem('alaya-viewer-emoji', emoji) } catch {}
 
     try {
       const session = await getSessionByCode(sessionCode)
@@ -185,7 +187,7 @@ export default function Join() {
           {/* Heading */}
           <div className="mb-10 text-center">
             <h1 className="text-3xl font-semibold tracking-tight text-midnight-sky-900 sm:text-4xl">
-              Join a session
+              Join the show
             </h1>
             <p className="mt-2 text-base font-light text-midnight-sky-600">
               Enter the code shown on the screen
@@ -225,7 +227,6 @@ export default function Join() {
               className="mb-1.5 block text-sm font-medium text-midnight-sky-800"
             >
               Your name
-              <span className="ml-1 font-light text-midnight-sky-500">(optional)</span>
             </label>
             <input
               id="join-name"
@@ -234,11 +235,11 @@ export default function Join() {
               value={name}
               onChange={e => setName(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && codeComplete && handleJoin()}
-              placeholder="e.g. Sarah"
+              placeholder="Leave blank to stay anonymous"
               maxLength={40}
               disabled={status === 'loading'}
               className={cn(
-                'w-full rounded-2xl border border-midnight-sky-300 bg-white px-4 py-3.5 text-base text-midnight-sky-900 placeholder:text-midnight-sky-400',
+                'w-full rounded-2xl border border-midnight-sky-300 bg-white px-4 py-3.5 text-base text-midnight-sky-900 placeholder:text-midnight-sky-500',
                 'outline-none transition-all duration-150',
                 'focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/20',
                 'disabled:opacity-50',
@@ -301,7 +302,7 @@ export default function Join() {
                 ))}
               </div>
             </div>
-            <p className="mt-1.5 text-center text-[11px] text-midnight-sky-400">
+            <p className="mt-1.5 text-center text-[11px] text-midnight-sky-600">
               No preference? We'll pick one for you.
             </p>
           </div>

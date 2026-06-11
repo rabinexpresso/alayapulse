@@ -56,6 +56,8 @@ export interface ResultQuestion {
   rightLabel?: string
   /** Visualization hint for MCQ — bar/pie/donut. */
   vizType?:  'bar' | 'pie' | 'donut'
+  /** MCQ only — 0-based indices of correct option(s), if marked by the presenter. */
+  correctAnswers?: number[]
   /** Individual responses. May be empty after aggregate-only trim. */
   responses: ResultResponse[]
   /** Total response count — preserved even if responses are dropped. */
@@ -63,6 +65,8 @@ export interface ResultQuestion {
 }
 
 export interface DeckResults {
+  /** Unique id for this session's results — used for history lists and deletion. */
+  id:             string
   /** The 6-char session code from the live poll. */
   sessionCode:    string
   /** Unix ms when the session started. */
@@ -77,6 +81,24 @@ export interface DeckResults {
   trimmed?:       boolean
   /** Human-readable note about how trimming was applied. */
   trimNote?:      string
+}
+
+/**
+ * Whether an MCQ response matches the question's marked correct answer(s).
+ * Returns null when correctness doesn't apply (non-MCQ, or no correct
+ * answer was marked on the slide).
+ */
+export function isResponseCorrect(response: ResultResponse, question: ResultQuestion): boolean | null {
+  if (question.type !== 'mcq' || !question.correctAnswers?.length) return null
+  let indices: number[]
+  try {
+    const parsed = JSON.parse(response.value)
+    indices = Array.isArray(parsed) ? parsed as number[] : [parseInt(response.value, 10)]
+  } catch {
+    indices = [parseInt(response.value, 10)]
+  }
+  const correct = new Set(question.correctAnswers)
+  return indices.length === correct.size && indices.every(i => correct.has(i))
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -102,12 +124,12 @@ export function clearStorageBackend(): void {
 
 const IDB_NAME    = 'alaya-pulse'
 const IDB_STORE   = 'decks'
-const IDB_RESULTS = 'results'   // keyPath = deckId
+const IDB_RESULTS = 'results'   // keyPath = `${deckId}__${sessionId}`, indexed by deckId
 let _idb: IDBPDatabase | null = null
 
 async function getIDB(): Promise<IDBPDatabase> {
   if (!_idb) {
-    _idb = await openDB(IDB_NAME, 2, {
+    _idb = await openDB(IDB_NAME, 3, {
       upgrade(database, oldVersion) {
         if (oldVersion < 1) {
           database.createObjectStore(IDB_STORE, { keyPath: 'id' })
@@ -115,6 +137,15 @@ async function getIDB(): Promise<IDBPDatabase> {
         if (oldVersion < 2) {
           // v2: results store, one entry per deckId
           database.createObjectStore(IDB_RESULTS, { keyPath: 'deckId' })
+        }
+        if (oldVersion < 3) {
+          // v3: results store now holds one entry PER SESSION (history support).
+          // Drop the old single-entry store and recreate with a composite key.
+          if (database.objectStoreNames.contains(IDB_RESULTS)) {
+            database.deleteObjectStore(IDB_RESULTS)
+          }
+          const store = database.createObjectStore(IDB_RESULTS, { keyPath: '_key' })
+          store.createIndex('deckId', 'deckId')
         }
       },
     })
@@ -391,49 +422,64 @@ export function trimResultsForFirestore(results: DeckResults): DeckResults {
   return limited
 }
 
-function resultsDoc(uid: string, deckId: string) {
-  return doc(db, 'users', uid, 'decks', deckId, 'results', 'latest')
+function resultsCollection(uid: string, deckId: string) {
+  return collection(db, 'users', uid, 'decks', deckId, 'results')
+}
+
+function resultsDoc(uid: string, deckId: string, sessionId: string) {
+  return doc(db, 'users', uid, 'decks', deckId, 'results', sessionId)
 }
 
 export async function cloudSaveResults(deckId: string, results: DeckResults): Promise<void> {
   const user = auth.currentUser
   if (!user) throw new Error('Not signed in')
   const trimmed = trimResultsForFirestore(results)
-  await setDoc(resultsDoc(user.uid, deckId), stripUndefined(trimmed))
+  await setDoc(resultsDoc(user.uid, deckId, results.id), stripUndefined(trimmed))
 }
 
-export async function cloudLoadResults(deckId: string): Promise<DeckResults | null> {
+/** All saved sessions for a deck, newest first. */
+export async function cloudListResults(deckId: string): Promise<DeckResults[]> {
   const user = auth.currentUser
-  if (!user) return null
-  const snap = await getDoc(resultsDoc(user.uid, deckId))
-  if (!snap.exists()) return null
-  return snap.data() as DeckResults
+  if (!user) return []
+  const snap = await getDocs(resultsCollection(user.uid, deckId))
+  return snap.docs
+    .map(d => {
+      const data = d.data() as DeckResults
+      // Older sessions (saved before per-session storage) used a fixed
+      // doc id of "latest" and have no `id` field — backfill it from the doc id.
+      return { ...data, id: data.id ?? d.id }
+    })
+    .sort((a, b) => b.conductedAt - a.conductedAt)
 }
 
-export async function cloudDeleteResults(deckId: string): Promise<void> {
+export async function cloudDeleteResults(deckId: string, sessionId: string): Promise<void> {
   const user = auth.currentUser
   if (!user) return
-  try { await deleteDoc(resultsDoc(user.uid, deckId)) } catch { /* ignore */ }
+  try { await deleteDoc(resultsDoc(user.uid, deckId, sessionId)) } catch { /* ignore */ }
 }
 
 export async function browserSaveResults(deckId: string, results: DeckResults): Promise<void> {
   const idb = await getIDB()
   // IndexedDB has no per-doc cap — store the full results.
-  await idb.put(IDB_RESULTS, { deckId, ...results })
+  await idb.put(IDB_RESULTS, { _key: `${deckId}__${results.id}`, deckId, ...results })
 }
 
-export async function browserLoadResults(deckId: string): Promise<DeckResults | null> {
+/** All saved sessions for a deck, newest first. */
+export async function browserListResults(deckId: string): Promise<DeckResults[]> {
   const idb = await getIDB()
-  const row = await idb.get(IDB_RESULTS, deckId) as (DeckResults & { deckId: string }) | undefined
-  if (!row) return null
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { deckId: _drop, ...rest } = row
-  return rest as DeckResults
+  const all = await idb.getAllFromIndex(IDB_RESULTS, 'deckId', deckId) as (DeckResults & { _key: string; deckId: string })[]
+  return all
+    .map(row => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { _key, deckId: _drop, ...rest } = row
+      return rest as DeckResults
+    })
+    .sort((a, b) => b.conductedAt - a.conductedAt)
 }
 
-export async function browserDeleteResults(deckId: string): Promise<void> {
+export async function browserDeleteResults(deckId: string, sessionId: string): Promise<void> {
   const idb = await getIDB()
-  try { await idb.delete(IDB_RESULTS, deckId) } catch { /* ignore */ }
+  try { await idb.delete(IDB_RESULTS, `${deckId}__${sessionId}`) } catch { /* ignore */ }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -515,7 +561,7 @@ export async function getSharedDeck(shareId: string): Promise<SharedDeck | null>
   return data
 }
 
-/** Backend-agnostic save/load — picks the right backend based on storage preference. */
+/** Backend-agnostic save/list/delete — picks the right backend based on storage preference. */
 export async function saveResults(
   backend: StorageBackend, deckId: string, results: DeckResults,
 ): Promise<void> {
@@ -523,19 +569,20 @@ export async function saveResults(
     ? cloudSaveResults(deckId, results)
     : browserSaveResults(deckId, results)
 }
-export async function loadResults(
+/** All saved sessions for a deck, newest first. */
+export async function listResults(
   backend: StorageBackend, deckId: string,
-): Promise<DeckResults | null> {
+): Promise<DeckResults[]> {
   return backend === 'cloud'
-    ? cloudLoadResults(deckId)
-    : browserLoadResults(deckId)
+    ? cloudListResults(deckId)
+    : browserListResults(deckId)
 }
 export async function deleteResults(
-  backend: StorageBackend, deckId: string,
+  backend: StorageBackend, deckId: string, sessionId: string,
 ): Promise<void> {
   return backend === 'cloud'
-    ? cloudDeleteResults(deckId)
-    : browserDeleteResults(deckId)
+    ? cloudDeleteResults(deckId, sessionId)
+    : browserDeleteResults(deckId, sessionId)
 }
 
 /* ─────────────────────────────────────────────────────────────────────────

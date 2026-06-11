@@ -504,7 +504,22 @@ export function injectPersistentHtmlNavScript(
         done(); return;
       }
     } catch (e) {}
-    // 3) Hash navigation
+    // 3) AI-generated / custom slideshow: try common 1-based function names.
+    //    AI tools (Claude, ChatGPT, etc.) consistently produce gotoSlide(N),
+    //    showSlide(N), etc. with 1-based indexing. Check before falling back
+    //    to keypress navigation which these slideshows typically ignore.
+    try {
+      var _fns = ['gotoSlide', 'showSlide', 'goToSlide', 'changeSlide'];
+      for (var _fi = 0; _fi < _fns.length; _fi++) {
+        if (typeof window[_fns[_fi]] === 'function') {
+          log('using direct fn', _fns[_fi]);
+          window[_fns[_fi]](target + 1);  // 0-based Pulse index → 1-based HTML index
+          currentIndex = target;
+          done(); return;
+        }
+      }
+    } catch (e) {}
+    // 4) Hash navigation
     try { window.location.hash = '#/' + target; } catch (e) {}
 
     // 4) Keypress nav with slide-change counting + iframe settle detection.
@@ -625,6 +640,17 @@ export function injectPersistentHtmlNavScript(
         window.impress().goto(0);
         currentIndex = 0;
         done(); return;
+      }
+    } catch (e) {}
+    // Direct function call — rewind to slide 1 (1-based)
+    try {
+      var _rwFns = ['gotoSlide', 'showSlide', 'goToSlide', 'changeSlide'];
+      for (var _rwfi = 0; _rwfi < _rwFns.length; _rwfi++) {
+        if (typeof window[_rwFns[_rwfi]] === 'function') {
+          window[_rwFns[_rwfi]](1);
+          currentIndex = 0;
+          done(); return;
+        }
       }
     } catch (e) {}
 

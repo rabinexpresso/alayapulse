@@ -23,6 +23,7 @@ import {
 import { AlayaMark } from '@/components/AlayaMark'
 import { PersistentHtmlIframe } from '@/components/PersistentHtmlIframe'
 import { cn } from '@/lib/utils'
+import { injectSlideNavigation } from '@/lib/importFile'
 import {
   getStorageBackend, setStorageBackend,
   browserSaveDeck, cloudSaveDeck, getUniqueDeckTitle,
@@ -246,6 +247,8 @@ interface QuestionSlide {
   wcMaxSubmissions?: number
   /** Optional countdown timer in seconds shown during the question phase. */
   timer?: number
+  /** MCQ only — optional plain-text explanation shown on the big screen when the answer is revealed. */
+  explanation?: string
 }
 type ContentTemplate = 'heading' | 'bullets' | 'quote'
 interface ContentSlide {
@@ -307,6 +310,108 @@ function makeQuestion(type: QType, isQuizMode = false): QuestionSlide {
     // Default 30s timer on MCQ slides when quiz mode is on (needed for speed points)
     ...(isQuizMode && type === 'mcq' ? { timer: 30 } : {}),
   }
+}
+
+/* ── CSV import helpers ─────────────────────────────────────────────────── */
+
+function parseCsvRow(line: string): string[] {
+  const result: string[] = []
+  let current = ''
+  let inQuotes = false
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') { current += '"'; i++ }
+      else inQuotes = !inQuotes
+    } else if (ch === ',' && !inQuotes) {
+      result.push(current); current = ''
+    } else {
+      current += ch
+    }
+  }
+  result.push(current)
+  return result
+}
+
+interface CsvParseResult {
+  slides: QuestionSlide[]
+  errors: Array<{ row: number; message: string }>
+}
+
+function parseCsvQuestions(csvText: string): CsvParseResult {
+  const lines = csvText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
+  const slides: QuestionSlide[] = []
+  const errors: Array<{ row: number; message: string }> = []
+  const LETTER_IDX: Record<string, number> = { A: 0, B: 1, C: 2, D: 3, E: 4, F: 5 }
+
+  let headerIdx = -1
+  let headers: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim()
+    if (!t || t.startsWith('#')) continue
+    headers = parseCsvRow(lines[i]).map(h => h.trim().toLowerCase())
+    headerIdx = i
+    break
+  }
+
+  if (headerIdx === -1) {
+    errors.push({ row: 0, message: 'No header row found.' })
+    return { slides, errors }
+  }
+
+  const ci = (name: string) => headers.indexOf(name)
+  const VALID_TYPES = ['mcq', 'wordcloud', 'openended', 'rating']
+
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    const t = lines[i].trim()
+    if (!t || t.startsWith('#')) continue
+    const vals = parseCsvRow(lines[i]).map(v => v.trim())
+    const get = (name: string) => vals[ci(name)] ?? ''
+
+    const type = get('type').toLowerCase()
+    const question = get('question')
+    if (!type && !question) continue
+
+    if (!VALID_TYPES.includes(type)) {
+      errors.push({ row: i + 1, message: `Row ${i + 1}: unknown type "${get('type')}" — must be mcq, wordcloud, openended, or rating.` })
+      continue
+    }
+    if (!question) {
+      errors.push({ row: i + 1, message: `Row ${i + 1}: missing question text.` })
+      continue
+    }
+
+    const timerVal = parseInt(get('timer'))
+    const slide: QuestionSlide = {
+      id: uid(),
+      type: type as QType,
+      question,
+      options: [],
+      timer: (!isNaN(timerVal) && timerVal > 0) ? timerVal : 30,
+    }
+
+    if (type === 'mcq') {
+      const optKeys = ['option_a', 'option_b', 'option_c', 'option_d', 'option_e', 'option_f']
+      slide.options = optKeys.map(k => get(k)).filter(o => o !== '')
+      if (slide.options.length < 2) {
+        errors.push({ row: i + 1, message: `Row ${i + 1}: MCQ needs at least 2 options — skipped.` })
+        continue
+      }
+      const correctRaw = get('correct')
+      if (correctRaw) {
+        const idxs = correctRaw.toUpperCase().split('|')
+          .map(l => LETTER_IDX[l.trim()])
+          .filter((n): n is number => n !== undefined && n < slide.options.length)
+        if (idxs.length) slide.correctAnswers = idxs
+      }
+      const expl = get('explanation')
+      if (expl) slide.explanation = expl
+    }
+
+    slides.push(slide)
+  }
+
+  return { slides, errors }
 }
 
 /* ── Content slide helpers ─────────────────────────────────────────────── */
@@ -494,6 +599,11 @@ export default function Create() {
   const [largeHtmlToast, setLargeHtmlToast] = useState<{
     fileName: string; sizeKB: number
   } | null>(null)
+  // Quiz-on toast — shown when the user enables quiz mode
+  // 'add'    → no leaderboard slide yet; offer to insert one
+  // 'exists' → leaderboard already present; just confirm quiz is on
+  const [quizOnToast, setQuizOnToast] = useState<'add' | 'exists' | null>(null)
+  const [csvImportToast, setCsvImportToast] = useState<{ count: number } | null>(null)
 
   /* ── Undo / Redo history ─────────────────────────────────────────────── */
   type HistorySnap = { slides: Slide[]; selectedId: string | null }
@@ -650,6 +760,13 @@ export default function Create() {
       if (lastResults) {
         try {
           await saveResults(b, deck.id, lastResults)
+          // Mark this session's results as saved so re-mounting this page
+          // (e.g. browser-back from /results) doesn't repeat the save.
+          // Keyed by the per-session id (not sessionCode) so a "Resume"
+          // run — which reuses the same room code — still gets saved.
+          if (lastResults.id) {
+            sessionStorage.setItem(`alaya-results-saved-${lastResults.id}`, '1')
+          }
         } catch (e) {
           console.error('Saving results failed (deck still saved):', e)
           const msg = e instanceof Error ? e.message : 'Unknown error'
@@ -838,7 +955,7 @@ export default function Create() {
           const slides: HtmlSlide[] = Array.from({ length: detected }, (_, i) => ({
             id:         i === 0 ? firstId : uid(),
             type:       'html',
-            html,
+            html:       injectSlideNavigation(html, i),
             fileName:   file.name,
             slideIndex: i,
             slideTotal: detected,
@@ -858,6 +975,15 @@ export default function Create() {
       setImporting(false)
     }
   }, [])
+
+  /* ── CSV import ──────────────────────────────────────────────────────── */
+
+  const importCsvSlides = useCallback((newSlides: QuestionSlide[]) => {
+    pushHistory()
+    setSlides(prev => [...prev, ...newSlides])
+    setSelectedId(prev => prev ?? newSlides[0]?.id ?? null)
+    setCsvImportToast({ count: newSlides.length })
+  }, [pushHistory])
 
   /* ── Slide mutation ─────────────────────────────────────────────────── */
 
@@ -1004,6 +1130,20 @@ export default function Create() {
     return () => window.clearTimeout(id)
   }, [largeHtmlToast])
 
+  // Auto-dismiss the quiz-on toast after 8 seconds
+  useEffect(() => {
+    if (!quizOnToast) return
+    const id = window.setTimeout(() => setQuizOnToast(null), 8000)
+    return () => window.clearTimeout(id)
+  }, [quizOnToast])
+
+  // Auto-dismiss the CSV import toast after 10 seconds
+  useEffect(() => {
+    if (!csvImportToast) return
+    const id = window.setTimeout(() => setCsvImportToast(null), 10000)
+    return () => window.clearTimeout(id)
+  }, [csvImportToast])
+
   // ── Auto-save results when the user returns from a session ──────────
   // When `lastResults` arrives via router state (set by Present.tsx on
   // session end), persist it without making the user click Save. If no
@@ -1013,6 +1153,17 @@ export default function Create() {
   const autoSavedResultsRef = useRef<DeckResults | undefined>(undefined)
   useEffect(() => {
     if (!lastResults) return
+
+    // Results for this session were already saved on a previous mount
+    // (e.g. browser-back from /results page) — don't repeat the save.
+    if (lastResults.id && sessionStorage.getItem(`alaya-results-saved-${lastResults.id}`)) {
+      autoSavedResultsRef.current = lastResults
+      if (!currentDeckId) {
+        const cachedDeckId = sessionStorage.getItem(`alaya-autosave-${lastResults.sessionCode}`)
+        if (cachedDeckId) setCurrentDeckId(cachedDeckId)
+      }
+      return
+    }
 
     // When Create remounts (e.g. browser-back from /results page), the ref
     // resets to undefined but the session was already saved. Check sessionStorage
@@ -1195,7 +1346,6 @@ export default function Create() {
             onClick={() => navigate('/decks')}
             className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl bg-fresh-green px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-fresh-green/85 active:scale-95"
           >
-            <span className="text-sm leading-none">←</span>
             My Decks
           </button>
           <span className="h-4 w-px bg-white/15" />
@@ -1234,13 +1384,18 @@ export default function Create() {
           {/* Quiz mode toggle — styled as a prominent button (matches Save / Export) */}
           <motion.button
             onClick={() => {
-              // When turning quiz ON, apply 30s default to any MCQ slide without a timer
               if (!isQuiz) {
+                // Apply 30s default to any MCQ slide without a timer
                 setSlides(prev => prev.map(s =>
                   s.type === 'mcq' && !(s as QuestionSlide).timer
                     ? { ...s, timer: 30 }
                     : s
                 ))
+                // Show leaderboard nudge toast
+                const hasLeaderboard = slides.some(s => (s as { type: string }).type === 'leaderboard')
+                setQuizOnToast(hasLeaderboard ? 'exists' : 'add')
+              } else {
+                setQuizOnToast(null)
               }
               setIsQuiz(v => !v)
             }}
@@ -1495,6 +1650,79 @@ export default function Create() {
         )}
       </AnimatePresence>
 
+      {/* ── Quiz-on leaderboard nudge ───────────────────────────────── */}
+      <AnimatePresence>
+        {quizOnToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+            className="absolute left-1/2 top-16 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border border-golden-sun/30 bg-white px-4 py-2 shadow-[0_8px_24px_-8px_rgba(0,0,121,0.18)]"
+          >
+            <Trophy className="size-3.5 shrink-0 text-golden-sun" />
+            {quizOnToast === 'add' ? (
+              <>
+                <span className="text-xs font-medium text-midnight-sky-700">
+                  Add a Leaderboard slide to show the top 10 players
+                </span>
+                <button
+                  onClick={() => {
+                    addLeaderboard()
+                    setQuizOnToast(null)
+                  }}
+                  className="rounded-full bg-golden-sun px-2.5 py-1 text-[11px] font-semibold text-midnight-sky-900 transition hover:opacity-90"
+                >
+                  Add leaderboard
+                </button>
+              </>
+            ) : (
+              <span className="text-xs font-medium text-midnight-sky-700">
+                Leaderboard slide already in your deck ✓
+              </span>
+            )}
+            <button
+              onClick={() => setQuizOnToast(null)}
+              className="rounded-full p-0.5 text-midnight-sky-400 transition hover:bg-midnight-sky-100 hover:text-midnight-sky-700"
+              aria-label="Dismiss"
+            >
+              <X className="size-3.5" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── CSV import success toast ────────────────────────────────── */}
+      <AnimatePresence>
+        {csvImportToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+            className="absolute left-1/2 top-16 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border border-fresh-green/30 bg-white px-4 py-2 shadow-[0_8px_24px_-8px_rgba(0,0,121,0.18)]"
+          >
+            <span className="flex size-2 shrink-0 rounded-full bg-fresh-green" />
+            <span className="text-xs font-medium text-midnight-sky-700">
+              {csvImportToast.count} question{csvImportToast.count !== 1 ? 's' : ''} added to the end of your deck
+            </span>
+            <button
+              onClick={() => { setShowSorter(true); setCsvImportToast(null) }}
+              className="rounded-full bg-midnight-sky-100 px-2.5 py-1 text-[11px] font-semibold text-midnight-sky-700 transition hover:bg-midnight-sky-200"
+            >
+              Open Slide Overview
+            </button>
+            <button
+              onClick={() => setCsvImportToast(null)}
+              className="rounded-full p-0.5 text-midnight-sky-400 transition hover:bg-midnight-sky-100 hover:text-midnight-sky-700"
+              aria-label="Dismiss"
+            >
+              <X className="size-3.5" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ── Large-HTML warning ──────────────────────────────────────── */}
       <AnimatePresence>
         {largeHtmlToast && (
@@ -1561,6 +1789,7 @@ export default function Create() {
           onDuplicate={duplicateSlide}
           onDragEnd={handleDragEnd}
           onImport={importFile}
+          onImportCsv={importCsvSlides}
           onOpenSorter={() => setShowSorter(true)}
           onSetAddMenu={setAddMenu}
           onAddQuestion={addQuestion}
@@ -1583,12 +1812,163 @@ export default function Create() {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
+   CSV Import Modal
+   ───────────────────────────────────────────────────────────────────────── */
+
+function CsvImportModal({ onClose, onImport }: {
+  onClose: () => void
+  onImport: (slides: QuestionSlide[]) => void
+}) {
+  const [parseResult, setParseResult] = useState<CsvParseResult | null>(null)
+  const [dragOver, setDragOver]       = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const handleFile = async (file: File) => {
+    if (!file.name.toLowerCase().endsWith('.csv')) return
+    const text = await file.text()
+    setParseResult(parseCsvQuestions(text))
+  }
+
+  const TYPE_LABEL:  Record<string, string> = { mcq: 'MCQ', wordcloud: 'Word Cloud', openended: 'Open Ended', rating: 'Rating' }
+  const TYPE_COLOUR: Record<string, string> = {
+    mcq:       'bg-sky-blue/15 text-sky-blue',
+    wordcloud: 'bg-fresh-green/15 text-fresh-green',
+    openended: 'bg-golden-sun/15 text-golden-sun',
+    rating:    'bg-hot-pink/15 text-hot-pink',
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.97 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.97 }}
+        transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+        className="flex w-full max-w-lg flex-col rounded-2xl bg-white shadow-2xl"
+        style={{ maxHeight: 'calc(100vh - 48px)' }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-midnight-sky-100 px-5 py-4">
+          <h2 className="text-sm font-semibold text-midnight-sky-800">Import questions in CSV</h2>
+          <button onClick={onClose} className="rounded-lg p-1 text-midnight-sky-400 transition hover:bg-midnight-sky-100 hover:text-midnight-sky-700">
+            <X className="size-4" />
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-4 overflow-y-auto p-5">
+          {/* Download template */}
+          <div className="flex items-center justify-between rounded-xl border border-midnight-sky-100 bg-midnight-sky-50 px-4 py-3">
+            <div>
+              <p className="text-xs font-medium text-midnight-sky-700">Need the template?</p>
+              <p className="mt-0.5 text-[11px] text-midnight-sky-500">Fill it in, or use ChatGPT / Claude to convert your Word doc</p>
+            </div>
+            <a
+              href="/alaya_pulse_import_template.csv"
+              download="alaya_pulse_import_template.csv"
+              className="flex shrink-0 items-center gap-1.5 rounded-lg bg-midnight-sky-800 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-midnight-sky-700"
+              onClick={e => e.stopPropagation()}
+            >
+              <Upload className="size-3 rotate-180" />
+              Download template
+            </a>
+          </div>
+
+          {/* Upload area or parsed results */}
+          {!parseResult ? (
+            <div
+              onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f) }}
+              onClick={() => fileRef.current?.click()}
+              className={cn(
+                'flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed py-10 transition',
+                dragOver
+                  ? 'border-sky-blue bg-sky-blue/5'
+                  : 'border-midnight-sky-200 hover:border-midnight-sky-400 hover:bg-midnight-sky-50',
+              )}
+            >
+              <Upload className="size-6 text-midnight-sky-400" />
+              <p className="text-sm font-medium text-midnight-sky-700">Drop your CSV file here</p>
+              <p className="text-[11px] text-midnight-sky-400">or click to browse</p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {/* Errors */}
+              {parseResult.errors.length > 0 && (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+                  <p className="mb-1.5 text-[11px] font-semibold text-red-700">
+                    {parseResult.errors.length} row{parseResult.errors.length > 1 ? 's' : ''} skipped
+                  </p>
+                  {parseResult.errors.map((err, i) => (
+                    <p key={i} className="text-[11px] text-red-600">{err.message}</p>
+                  ))}
+                </div>
+              )}
+
+              {/* Slides preview list */}
+              {parseResult.slides.length > 0 ? (
+                <div className="flex flex-col gap-1 rounded-xl border border-midnight-sky-100 p-1.5" style={{ maxHeight: 280, overflowY: 'auto' }}>
+                  {parseResult.slides.map((s, i) => (
+                    <div key={s.id} className="flex items-start gap-2.5 rounded-lg px-2.5 py-2 hover:bg-midnight-sky-50">
+                      <span className="mt-0.5 w-5 shrink-0 text-right text-[11px] font-medium text-midnight-sky-400">{i + 1}</span>
+                      <span className={cn('mt-0.5 shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide', TYPE_COLOUR[s.type])}>
+                        {TYPE_LABEL[s.type]}
+                      </span>
+                      <span className="text-[11px] leading-snug text-midnight-sky-700 line-clamp-2">{s.question}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-midnight-sky-100 bg-midnight-sky-50 py-8 text-center">
+                  <p className="text-sm text-midnight-sky-400">No valid questions found in this file.</p>
+                </div>
+              )}
+
+              <button
+                onClick={() => setParseResult(null)}
+                className="text-center text-[11px] text-midnight-sky-400 transition hover:text-midnight-sky-700"
+              >
+                ← Upload a different file
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-2.5 border-t border-midnight-sky-100 px-5 py-4">
+          <button
+            onClick={onClose}
+            className="rounded-xl border border-midnight-sky-200 px-4 py-2 text-sm text-midnight-sky-700 transition hover:bg-midnight-sky-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => { if (parseResult?.slides.length) { onImport(parseResult.slides); onClose() } }}
+            disabled={!parseResult || parseResult.slides.length === 0}
+            className="rounded-xl bg-sky-blue px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+          >
+            {parseResult?.slides.length
+              ? `Add ${parseResult.slides.length} slide${parseResult.slides.length !== 1 ? 's' : ''}`
+              : 'Add slides'}
+          </button>
+        </div>
+      </motion.div>
+
+      <input
+        ref={fileRef} type="file" accept=".csv" className="hidden"
+        onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = '' }}
+      />
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
    Slide Panel — dark navy left sidebar
    ───────────────────────────────────────────────────────────────────────── */
 
 function SlidePanel({
   slides, selectedId, isImporting, addMenuAfter,
-  onSelect, onDelete, onDuplicate, onDragEnd, onImport, onOpenSorter, onSetAddMenu, onAddQuestion, onAddContent, onAddCanvas, onAddLeaderboard,
+  onSelect, onDelete, onDuplicate, onDragEnd, onImport, onOpenSorter, onSetAddMenu, onAddQuestion, onAddContent, onAddCanvas, onAddLeaderboard, onImportCsv,
 }: {
   slides: Slide[]
   selectedId: string | null
@@ -1605,15 +1985,32 @@ function SlidePanel({
   onAddContent: (template: ContentTemplate, afterId?: string) => void
   onAddCanvas: (afterId?: string) => void
   onAddLeaderboard: (afterId?: string) => void
+  onImportCsv: (slides: QuestionSlide[]) => void
 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
-  const fileRef = useRef<HTMLInputElement>(null)
+  const fileRef  = useRef<HTMLInputElement>(null)
+  const mergeRef = useRef<HTMLInputElement>(null)
+  const importMenuRef = useRef<HTMLDivElement>(null)
+  const [importMenuOpen, setImportMenuOpen] = useState(false)
+  const [showCsvModal,   setShowCsvModal]   = useState(false)
   const [addMenuOpen, setAddMenuOpen] = useState<boolean>(() => {
     try { return localStorage.getItem('alaya-add-menu-open') !== 'false' } catch { return true }
   })
+
+  // Close import dropdown when clicking outside
+  useEffect(() => {
+    if (!importMenuOpen) return
+    const handler = (e: MouseEvent) => {
+      if (importMenuRef.current && !importMenuRef.current.contains(e.target as Node)) {
+        setImportMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [importMenuOpen])
   const toggleAddMenu = () => setAddMenuOpen(prev => {
     const next = !prev
     try { localStorage.setItem('alaya-add-menu-open', String(next)) } catch {}
@@ -1626,13 +2023,51 @@ function SlidePanel({
       {/* Import / Sorter button row */}
       <div className="shrink-0 border-b border-white/10 p-3">
         <div className="flex gap-2">
-          <button
-            onClick={() => fileRef.current?.click()}
-            disabled={isImporting}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#f97316] py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-[#ea6c0a] active:scale-95 disabled:opacity-40"
-          >
-            {isImporting ? <LoadingDots /> : 'Import / Merge'}
-          </button>
+          {/* Import / Merge dropdown */}
+          <div ref={importMenuRef} className="relative flex-1">
+            <button
+              onClick={() => setImportMenuOpen(o => !o)}
+              disabled={isImporting}
+              className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-[#f97316] py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-[#ea6c0a] active:scale-95 disabled:opacity-40"
+            >
+              {isImporting ? <LoadingDots /> : 'Import / Merge'}
+            </button>
+            <AnimatePresence>
+              {importMenuOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: -4, scale: 0.97 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -4, scale: 0.97 }}
+                  transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
+                  className="absolute left-0 top-full z-30 mt-1.5 w-52 overflow-hidden rounded-xl border border-white/10 bg-[#1e1e3a] py-1 shadow-2xl"
+                >
+                  <button
+                    onClick={() => { fileRef.current?.click(); setImportMenuOpen(false) }}
+                    className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-xs text-white/80 transition hover:bg-white/8 hover:text-white"
+                  >
+                    <Upload className="size-3.5 shrink-0 text-white/50" />
+                    Import slides
+                  </button>
+                  <button
+                    onClick={() => { setShowCsvModal(true); setImportMenuOpen(false) }}
+                    className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-xs text-white/80 transition hover:bg-white/8 hover:text-white"
+                  >
+                    <FileText className="size-3.5 shrink-0 text-white/50" />
+                    Import questions in CSV
+                  </button>
+                  <div className="mx-3 my-1 border-t border-white/8" />
+                  <button
+                    onClick={() => { mergeRef.current?.click(); setImportMenuOpen(false) }}
+                    className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-xs text-white/80 transition hover:bg-white/8 hover:text-white"
+                  >
+                    <Copy className="size-3.5 shrink-0 text-white/50" />
+                    Merge deck
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
           <button
             onClick={onOpenSorter}
             title="Slide overview"
@@ -1641,13 +2076,32 @@ function SlidePanel({
             <LayoutGrid className="size-4" />
           </button>
         </div>
+
+        {/* Slides file input — PDF, HTML, images, video */}
         <input
           ref={fileRef} type="file"
-          accept=".pdf,.html,.htm,text/html,image/*,video/mp4,video/webm,video/quicktime,.json,.apulse"
+          accept=".pdf,.html,.htm,text/html,image/*,video/mp4,video/webm,video/quicktime"
+          className="hidden"
+          onChange={e => { const f = e.target.files?.[0]; if (f) onImport(f); e.target.value = '' }}
+        />
+        {/* Merge file input — deck JSON only */}
+        <input
+          ref={mergeRef} type="file"
+          accept=".json,.apulse"
           className="hidden"
           onChange={e => { const f = e.target.files?.[0]; if (f) onImport(f); e.target.value = '' }}
         />
       </div>
+
+      {/* CSV import modal */}
+      <AnimatePresence>
+        {showCsvModal && (
+          <CsvImportModal
+            onClose={() => setShowCsvModal(false)}
+            onImport={slides => { onImportCsv(slides); setShowCsvModal(false) }}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Slide list or empty state */}
       <div className="scrollbar-sidebar flex flex-1 flex-col overflow-y-auto py-2">
@@ -3208,6 +3662,21 @@ function MCQEditor({ slide, onUpdate, onPushHistory }: {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Explanation — optional teaching text shown on big screen after reveal */}
+      <div className="mt-5 border-t border-midnight-sky-100 pt-5">
+        <label className="mb-2 block text-sm font-medium text-midnight-sky-700">
+          Explanation
+          <span className="ml-1.5 font-light text-midnight-sky-500">shown on big screen when answer is revealed</span>
+        </label>
+        <textarea
+          value={slide.explanation ?? ''}
+          onChange={e => onUpdate({ explanation: e.target.value || undefined })}
+          placeholder="Optional — explain why the correct answer is right…"
+          rows={3}
+          className="w-full resize-none rounded-xl border border-midnight-sky-200 bg-white px-3.5 py-2.5 text-sm text-midnight-sky-800 placeholder:text-midnight-sky-400 focus:border-sky-blue focus:outline-none focus:ring-2 focus:ring-sky-blue/20"
+        />
       </div>
     </div>
   )

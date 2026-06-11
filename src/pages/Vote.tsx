@@ -28,7 +28,9 @@ export default function Vote() {
   const { sessionCode } = useParams<{ sessionCode: string }>()
   const [searchParams]  = useSearchParams()
   const attendeeName    = searchParams.get('name') ?? ''
-  const attendeeEmoji   = searchParams.get('emoji') ?? ''
+  // Read emoji from URL — fall back to sessionStorage in case the URL param was lost
+  // (e.g. direct navigation, encoding edge-case on some devices)
+  const attendeeEmoji   = searchParams.get('emoji') || (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('alaya-viewer-emoji') : null) || ''
   const navigate        = useNavigate()
 
   const [session,        setSession]        = useState<Session | null | undefined>(undefined)
@@ -83,12 +85,25 @@ export default function Vote() {
   const timerIntervalRef  = useRef<ReturnType<typeof setInterval> | null>(null)
   // Cooldown tracker — prevents reaction spam (800ms per reaction type)
   const lastReactionRef   = useRef<Partial<Record<ReactionType, number>>>({})
+  // Viewer registration — stored in a ref so cleanup fires correctly on unmount
+  // and we never double-register (quiz attendees wait until name gate is submitted)
+  const viewerCleanupRef  = useRef<(() => void) | undefined>(undefined)
 
   // Leave the room — clear locally stored submitted-slide markers so the
   // attendee can vote fresh if they later rejoin a different session.
   const leaveRoom = () => {
     try { sessionStorage.removeItem(storageKey) } catch {}
     navigate('/join')
+  }
+
+  // Reactions — defined early so the lobby screen can use it before the main return
+  const handleReaction = async (type: ReactionType) => {
+    if (!sessionCode) return
+    const now  = Date.now()
+    const last = lastReactionRef.current[type] ?? 0
+    if (now - last < 800) return
+    lastReactionRef.current[type] = now
+    try { await sendReaction(sessionCode, type, 0.45 + Math.random() * 0.50) } catch { /* ignore */ }
   }
 
   // undefined = still loading, null = not found / error
@@ -98,12 +113,31 @@ export default function Vote() {
     return unsub
   }, [sessionCode])
 
-  // Register presence so the presenter can see how many people are watching
+  // Register presence — quiz attendees without a URL name wait until gate is submitted
   useEffect(() => {
     if (!sessionCode) return
-    return joinAsViewer(sessionCode, attendeeName || undefined, attendeeEmoji || undefined)
+    if (viewerCleanupRef.current) return  // Already registered — never double-register
+
+    // If name is already in URL: register immediately (no gate needed)
+    if (attendeeName) {
+      viewerCleanupRef.current = joinAsViewer(sessionCode, attendeeName, attendeeEmoji || undefined)
+      return
+    }
+
+    // No name in URL: need session to determine quiz vs non-quiz
+    if (session === undefined) return  // Still loading
+
+    // Quiz with no name: wait until the gate screen is submitted
+    if (session?.isQuiz && !quizName) return
+
+    // Non-quiz (anonymous OK) or quiz name just entered
+    const nameToUse = quizName || undefined
+    viewerCleanupRef.current = joinAsViewer(sessionCode, nameToUse, attendeeEmoji || undefined)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionCode])
+  }, [sessionCode, session, quizName, attendeeName, attendeeEmoji])
+
+  // Cleanup viewer presence on unmount
+  useEffect(() => () => { viewerCleanupRef.current?.() }, [])
 
   // Countdown from session.timerEndsAt — each client computes locally from the absolute timestamp
   useEffect(() => {
@@ -191,6 +225,17 @@ export default function Vote() {
           </button>
         </div>
       </main>
+    )
+  }
+
+  // ── Lobby screen — presenter hasn't started the show yet ─────────────
+  if (session.inLobby) {
+    return (
+      <AudienceLobbyScreen
+        emoji={attendeeEmoji}
+        name={quizName || attendeeName}
+        onReaction={handleReaction}
+      />
     )
   }
 
@@ -313,16 +358,6 @@ export default function Vote() {
     } finally {
       setSubmitting(false)
     }
-  }
-
-  // ── Reactions ──────────────────────────────────────────────────────────
-  const handleReaction = async (type: ReactionType) => {
-    if (!sessionCode) return
-    const now  = Date.now()
-    const last = lastReactionRef.current[type] ?? 0
-    if (now - last < 800) return   // 800ms cooldown per reaction type
-    lastReactionRef.current[type] = now
-    try { await sendReaction(sessionCode, type, 0.45 + Math.random() * 0.50) } catch { /* ignore */ }
   }
 
   // ── Waiting state: non-interactive slides (pdf, image, video, leaderboard)
@@ -1349,7 +1384,7 @@ function RatingQuestion({
 
             {/* Per-parameter end labels — only shown if configured */}
             {(left || right) && (
-              <div className="mb-1 flex justify-between text-[10px] font-semibold uppercase tracking-wider text-midnight-sky-400">
+              <div className="mb-1 flex justify-between text-[10px] font-semibold uppercase tracking-wider text-midnight-sky-600">
                 <span className="truncate pr-2">{left}</span>
                 <span className="truncate pl-2 text-right">{right}</span>
               </div>
@@ -1472,6 +1507,88 @@ function LoadingDots({ color = 'white' }: { color?: 'white' | 'pink' }) {
         />
       ))}
     </span>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Audience lobby screen — shown while presenter is in the pre-show lobby.
+   Dark theme. Audience sees their avatar, a "show is about to start" message,
+   and can send reactions that float on the presenter's lobby.
+   ───────────────────────────────────────────────────────────────────────── */
+
+function AudienceLobbyScreen({
+  emoji, name, onReaction,
+}: {
+  emoji:      string
+  name:       string
+  onReaction: (type: ReactionType) => void
+}) {
+  return (
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-midnight-sky-900">
+      {/* Ambient orbs */}
+      <div aria-hidden className="pointer-events-none absolute inset-0">
+        <div className="absolute -bottom-40 -left-40 size-[500px] rounded-full bg-hot-pink/10 blur-[120px]" />
+        <div className="absolute -right-40 -top-40 size-[400px] rounded-full bg-sky-blue/10 blur-[100px]" />
+      </div>
+
+      {/* Header */}
+      <header className="relative z-10 px-5 py-5">
+        <span className="text-sm font-bold tracking-tight text-white">
+          alaya <span className="text-hot-pink">pulse</span>
+        </span>
+      </header>
+
+      {/* Main content — vertically centred */}
+      <div className="relative z-10 flex flex-1 flex-col items-center justify-center gap-5 px-6 text-center">
+
+        {/* Avatar bubble — opacity fade avoids the iOS Safari compositing-layer
+            issue that makes certain emoji (🐉 🦉 etc.) render invisibly when
+            a scale transform is kept on the element after animation. */}
+        {emoji && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.4, delay: 0.1 }}
+            className="flex size-24 items-center justify-center rounded-full border border-white/15 bg-white/8 text-5xl"
+          >
+            {emoji}
+          </motion.div>
+        )}
+
+        {/* Name greeting */}
+        <motion.p
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="text-base font-medium text-white/60"
+        >
+          {name
+            ? <>You're in, <span className="font-semibold text-white">{name}</span>!</>
+            : <>You're in!</>}
+        </motion.p>
+
+        {/* Message */}
+        <h2 className="text-2xl font-semibold text-white">The show is about to start</h2>
+      </div>
+
+      {/* Reaction bar — nudge + buttons grouped so the arrow points directly at the buttons */}
+      <div className="relative z-10 flex flex-col items-center gap-4 pb-10 pt-4">
+        <p className="text-sm font-medium text-white/50">Tap a reaction to hype up the room</p>
+        <div className="flex items-center gap-3">
+          {REACTION_CONFIG.map(r => (
+            <motion.button
+              key={r.type}
+              onClick={() => onReaction(r.type)}
+              whileTap={{ scale: 0.75 }}
+              className="flex size-14 items-center justify-center rounded-2xl transition-all active:scale-90"
+              title={r.label}
+            >
+              <span className="select-none text-4xl leading-none">{r.emoji}</span>
+            </motion.button>
+          ))}
+        </div>
+      </div>
+    </div>
   )
 }
 

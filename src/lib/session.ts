@@ -75,6 +75,8 @@ export interface QuestionSlide {
   correctAnswers?: number[]
   /** MCQ only — countdown timer in seconds. Auto-starts when presenter reaches this slide. */
   timer?: number
+  /** MCQ only — optional plain-text explanation shown on the big screen when the answer is revealed. */
+  explanation?: string
 }
 
 /* ─── Canvas slide types ────────────────────────────────────────────────── */
@@ -144,6 +146,8 @@ export interface Session {
   resetCounts?:   Record<string, number>
   /** Quiz mode — when true, audience must enter a name and receives per-answer score feedback. */
   isQuiz?:        boolean
+  /** Lobby mode — true while presenter is in the pre-show lobby; audience sees waiting screen. */
+  inLobby?:       boolean
   /** Per-slide timing metadata for speed-point calculation. */
   questionMeta?:  Record<string, { openedAt: number; duration: number | null }>
 }
@@ -289,6 +293,8 @@ export async function createSession(title: string, rawSlides: any[], isQuiz?: bo
       ...(Array.isArray(s.correctAnswers) && s.correctAnswers.length > 0 ? { correctAnswers: s.correctAnswers as number[] } : {}),
       // MCQ: preserve timer so auto-start works on session resume
       ...(typeof s.timer === 'number' ? { timer: s.timer } : {}),
+      // MCQ: preserve explanation text for post-reveal teaching moment
+      ...(typeof s.explanation === 'string' && s.explanation.trim() ? { explanation: s.explanation.trim() } : {}),
       // Open Ended: preserve max submissions per person
       ...(typeof s.oeMaxSubmissions === 'number' ? { oeMaxSubmissions: s.oeMaxSubmissions } : {}),
     }
@@ -351,11 +357,13 @@ export async function updateSessionState(
   code: string,
   currentSlide: number,
   currentPhase: SlidePhase,
+  inLobby?: boolean,
 ): Promise<void> {
   await updateDoc(doc(db, 'sessions', code.toUpperCase()), {
     currentSlide,
     currentPhase,
     status: 'active',
+    ...(inLobby !== undefined ? { inLobby } : {}),
   })
 }
 
@@ -427,6 +435,8 @@ export async function updateSessionSlides(code: string, rawSlides: any[], isQuiz
       ...(Array.isArray(s.correctAnswers) && s.correctAnswers.length > 0 ? { correctAnswers: s.correctAnswers as number[] } : {}),
       // MCQ: preserve timer so auto-start works on session resume
       ...(typeof s.timer === 'number' ? { timer: s.timer } : {}),
+      // MCQ: preserve explanation text for post-reveal teaching moment
+      ...(typeof s.explanation === 'string' && s.explanation.trim() ? { explanation: s.explanation.trim() } : {}),
       // Open Ended: preserve max submissions per person
       ...(typeof s.oeMaxSubmissions === 'number' ? { oeMaxSubmissions: s.oeMaxSubmissions } : {}),
     }
@@ -534,12 +544,25 @@ export function joinAsViewer(sessionCode: string, name?: string, emoji?: string)
     sessionStorage.setItem('alaya-viewer-id', viewerId)
   }
 
+  // Always resolve to a concrete emoji so the presenter Lobby never shows a fallback.
+  // Priority: (1) caller-provided  (2) stored from Join page  (3) simple random
+  const SIMPLE_EMOJIS = ['🎉','⭐','🔥','💎','🌈','🦁','🐯','🦊','🐬','🦋']
+  let resolvedEmoji = emoji
+  if (!resolvedEmoji) {
+    resolvedEmoji = sessionStorage.getItem('alaya-viewer-emoji') ?? undefined
+  }
+  if (!resolvedEmoji) {
+    resolvedEmoji = SIMPLE_EMOJIS[Math.floor(Math.random() * SIMPLE_EMOJIS.length)]
+  }
+  // Persist back so AudienceLobbyScreen can read the same value if URL param was missing
+  try { sessionStorage.setItem('alaya-viewer-emoji', resolvedEmoji) } catch {}
+
   const ref = doc(db, 'sessions', sessionCode.toUpperCase(), 'viewers', viewerId)
   setDoc(ref, {
     joinedAt:  serverTimestamp(),
     lastSeen:  serverTimestamp(),
-    ...(name  ? { name  } : {}),
-    ...(emoji ? { emoji } : {}),
+    ...(name ? { name } : {}),
+    emoji: resolvedEmoji,   // always present — no more '🎉' fallback needed in subscribeToViewers
   })
     .catch(err => console.error('[alaya-pulse] joinAsViewer: failed to register presence', err))
 
@@ -567,6 +590,22 @@ export function subscribeToViewerCount(
   return onSnapshot(
     collection(db, 'sessions', sessionCode.toUpperCase(), 'viewers'),
     snap => callback(snap.size),
+  )
+}
+
+export function subscribeToViewers(
+  sessionCode: string,
+  callback: (viewers: { id: string; name: string; emoji: string }[]) => void,
+): () => void {
+  return onSnapshot(
+    collection(db, 'sessions', sessionCode.toUpperCase(), 'viewers'),
+    snap => callback(
+      snap.docs.map(d => ({
+        id:    d.id,
+        name:  (d.data().name  as string) || '',
+        emoji: (d.data().emoji as string) || '🎉',
+      }))
+    ),
   )
 }
 

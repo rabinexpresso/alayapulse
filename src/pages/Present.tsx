@@ -10,7 +10,7 @@ import {
 import { QRCodeSVG } from 'qrcode.react'
 import { cn } from '@/lib/utils'
 import {
-  updateSessionState, endSession, subscribeToSlideResponses, subscribeToViewerCount,
+  updateSessionState, endSession, subscribeToSlideResponses, subscribeToViewerCount, subscribeToViewers,
   fetchAllSessionResponses, getSessionByCode, startTimer, clearTimer, resetSlideAndTimer, updateQuestionMeta,
   subscribeToReactions, deleteReaction,
   type Response as FirestoreResponse, type Reaction, type ReactionType,
@@ -112,6 +112,8 @@ interface QSlide {
   correctAnswers?: number[]
   /** MCQ only — countdown timer in seconds; auto-starts when presenter reaches this slide. */
   timer?: number
+  /** MCQ only — optional plain-text explanation shown on the big screen when the answer is revealed. */
+  explanation?: string
   /** Word Cloud only — max submissions per person. */
   wcMaxSubmissions?: number
   /** Open Ended only — max responses per person. Default 1. */
@@ -288,9 +290,12 @@ export default function Present() {
   const [phase,     setPhase]     = useState<SlidePhase>('question')
   const [responses,       setResponses]       = useState<FirestoreResponse[]>([])
   const [viewerCount,     setViewerCount]     = useState(0)
-  const [showExitConfirm, setShowExitConfirm] = useState(false)
-  const [showQRModal,     setShowQRModal]     = useState(false)
-  const [showHUD,         setShowHUD]         = useState(true)
+  const [showExitConfirm,   setShowExitConfirm]   = useState(false)
+  const [showQRModal,       setShowQRModal]       = useState(false)
+  const [showHUD,           setShowHUD]           = useState(true)
+  const [showingWaitingRoom, setShowingWaitingRoom] = useState(isRealSession && startSlide === 0)
+  const [hasStarted,         setHasStarted]         = useState(startSlide > 0)
+  const [viewers,            setViewers]            = useState<{ id: string; name: string; emoji: string }[]>([])
   // Results capture — track peak viewer count + session start time so we
   // can build a complete DeckResults snapshot when the presenter ends
   // the session and hands it back to the editor for save.
@@ -313,10 +318,11 @@ export default function Present() {
   // Refs so callbacks always read current values without stale closures.
   // isQuestion/code are not yet computed at this point — initialised with dummies,
   // then kept in sync via useEffects further down (after those values are computed).
-  const phaseRef          = useRef(phase)
-  const isQuestionRef     = useRef(false)           // dummy init — synced below
-  const isRealSessionRef  = useRef(isRealSession)
-  const codeRef           = useRef('')              // dummy init — synced below
+  const phaseRef               = useRef(phase)
+  const isQuestionRef          = useRef(false)           // dummy init — synced below
+  const isRealSessionRef       = useRef(isRealSession)
+  const codeRef                = useRef('')              // dummy init — synced below
+  const showingWaitingRoomRef  = useRef(isRealSession && startSlide === 0)  // synced below
 
   const slide      = deck[current] as AnySlide
   const isQuestion = slide.type !== 'pdf' && slide.type !== 'image' && slide.type !== 'video' && slide.type !== 'content' && slide.type !== 'canvas' && slide.type !== 'html' && slide.type !== 'leaderboard'
@@ -324,16 +330,19 @@ export default function Present() {
   const joinUrl    = `${window.location.origin}/join?code=${code}`
 
   // Keep timer refs in sync (these must come after isQuestion / code are computed)
-  useEffect(() => { phaseRef.current = phase },               [phase])
-  useEffect(() => { isQuestionRef.current = isQuestion },     [isQuestion])
-  useEffect(() => { isRealSessionRef.current = isRealSession }, [isRealSession])
-  useEffect(() => { codeRef.current = code },                 [code])
-  useEffect(() => { slideRef.current = slide },               [slide])
+  useEffect(() => { phaseRef.current = phase },                           [phase])
+  useEffect(() => { isQuestionRef.current = isQuestion },                 [isQuestion])
+  useEffect(() => { isRealSessionRef.current = isRealSession },           [isRealSession])
+  useEffect(() => { codeRef.current = code },                             [code])
+  useEffect(() => { slideRef.current = slide },                           [slide])
+  useEffect(() => { showingWaitingRoomRef.current = showingWaitingRoom }, [showingWaitingRoom])
 
   // ── Sync presenter state to Firestore so audience knows current slide ──
   useEffect(() => {
     if (!isRealSession) return
-    updateSessionState(code, current, phase).catch(console.error)
+    // inLobby is true only before the show has ever started (not when going back)
+    const inLobby = showingWaitingRoom && !hasStarted
+    updateSessionState(code, current, phase, inLobby).catch(console.error)
     // Record when each quiz question opens so audience can calculate speed points
     if (isQuiz && isQuestion && phase === 'question') {
       const slideId  = (slide as QSlide).id
@@ -342,7 +351,7 @@ export default function Present() {
       updateQuestionMeta(code, slideId, openedAt, null).catch(console.error)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isRealSession, code, current, phase])
+  }, [isRealSession, code, current, phase, showingWaitingRoom, hasStarted])
 
   // ── Auto-start timer when navigating FORWARD to an MCQ slide with a timer ──
   // Skips the initial mount (presenter might still be setting up) and back-navigation.
@@ -367,6 +376,12 @@ export default function Present() {
       setViewerCount(n)
       if (n > peakViewerRef.current) peakViewerRef.current = n
     })
+  }, [code])
+
+  // ── Subscribe to live viewers list (name + emoji) for waiting room ────
+  useEffect(() => {
+    if (code === 'DEMO') return
+    return subscribeToViewers(code, setViewers)
   }, [code])
 
   // ── Subscribe to live responses for the current question slide ─────────
@@ -513,13 +528,28 @@ export default function Present() {
     }
     // Navigating to a different slide — stop any running timer
     stopTimer()
-    if (current <= 0) return
+    if (current <= 0) {
+      // On slide 1 in a real session: go back to the lobby instead of dead-ending
+      if (isRealSession) setShowingWaitingRoom(true)
+      return
+    }
     setTransType('slide'); setDirection(-1); setPhase('question')
     setCurrent(prev => prev - 1)
-  }, [isQuestion, phase, current, stopTimer])
+  }, [isQuestion, phase, current, stopTimer, isRealSession])
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
+      if (showingWaitingRoomRef.current) {
+        // In the lobby: → / Space advances to slide 1; Escape shows exit confirm
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') {
+          e.preventDefault()
+          setHasStarted(true)
+          setShowingWaitingRoom(false)
+        } else if (e.key === 'Escape') {
+          setShowExitConfirm(true)
+        }
+        return
+      }
       if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') { e.preventDefault(); goNext() }
       else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp')                { e.preventDefault(); goPrev() }
       else if (e.key === 'Escape')                                           { setShowExitConfirm(true) }
@@ -530,7 +560,7 @@ export default function Present() {
   }, [goNext, goPrev, navigate])
 
 
-  const canGoPrev     = !(current === 0 && !(isQuestion && phase === 'results'))
+  const canGoPrev = current > 0 || (isQuestion && phase === 'results') || (current === 0 && isRealSession && !showingWaitingRoom)
   const canGoNext     = !(current === deck.length - 1 && (!isQuestion || phase === 'results'))
   const responseCount = responses.length
 
@@ -672,8 +702,8 @@ export default function Present() {
         )}
       </div>
 
-      {/* ── Reaction particles — float up from bottom, fade at 40% height ── */}
-      <div className="pointer-events-none fixed inset-0 z-25 overflow-hidden">
+      {/* ── Reaction particles — float up from bottom, above lobby overlay ── */}
+      <div className="pointer-events-none fixed inset-0 z-[45] overflow-hidden">
         {particles.map(p => (
           <ReactionParticle key={p.id} reaction={p} onComplete={() => removeParticle(p.id)} />
         ))}
@@ -974,6 +1004,28 @@ export default function Present() {
         )}
       </AnimatePresence>
 
+      {/* ── Lobby overlay — slides in over the deck, z-40 so exit confirm (z-50) still works ── */}
+      <AnimatePresence>
+        {showingWaitingRoom && isRealSession && (
+          <motion.div
+            key="lobby"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            className="fixed inset-0 z-40"
+          >
+            <WaitingRoom
+              code={code}
+              joinUrl={joinUrl}
+              viewers={viewers}
+              isQuiz={isQuiz}
+              onStart={() => { setHasStarted(true); setShowingWaitingRoom(false) }}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ── End session confirmation ─────────────────────────────────── */}
       <AnimatePresence>
         {showExitConfirm && (
@@ -1040,6 +1092,132 @@ export default function Present() {
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Lobby — full-screen overlay shown to the presenter before the show starts.
+   Press → (or click the right hover zone) to advance to slide 1.
+   Press ← from slide 1 to come back here. Escape → exit confirm modal.
+   ───────────────────────────────────────────────────────────────────────── */
+
+function WaitingRoom({
+  code, joinUrl, viewers, isQuiz, onStart,
+}: {
+  code:    string
+  joinUrl: string
+  viewers: { id: string; name: string; emoji: string }[]
+  isQuiz:  boolean
+  onStart: () => void
+}) {
+  const count = viewers.length
+
+  // Tiles shrink as room fills; scroll kicks in when tiles hit ≤48 px
+  const tileMin =
+    count <= 30  ? 110 :
+    count <= 60  ? 88  :
+    count <= 120 ? 70  :
+    count <= 200 ? 56  : 48
+
+  return (
+    <div className="flex h-full w-full flex-col bg-midnight-sky-900 text-white">
+      {/* Ambient orbs */}
+      <div aria-hidden className="pointer-events-none absolute inset-0">
+        <div className="absolute -bottom-40 -left-40 size-[600px] rounded-full bg-hot-pink/10 blur-[130px]" />
+        <div className="absolute -right-40 -top-40 size-[500px] rounded-full bg-sky-blue/10 blur-[110px]" />
+      </div>
+
+      {/* Compact one-row header */}
+      <header className="relative z-10 flex items-center gap-4 px-8 py-4">
+        <div>
+          <p className="text-[10px] font-bold tracking-tight text-white/35">
+            alaya <span className="text-hot-pink">pulse</span>
+          </p>
+          <h1 className="text-xl font-bold leading-tight text-white">Lobby</h1>
+        </div>
+        <div className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1">
+          <span className="size-1.5 animate-pulse rounded-full bg-fresh-green" />
+          <motion.span
+            key={count}
+            initial={{ scale: 1.3 }}
+            animate={{ scale: 1 }}
+            transition={{ duration: 0.2 }}
+            className="tabular-nums text-sm font-bold text-white/80"
+          >
+            {count}
+          </motion.span>
+          <span className="text-sm text-white/40">
+            {count === 1 ? 'person' : 'people'}
+          </span>
+        </div>
+        {isQuiz && (
+          <div className="flex items-center gap-1.5 rounded-full border border-golden-sun/30 bg-golden-sun/10 px-3 py-1">
+            <Trophy className="size-3.5 text-golden-sun" />
+            <span className="text-sm font-semibold text-golden-sun">Quiz mode</span>
+          </div>
+        )}
+      </header>
+
+      {/* Viewer grid — right-padded to avoid QR overlap */}
+      <main className="relative z-10 flex-1 overflow-y-auto pl-8 pr-52 pb-8 [scrollbar-width:thin]">
+        {count === 0 ? (
+          <div className="flex h-full items-center justify-center">
+            <p className="text-center text-base font-light text-white/25">
+              Waiting for people to scan and join…
+            </p>
+          </div>
+        ) : (
+          <div
+            className="grid gap-2"
+            style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${tileMin}px, 1fr))` }}
+          >
+            <AnimatePresence initial={false}>
+              {viewers.map(v => (
+                <motion.div
+                  key={v.id}
+                  initial={{ opacity: 0, scale: 0.7 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.5 }}
+                  transition={{ duration: 0.3, ease: [0.34, 1.56, 0.64, 1] }}
+                  className="flex flex-col items-center justify-center gap-0.5 rounded-xl border border-white/10 bg-white/5 px-1.5 py-2"
+                >
+                  <span style={{ fontSize: tileMin >= 88 ? '1.5rem' : tileMin >= 65 ? '1.2rem' : '1rem', lineHeight: 1 }}>
+                    {v.emoji}
+                  </span>
+                  {v.name && (
+                    <span className="w-full truncate text-center font-medium text-white/65" style={{ fontSize: '10px' }}>
+                      {v.name}
+                    </span>
+                  )}
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+        )}
+      </main>
+
+      {/* Right hover zone — click or hover to advance to slide 1 */}
+      <button
+        onClick={onStart}
+        className="absolute right-0 top-0 z-50 flex h-full w-20 items-center justify-end pr-4 opacity-0 transition-opacity hover:opacity-100 [will-change:opacity]"
+        aria-label="Start show"
+      >
+        <div className="rounded-full bg-black/30 p-3 transition hover:bg-black/50">
+          <ChevronRight className="size-6 text-white" />
+        </div>
+      </button>
+
+      {/* Bottom-right: QR code + session code + join URL */}
+      <div className="absolute bottom-6 right-8 z-20 flex flex-col items-end gap-3">
+        <div className="rounded-2xl bg-white p-3 shadow-2xl">
+          <QRCodeSVG value={joinUrl} size={120} bgColor="#ffffff" fgColor="#000079" level="M" />
+        </div>
+        <div className="text-right">
+          <p className="font-mono text-xl font-bold tracking-[0.22em] text-white">{code}</p>
+          <p className="text-sm font-semibold text-white/70">{window.location.host}/join</p>
+        </div>
+      </div>
     </div>
   )
 }
@@ -1257,7 +1435,7 @@ const MCQ_ACCENTS: Record<string, MCQAccents> = {
   navy:        { selected: '#ff0065', correct: '#42db66' },  // hot-pink / fresh-green
   pink:        { selected: '#00b0ff', correct: '#ffc709' },  // sky-blue  / golden-sun
   sky:         { selected: '#ff0065', correct: '#ffc709' },  // hot-pink  / golden-sun
-  green:       { selected: '#ff0065', correct: '#ffc709' },  // hot-pink  / golden-sun
+  green:       { selected: '#ff0065', correct: '#000079' },  // hot-pink  / midnight-sky (navy reads better on green than golden-sun)
   golden:      { selected: '#ff0065', correct: '#00b0ff' },  // hot-pink  / sky-blue
   white:       { selected: '#ff0065', correct: '#42db66' },  // hot-pink  / fresh-green
   transparent: { selected: '#ff0065', correct: '#42db66' },
@@ -1937,7 +2115,7 @@ function ResultsSlideView({
 
   return (
     <div
-      className="absolute inset-0 flex flex-col overflow-hidden px-14 pt-10 pb-24"
+      className={cn('absolute inset-0 flex flex-col overflow-hidden px-14 pt-10', slide.type === 'mcq' ? 'pb-16' : 'pb-24')}
       style={{ backgroundColor: slide.theme === 'transparent' ? 'transparent' : c.bg }}
     >
       {/* Badge + question + optional reveal button.
@@ -1973,44 +2151,79 @@ function ResultsSlideView({
         )}
       </div>
 
-      {/* Results */}
-      <div className={vizWrap}>
-        {slide.type === 'mcq' && (
-          <MCQResults
-            options={slide.options}
-            votes={mcqVotes}
-            respondentCount={respondentCount}
-            vizType={slide.vizType ?? 'bar'}
-            correctAnswers={slide.correctAnswers}
-            revealed={answerRevealed}
-            theme={slide.theme}
-          />
-        )}
-        {slide.type === 'wordcloud' && <WordCloudResults words={cloudWords} slideTheme={slide.theme} />}
-        {slide.type === 'openended' && (
-          <OpenEndedResults
-            answers={openAnswers}
-            pinnedKeys={pinnedKeys}
-            onTogglePin={togglePin}
-            slideTheme={slide.theme}
-          />
-        )}
-        {slide.type === 'rating'    && (() => {
-          const lefts  = slide.leftLabels  ?? slide.options.map(() => slide.leftLabel  ?? '')
-          const rights = slide.rightLabels ?? slide.options.map(() => slide.rightLabel ?? '')
-          return (
-            <RatingResults
-              params={slide.options}
-              avgs={ratingAvgs}
-              distributions={ratingDist}
-              ratingMax={ratingMax}
-              leftLabels={lefts}
-              rightLabels={rights}
-              darkBg={needsDarkPanel}
+      {/* MCQ — dedicated flex-column layout: bars fill top, explanation grows from bottom */}
+      {slide.type === 'mcq' && (
+        <div className="mt-6 flex flex-1 flex-col overflow-hidden">
+          {/* Bars — flex-1 so they naturally yield space to explanation when it appears */}
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <MCQResults
+              options={slide.options}
+              votes={mcqVotes}
+              respondentCount={respondentCount}
+              vizType={slide.vizType ?? 'bar'}
+              correctAnswers={slide.correctAnswers}
+              revealed={answerRevealed}
+              explanationRevealed={answerRevealed && !!slide.explanation}
+              theme={slide.theme}
             />
-          )
-        })()}
-      </div>
+          </div>
+          {/* Explanation — animates height 0→auto, smoothly pushing bars up */}
+          <AnimatePresence>
+            {answerRevealed && slide.explanation && (
+              <motion.div
+                key="mcq-explanation"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+                style={{ overflow: 'hidden', flexShrink: 0 }}
+              >
+                <div
+                  className={cn(
+                    'mt-4 rounded-2xl border px-5 py-4 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+                    c.isDark ? 'border-teal-400/30 bg-teal-900/60' : 'border-white/15 bg-midnight-sky-900/85'
+                  )}
+                  style={{ maxHeight: '7rem' }}
+                >
+                  <p className={cn('mb-1.5 text-[10px] font-bold uppercase tracking-widest', c.isDark ? 'text-teal-300' : 'text-golden-sun')}>Explanation</p>
+                  <p className="text-sm leading-relaxed text-white/90">{slide.explanation}</p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
+
+      {/* All other slide types use the original vizWrap */}
+      {slide.type !== 'mcq' && (
+        <div className={vizWrap}>
+          {slide.type === 'wordcloud' && <WordCloudResults words={cloudWords} slideTheme={slide.theme} />}
+          {slide.type === 'openended' && (
+            <OpenEndedResults
+              answers={openAnswers}
+              pinnedKeys={pinnedKeys}
+              onTogglePin={togglePin}
+              slideTheme={slide.theme}
+            />
+          )}
+          {slide.type === 'rating'    && (() => {
+            const lefts  = slide.leftLabels  ?? slide.options.map(() => slide.leftLabel  ?? '')
+            const rights = slide.rightLabels ?? slide.options.map(() => slide.rightLabel ?? '')
+            return (
+              <RatingResults
+                params={slide.options}
+                avgs={ratingAvgs}
+                distributions={ratingDist}
+                ratingMax={ratingMax}
+                leftLabels={lefts}
+                rightLabels={rights}
+                darkBg={needsDarkPanel}
+                theme={slide.theme}
+              />
+            )
+          })()}
+        </div>
+      )}
     </div>
   )
 }
@@ -2022,26 +2235,29 @@ function ResultsSlideView({
 // Shared palette for pie / donut segments
 const VIZ_COLORS = ['#ff0065', '#00b0ff', '#42db66', '#ffc709', '#a855f7', '#f97316']
 
-function MCQResults({ options, votes, respondentCount, vizType = 'bar', correctAnswers, revealed, theme }: {
-  options:          string[]
-  votes:            number[]
-  respondentCount?: number
-  vizType?:         'bar' | 'pie' | 'donut'
-  correctAnswers?:  number[]
-  revealed?:        boolean
-  theme?:           string
+function MCQResults({ options, votes, respondentCount, vizType = 'bar', correctAnswers, revealed, explanationRevealed, theme }: {
+  options:              string[]
+  votes:                number[]
+  respondentCount?:     number
+  vizType?:             'bar' | 'pie' | 'donut'
+  correctAnswers?:      number[]
+  revealed?:            boolean
+  /** True when the explanation box is visible — bar chart tightens its row gap to make room. */
+  explanationRevealed?: boolean
+  theme?:               string
 }) {
   if (vizType === 'pie')   return <MCQPieChart   options={options} votes={votes} respondentCount={respondentCount} correctAnswers={correctAnswers} revealed={revealed} />
   if (vizType === 'donut') return <MCQDonutChart options={options} votes={votes} respondentCount={respondentCount} correctAnswers={correctAnswers} revealed={revealed} />
-  return <MCQBarChart options={options} votes={votes} respondentCount={respondentCount} correctAnswers={correctAnswers} revealed={revealed} theme={theme} />
+  return <MCQBarChart options={options} votes={votes} respondentCount={respondentCount} correctAnswers={correctAnswers} revealed={revealed} explanationRevealed={explanationRevealed} theme={theme} />
 }
 
 /* ── Bar chart — stacked layout: full-width label on top, bar below ───── */
 
-function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed, theme }: {
+function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed, explanationRevealed, theme }: {
   options: string[]; votes: number[]
   respondentCount?: number
   correctAnswers?: number[]; revealed?: boolean
+  explanationRevealed?: boolean
   theme?: string
 }) {
   const total   = respondentCount ?? votes.reduce((s, v) => s + v, 0)
@@ -2066,7 +2282,11 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
   }, [revealed])
 
   return (
-    <div className={cn('flex flex-col', dense ? 'gap-2' : 'gap-5')}>
+    <motion.div
+      className="flex flex-col"
+      animate={{ rowGap: explanationRevealed && !dense ? 12 : dense ? 8 : 20 }}
+      transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+    >
       {options.map((opt, i) => {
         const v         = votes[i] ?? 0
         const pct       = total > 0 ? Math.round((v / total) * 100) : 0
@@ -2090,6 +2310,7 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
               opacity: isWrong ? 0.28 : 1,
               x: 0,
               scale: flashReveal && isCorrect ? [1, 1.03, 1] : 1,
+              rowGap: explanationRevealed && !dense ? 4 : dense ? 4 : 8,
             }}
             transition={{
               opacity: { delay: flashReveal && isWrong ? 0.25 : i * 0.08, duration: 0.45 },
@@ -2097,6 +2318,7 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
               scale:   flashReveal && isCorrect
                 ? { duration: 0.55, times: [0, 0.3, 1], ease: 'easeOut' }
                 : { duration: 0 },
+              rowGap:  { duration: 0.45, ease: [0.16, 1, 0.3, 1] },
             }}
             className={cn('flex flex-col', dense ? 'gap-1' : 'gap-2')}
           >
@@ -2126,7 +2348,7 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
             </div>
             {/* Row 2: bar */}
             <div className={dense ? 'pl-11' : 'pl-14'}>
-              <div className={cn('relative overflow-hidden rounded-xl', dense ? 'h-[10px]' : 'h-7')} style={{ backgroundColor: barTrack }}>
+              <div className={cn('relative overflow-hidden rounded-xl', dense ? 'h-[6px]' : 'h-3.5')} style={{ backgroundColor: barTrack }}>
                 <motion.div
                   className="absolute inset-y-0 left-0 rounded-xl"
                   style={{ backgroundColor: barFill }}
@@ -2151,7 +2373,7 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
           </motion.div>
         )
       })}
-    </div>
+    </motion.div>
   )
 }
 
@@ -2705,7 +2927,7 @@ function rankOrdinal(rank: number): string {
 }
 const RANK_BADGE_STYLE = { bg: 'bg-golden-sun/25', text: 'text-golden-sun', border: 'border-golden-sun/40' }
 
-function RatingResults({ params, avgs, distributions, ratingMax = 5, leftLabels = [], rightLabels = [], darkBg = false }: {
+function RatingResults({ params, avgs, distributions, ratingMax = 5, leftLabels = [], rightLabels = [], darkBg = false, theme }: {
   params:        string[]
   avgs:          number[]
   distributions: number[][]
@@ -2713,6 +2935,7 @@ function RatingResults({ params, avgs, distributions, ratingMax = 5, leftLabels 
   leftLabels?:   string[]
   rightLabels?:  string[]
   darkBg?:       boolean
+  theme?:        string
 }) {
   const dense = params.length >= 4
 
@@ -2730,6 +2953,7 @@ function RatingResults({ params, avgs, distributions, ratingMax = 5, leftLabels 
           ratingMax={ratingMax}
           dense={dense}
           darkBg={darkBg}
+          theme={theme}
           leftLabel ={leftLabels[idx]  ?? ''}
           rightLabel={rightLabels[idx] ?? ''}
           delay={rank * 0.13}
@@ -2752,10 +2976,11 @@ function ratingBarColor(bucketIdx: number, total: number): string {
   return 'rgba(255,255,255,0.20)'
 }
 
-function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, darkBg = false, leftLabel, rightLabel, delay, rank }: {
+function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, darkBg = false, theme, leftLabel, rightLabel, delay, rank }: {
   label: string; avg: number; dist: number[]; ratingMax?: number
   dense?: boolean
   darkBg?: boolean
+  theme?: string
   leftLabel?: string; rightLabel?: string
   delay: number
   rank?: number
@@ -2764,6 +2989,7 @@ function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, darkBg = fa
   const maxCount   = Math.max(...dist, 1)
   const hasEndLabels = !!leftLabel || !!rightLabel
   const badge = rank !== undefined ? { ...RANK_BADGE_STYLE, label: rankOrdinal(rank) } : null
+  const tc = qColors(theme)
 
   return (
     <motion.div
@@ -2790,7 +3016,7 @@ function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, darkBg = fa
               {badge.label}
             </span>
           )}
-          <span className={cn('min-w-0 truncate font-semibold text-white', dense ? 'text-sm' : 'text-xl md:text-2xl')}>
+          <span className={cn('min-w-0 truncate font-semibold', dense ? 'text-sm' : 'text-xl md:text-2xl')} style={{ color: tc.fg }}>
             {label}
           </span>
         </div>
@@ -2802,9 +3028,9 @@ function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, darkBg = fa
             {displayed.toFixed(1)}
           </span>
           <span className={cn(
-            'font-semibold text-white/70',
+            'font-semibold',
             dense ? 'text-xs' : 'text-xl md:text-2xl',
-          )}>/{ratingMax}</span>
+          )} style={{ color: tc.fgDim }}>/{ratingMax}</span>
         </div>
       </div>
 
@@ -2819,7 +3045,8 @@ function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, darkBg = fa
                 initial={{ opacity: 0, y: -4 }}
                 animate={{ opacity: count > 0 ? 1 : 0, y: 0 }}
                 transition={{ duration: 0.25, delay: delay + bucketIdx * 0.04 + 0.5 }}
-                className={cn('shrink-0 font-bold tabular-nums', dense ? 'text-[9px]' : 'text-[11px]', count > 0 ? 'text-white' : 'text-transparent')}
+                className={cn('shrink-0 font-bold tabular-nums', dense ? 'text-[9px]' : 'text-[11px]')}
+                style={{ color: count > 0 ? tc.fg : 'transparent' }}
               >
                 {count > 0 ? count : ''}
               </motion.span>
@@ -2832,7 +3059,7 @@ function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, darkBg = fa
                   transition={{ duration: 0.7, delay: delay + bucketIdx * 0.04, ease: [0.16, 1, 0.3, 1] }}
                 />
               </div>
-              <span className={cn('shrink-0 font-medium tabular-nums', dense ? 'text-[9px]' : 'text-[10px]', count > 0 ? 'text-white/75' : 'text-white/40')}>{bucketIdx}</span>
+              <span className={cn('shrink-0 font-medium tabular-nums', dense ? 'text-[9px]' : 'text-[10px]')} style={{ color: count > 0 ? tc.fgDim : tc.fgFaint }}>{bucketIdx}</span>
             </div>
           )
         })}
@@ -2840,7 +3067,7 @@ function RatingRow({ label, avg, dist, ratingMax = 5, dense = false, darkBg = fa
 
       {/* Anchor labels at the ends of the scale (Mentimeter-style) */}
       {hasEndLabels && (
-        <div className={cn('flex justify-between font-semibold uppercase tracking-wider text-white/55', dense ? 'mt-0.5 text-[9px]' : 'mt-1 text-[10px]')}>
+        <div className={cn('flex justify-between font-semibold uppercase tracking-wider', dense ? 'mt-0.5 text-[9px]' : 'mt-1 text-[10px]')} style={{ color: tc.fgDim }}>
           <span className="truncate pr-2">{leftLabel}</span>
           <span className="truncate pl-2 text-right">{rightLabel}</span>
         </div>
@@ -2922,9 +3149,11 @@ function buildResultsSnapshot(
       ...(leftLabels  ? { leftLabels  } : {}),
       ...(rightLabels ? { rightLabels } : {}),
       ...(q.vizType   ? { vizType: q.vizType } : {}),
+      ...(q.type === 'mcq' && q.correctAnswers?.length ? { correctAnswers: q.correctAnswers } : {}),
     })
   }
   return {
+    id:            `s_${startedAt}`,
     sessionCode,
     conductedAt:   startedAt,
     endedAt:       Date.now(),
@@ -3093,9 +3322,48 @@ function LeaderboardSlideView({
     : lbBg.type === 'gradient' ? { backgroundImage: lbBg.value }
     : { backgroundImage: `url(${lbBg.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
 
+  // ── Responsive sizing tier based on player count ─────────────────────────
+  // All class names are string literals so Tailwind picks them up at build time.
+  const lbTier = top10.length <= 4 ? 0 : top10.length <= 6 ? 1 : 2
+  const tc = ([
+    // Tier 0 — 1–4 players: full size (current)
+    {
+      outerPb:     'pb-24',
+      listGap:     'gap-3',
+      titleText:   'text-5xl', titleTrophy: 'size-9', titleMb: 'mb-8',
+      winner: { py: 'py-4',   emoji: 'text-3xl',  name: 'text-2xl',  bar: 'h-3',   pts: 'text-2xl w-28' },
+      podium: { py: 'py-3',   emoji: 'text-2xl',  name: 'text-xl',   bar: 'h-2',   pts: 'text-lg  w-24' },
+      other:  { py: 'py-2',   emoji: 'text-xl',   name: 'text-base', bar: 'h-2',   pts: 'text-lg  w-24' },
+      badge:  { size: 'size-12', rank: 'text-xl',   crown: 'size-6', crownTop: '-top-5' },
+      rankW:  'w-12 text-lg',
+    },
+    // Tier 1 — 5–6 players: medium
+    {
+      outerPb:     'pb-20',
+      listGap:     'gap-2',
+      titleText:   'text-4xl', titleTrophy: 'size-7', titleMb: 'mb-5',
+      winner: { py: 'py-3',   emoji: 'text-2xl',  name: 'text-xl',   bar: 'h-2',   pts: 'text-xl  w-24' },
+      podium: { py: 'py-2',   emoji: 'text-xl',   name: 'text-lg',   bar: 'h-2',   pts: 'text-lg  w-20' },
+      other:  { py: 'py-1.5', emoji: 'text-lg',   name: 'text-sm',   bar: 'h-1.5', pts: 'text-base w-20' },
+      badge:  { size: 'size-10', rank: 'text-lg',   crown: 'size-5', crownTop: '-top-4' },
+      rankW:  'w-10 text-base',
+    },
+    // Tier 2 — 7–10 players: compact
+    {
+      outerPb:     'pb-16',
+      listGap:     'gap-1.5',
+      titleText:   'text-3xl', titleTrophy: 'size-6', titleMb: 'mb-3',
+      winner: { py: 'py-2',   emoji: 'text-xl',   name: 'text-lg',   bar: 'h-2',   pts: 'text-lg  w-20' },
+      podium: { py: 'py-1.5', emoji: 'text-lg',   name: 'text-base', bar: 'h-1.5', pts: 'text-base w-16' },
+      other:  { py: 'py-1',   emoji: 'text-base', name: 'text-sm',   bar: 'h-1',   pts: 'text-sm  w-16' },
+      badge:  { size: 'size-9',  rank: 'text-base', crown: 'size-4', crownTop: '-top-4' },
+      rankW:  'w-9 text-sm',
+    },
+  ] as const)[lbTier]
+
   return (
     <div
-      className={`absolute inset-0 flex flex-col overflow-hidden px-14 pt-12 pb-24${!lbBg ? ' bg-gradient-to-b from-midnight-sky-900 via-midnight-sky-900 to-[#1a0a3a]' : ''}`}
+      className={`absolute inset-0 flex flex-col overflow-hidden px-14 pt-12 ${tc.outerPb}${!lbBg ? ' bg-gradient-to-b from-midnight-sky-900 via-midnight-sky-900 to-[#1a0a3a]' : ''}`}
       style={lbBgStyle}
     >
 
@@ -3113,13 +3381,13 @@ function LeaderboardSlideView({
         initial={{ opacity: 0, y: -16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-        className="relative mb-8 flex items-center justify-center gap-3"
+        className={`relative flex items-center justify-center gap-3 ${tc.titleMb}`}
       >
-        <Trophy className="size-9 text-golden-sun drop-shadow-[0_0_18px_rgba(255,199,9,0.55)]" />
-        <h1 className="text-5xl font-extrabold tracking-tight text-white drop-shadow-[0_2px_20px_rgba(255,255,255,0.15)]">
+        <Trophy className={`${tc.titleTrophy} text-golden-sun drop-shadow-[0_0_18px_rgba(255,199,9,0.55)]`} />
+        <h1 className={`${tc.titleText} font-extrabold tracking-tight text-white drop-shadow-[0_2px_20px_rgba(255,255,255,0.15)]`}>
           LEADERBOARD
         </h1>
-        <Trophy className="size-9 text-golden-sun drop-shadow-[0_0_18px_rgba(255,199,9,0.55)]" />
+        <Trophy className={`${tc.titleTrophy} text-golden-sun drop-shadow-[0_0_18px_rgba(255,199,9,0.55)]`} />
       </motion.div>
 
       {!loaded ? null : leaderboard.length === 0 ? (
@@ -3127,13 +3395,14 @@ function LeaderboardSlideView({
           <p className="text-white/30">No scores yet — no quiz questions have been answered.</p>
         </div>
       ) : (
-        <div className="relative flex flex-1 flex-col justify-center gap-3 overflow-hidden">
+        <div className={`relative flex flex-1 flex-col justify-center ${tc.listGap} overflow-hidden`}>
           {revealedEntries.map(entry => {
             const rank = top10.indexOf(entry) + 1
             const barPct = maxScore > 0 ? (entry.score / maxScore) * 100 : 0
             const medalColor = rank <= 3 ? MEDAL_COLORS[rank - 1] : null
             const isWinner = rank === 1
             const isPodium = rank <= 3
+            const sz = isWinner ? tc.winner : isPodium ? tc.podium : tc.other
             return (
               <motion.div
                 key={entry.name}
@@ -3142,7 +3411,7 @@ function LeaderboardSlideView({
                 transition={{ type: 'spring', stiffness: 260, damping: 22 }}
                 className={cn(
                   'flex items-center gap-4 rounded-2xl px-5 transition-colors',
-                  isWinner ? 'py-4' : isPodium ? 'py-3' : 'py-2',
+                  sz.py,
                   isPodium && 'border bg-white/[0.04]',
                 )}
                 style={isPodium ? {
@@ -3156,7 +3425,7 @@ function LeaderboardSlideView({
                     initial={{ scale: 0, rotate: -30 }}
                     animate={{ scale: 1, rotate: 0 }}
                     transition={{ type: 'spring', stiffness: 380, damping: 16, delay: 0.1 }}
-                    className="relative flex size-12 shrink-0 items-center justify-center rounded-full text-xl font-extrabold tabular-nums shrink-0"
+                    className={`relative flex ${tc.badge.size} shrink-0 items-center justify-center rounded-full ${tc.badge.rank} font-extrabold tabular-nums`}
                     style={{ backgroundColor: `${medalColor}26`, color: medalColor ?? undefined, border: `2px solid ${medalColor}` }}
                   >
                     {isWinner && (
@@ -3164,15 +3433,15 @@ function LeaderboardSlideView({
                         initial={{ y: 6, opacity: 0, scale: 0.5 }}
                         animate={{ y: 0, opacity: 1, scale: 1 }}
                         transition={{ type: 'spring', stiffness: 400, damping: 14, delay: 0.25 }}
-                        className="absolute -top-5 left-1/2 -translate-x-1/2"
+                        className={`absolute ${tc.badge.crownTop} left-1/2 -translate-x-1/2`}
                       >
-                        <Crown className="size-6 fill-golden-sun text-golden-sun drop-shadow-[0_0_10px_rgba(255,199,9,0.8)]" />
+                        <Crown className={`${tc.badge.crown} fill-golden-sun text-golden-sun drop-shadow-[0_0_10px_rgba(255,199,9,0.8)]`} />
                       </motion.div>
                     )}
                     {rank}
                   </motion.div>
                 ) : (
-                  <span className="w-12 shrink-0 text-center text-lg font-bold tabular-nums text-white/40">
+                  <span className={`${tc.rankW} shrink-0 text-center font-bold tabular-nums text-white/40`}>
                     {rank}
                   </span>
                 )}
@@ -3182,19 +3451,19 @@ function LeaderboardSlideView({
                   initial={{ scale: 0, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   transition={{ type: 'spring', stiffness: 380, damping: 16, delay: 0.08 }}
-                  className={cn('shrink-0 leading-none', isWinner ? 'text-3xl' : isPodium ? 'text-2xl' : 'text-xl')}
+                  className={`shrink-0 leading-none ${sz.emoji}`}
                 >
                   {entry.emoji ?? '👤'}
                 </motion.span>
 
                 <div className="flex flex-1 flex-col gap-1.5">
                   <span
-                    className={cn('font-bold', isWinner ? 'text-2xl' : isPodium ? 'text-xl' : 'text-base')}
+                    className={`font-bold ${sz.name}`}
                     style={{ color: medalColor ?? 'rgba(255,255,255,0.9)' }}
                   >
                     {entry.name}
                   </span>
-                  <div className={cn('relative overflow-hidden rounded-full bg-white/10', isWinner ? 'h-3' : 'h-2')}>
+                  <div className={`relative overflow-hidden rounded-full bg-white/10 ${sz.bar}`}>
                     <motion.div
                       className="absolute inset-y-0 left-0 rounded-full"
                       style={{
@@ -3212,7 +3481,7 @@ function LeaderboardSlideView({
                   initial={{ opacity: 0, scale: 0.7 }}
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ delay: 0.3, type: 'spring', stiffness: 300, damping: 18 }}
-                  className={cn('shrink-0 text-right font-extrabold tabular-nums', isWinner ? 'w-28 text-2xl' : 'w-24 text-lg')}
+                  className={`shrink-0 text-right font-extrabold tabular-nums ${sz.pts}`}
                   style={{ color: medalColor ?? 'rgba(255,255,255,0.75)' }}
                 >
                   {entry.score.toLocaleString()} pts

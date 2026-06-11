@@ -634,30 +634,70 @@ function AnimatedHeadline() {
 
 const STEPS = [
   {
-    number: '01',
-    title:  'Build your session',
-    body:   'Import PDFs, HTML presentations, or videos — then mix in question slides for live interaction. Or build from scratch with custom canvas slides.',
-    color:  'text-sky-blue',
-    bg:     'bg-sky-blue/10',
-    border: 'border-sky-blue/20',
+    number:    '01',
+    title:     'Build your session',
+    body:      'Add your content — upload HTML slides, drop in a PDF or start from a blank canvas. Then sprinkle in question slides wherever you want the room to respond.',
+    color:     'text-sky-blue',
+    bg:        'bg-sky-blue/10',
+    border:    'border-sky-blue/20',
+    spotlight: 'rgba(0,176,255,0.10)',
   },
   {
-    number: '02',
-    title:  'Audience scans & joins',
-    body:   'Show the QR code or 6-character code on screen. Anyone with a phone can join in seconds — no app download, no account.',
-    color:  'text-hot-pink',
-    bg:     'bg-hot-pink/10',
-    border: 'border-hot-pink/20',
+    number:    '02',
+    title:     'Audience scans & joins',
+    body:      'Show the QR code or 6-character code on screen. Anyone with a phone can join in seconds — no app download, no account.',
+    color:     'text-hot-pink',
+    bg:        'bg-hot-pink/10',
+    border:    'border-hot-pink/20',
+    spotlight: 'rgba(255,0,101,0.10)',
   },
   {
-    number: '03',
-    title:  'Results update live',
-    body:   'Votes, words, and answers stream in as people respond. Reveal results whenever you\'re ready — the whole room reacts together.',
-    color:  'text-fresh-green',
-    bg:     'bg-fresh-green/10',
-    border: 'border-fresh-green/20',
+    number:    '03',
+    title:     'Results update live',
+    body:      'Votes, words, and answers stream in as people respond. Reveal results whenever you\'re ready — the whole room reacts together.',
+    color:     'text-fresh-green',
+    bg:        'bg-fresh-green/10',
+    border:    'border-fresh-green/20',
+    spotlight: 'rgba(66,219,102,0.10)',
   },
 ]
+
+function StepCard({ step, delay }: { step: typeof STEPS[0]; delay: number }) {
+  const divRef  = useRef<HTMLDivElement>(null)
+  const [spot, setSpot] = useState<{ x: number; y: number } | null>(null)
+
+  return (
+    <motion.div
+      ref={divRef}
+      initial={{ opacity: 0, y: 24 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: '-60px' }}
+      transition={{ duration: 0.55, delay, ease: [0.16, 1, 0.3, 1] }}
+      onMouseMove={(e) => {
+        const rect = divRef.current?.getBoundingClientRect()
+        if (!rect) return
+        setSpot({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+      }}
+      onMouseLeave={() => setSpot(null)}
+      className={`relative overflow-hidden rounded-2xl border ${step.border} ${step.bg} p-8`}
+    >
+      {spot && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background: `radial-gradient(circle 200px at ${spot.x}px ${spot.y}px, ${step.spotlight}, transparent 80%)`,
+          }}
+        />
+      )}
+      <span className={`mb-5 block font-mono text-4xl font-bold ${step.color} opacity-40`}>
+        {step.number}
+      </span>
+      <h3 className="mb-3 text-xl font-semibold text-white">{step.title}</h3>
+      <p className="text-sm font-light leading-relaxed text-white/60">{step.body}</p>
+    </motion.div>
+  )
+}
 
 function HowItWorks() {
   return (
@@ -679,20 +719,7 @@ function HowItWorks() {
 
       <div className="grid gap-6 md:grid-cols-3">
         {STEPS.map((step, i) => (
-          <motion.div
-            key={step.number}
-            initial={{ opacity: 0, y: 24 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: '-60px' }}
-            transition={{ duration: 0.55, delay: i * 0.1, ease: [0.16, 1, 0.3, 1] }}
-            className={`relative rounded-2xl border ${step.border} ${step.bg} p-8`}
-          >
-            <span className={`mb-5 block font-mono text-4xl font-bold ${step.color} opacity-40`}>
-              {step.number}
-            </span>
-            <h3 className="mb-3 text-xl font-semibold text-white">{step.title}</h3>
-            <p className="text-sm font-light leading-relaxed text-white/60">{step.body}</p>
-          </motion.div>
+          <StepCard key={step.number} step={step} delay={i * 0.1} />
         ))}
       </div>
     </section>

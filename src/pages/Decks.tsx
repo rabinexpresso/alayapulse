@@ -10,11 +10,12 @@ import {
   cloudListDecks, cloudSaveDeck, cloudDeleteDeck,
   signInWithGoogle, signOutUser,
   onAuthStateChanged, auth,
-  loadResults,
+  listResults,
   getRememberMe, setRememberMe, getCachedUser, saveCachedUser, clearCachedUser,
-  createSharedDeck,
+  createSharedDeck, getUniqueDeckTitle,
   type StorageBackend, type Deck, type User, type CachedUser,
 } from '@/lib/deckStorage'
+import { importFileToSlides } from '@/lib/importFile'
 
 /* ─────────────────────────────────────────────────────────────────────────
    Deck JSON export helper (mirrors Create.tsx)
@@ -172,6 +173,9 @@ export default function Decks() {
   const [showWelcomeBanner, setShowWelcomeBanner] = useState(
     () => !!localStorage.getItem(LS_ONBOARDING) && !localStorage.getItem(LS_WELCOME_DISMISSED)
   )
+  // Import-success toast
+  const [importedDeck,    setImportedDeck]    = useState<Deck | null>(null)
+  const importToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const filteredDecks = useMemo(() =>
     searchQuery.trim()
@@ -390,7 +394,7 @@ export default function Decks() {
     // enabled when the user opens a deck that has previous results.
     let lastResults
     if (backend) {
-      try { lastResults = await loadResults(backend, deck.id) } catch { /* ignore */ }
+      try { lastResults = (await listResults(backend, deck.id))[0] } catch { /* ignore */ }
     }
     navigate('/create', { state: { deck, lastResults } })
   }
@@ -405,26 +409,36 @@ export default function Decks() {
     navigate('/create', { state: { slides, deckTitle: template.name } })
   }
 
-  /* ── Import deck from .apulse.json file ───────────────────────────────── */
+  /* ── Import deck from file (JSON, PDF, image, video, HTML) ────────────── */
 
-  const handleImportDeck = useCallback((file: File) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      try {
-        const data = JSON.parse(reader.result as string)
-        if (!Array.isArray(data.slides)) throw new Error('invalid')
-        // Regenerate IDs to avoid collisions with existing slides
-        const uid = () => Math.random().toString(36).slice(2, 10)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const slides = (data.slides as any[]).map(s => ({ ...s, id: uid() }))
-        const title  = typeof data.title === 'string' ? data.title : 'Imported deck'
-        navigate('/create', { state: { slides, deckTitle: title } })
-      } catch {
-        alert('Could not import deck — the file may be invalid or corrupted.')
+  const handleImportDeck = useCallback(async (file: File) => {
+    if (!backend) return
+    try {
+      const { slides, title: parsedTitle } = await importFileToSlides(file)
+      // Use the parsed title (from JSON), or strip extension from file name
+      const rawTitle    = parsedTitle ?? (file.name.replace(/\.[^/.]+$/, '') || 'Imported deck')
+      const uniqueTitle = await getUniqueDeckTitle(rawTitle, backend)
+      const now         = Date.now()
+      const newDeck: Deck = {
+        id:        Math.random().toString(36).slice(2, 10),
+        title:     uniqueTitle,
+        slides,
+        createdAt: now,
+        updatedAt: now,
       }
+      if (backend === 'browser') await browserSaveDeck(newDeck)
+      else                       await cloudSaveDeck(newDeck)
+      // Prepend the new deck so it appears at the top of the list
+      setDecks(prev => [newDeck, ...prev])
+      // Show "Deck imported" toast for 6 seconds
+      setImportedDeck(newDeck)
+      if (importToastTimer.current) clearTimeout(importToastTimer.current)
+      importToastTimer.current = setTimeout(() => setImportedDeck(null), 6000)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Could not import — the file may be invalid or unsupported.'
+      alert(msg)
     }
-    reader.readAsText(file)
-  }, [navigate])
+  }, [backend])
 
   /* ── Render ───────────────────────────────────────────────────────────── */
 
@@ -594,7 +608,7 @@ export default function Decks() {
             <input
               ref={importRef}
               type="file"
-              accept=".json,.apulse"
+              accept=".json,.apulse,.pdf,.html,.htm,image/*,video/*"
               className="hidden"
               onChange={e => { const f = e.target.files?.[0]; if (f) handleImportDeck(f); e.target.value = '' }}
             />
@@ -770,15 +784,15 @@ export default function Decks() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 20 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-white/10 bg-midnight-sky-900 px-5 py-3 shadow-2xl"
+            className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-midnight-sky-100 bg-white px-5 py-3 shadow-2xl"
           >
-            <span className="text-sm font-medium text-white/80">
+            <span className="text-sm font-medium text-midnight-sky-800">
               {selectedIds.size} {selectedIds.size === 1 ? 'deck' : 'decks'} selected
             </span>
-            <div className="h-4 w-px bg-white/20" />
+            <div className="h-4 w-px bg-midnight-sky-200" />
             <button
               onClick={() => setConfirmDeleteSelected(true)}
-              className="flex items-center gap-1.5 rounded-xl bg-red-500/20 px-3 py-1.5 text-xs font-semibold text-red-400 transition hover:bg-red-500/30 hover:text-red-300"
+              className="flex items-center gap-1.5 rounded-xl bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-100"
             >
               <Trash2 className="size-3.5" />
               Delete {selectedIds.size === 1 ? 'deck' : 'decks'}
@@ -786,7 +800,7 @@ export default function Decks() {
             <button
               onClick={clearSelection}
               title="Cancel selection"
-              className="rounded-lg p-1 text-white/40 transition hover:text-white/70"
+              className="rounded-lg p-1 text-midnight-sky-400 transition hover:text-midnight-sky-700"
             >
               <XIcon className="size-4" />
             </button>
@@ -815,6 +829,43 @@ export default function Decks() {
             onConfirm={handleDeleteSelected}
             onCancel={() => setConfirmDeleteSelected(false)}
           />
+        )}
+      </AnimatePresence>
+
+      {/* ── Import success toast ─────────────────────────────────────────── */}
+      <AnimatePresence>
+        {importedDeck && (
+          <motion.div
+            key="import-toast"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 16 }}
+            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+            className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-white/10 bg-midnight-sky-900 px-5 py-3 shadow-2xl"
+          >
+            <Check className="size-4 shrink-0 text-emerald-400" />
+            <span className="text-sm font-medium text-white/90">Deck imported</span>
+            <div className="h-4 w-px bg-white/20" />
+            <button
+              onClick={() => {
+                setImportedDeck(null)
+                if (importToastTimer.current) clearTimeout(importToastTimer.current)
+                handleOpen(importedDeck)
+              }}
+              className="text-sm font-semibold text-sky-blue transition hover:opacity-75"
+            >
+              Open in editor
+            </button>
+            <button
+              onClick={() => {
+                setImportedDeck(null)
+                if (importToastTimer.current) clearTimeout(importToastTimer.current)
+              }}
+              className="ml-1 rounded-lg p-0.5 text-white/40 transition hover:text-white/70"
+            >
+              <XIcon className="size-3.5" />
+            </button>
+          </motion.div>
         )}
       </AnimatePresence>
     </main>

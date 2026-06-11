@@ -1,0 +1,34 @@
+# ===================================================================
+# Alaya Pulse -- Question Import Template
+# ===================================================================
+# HOW TO USE:
+# 1. Copy the LLM prompt below into ChatGPT or Claude
+# 2. Paste your Word document questions after the prompt and send
+# 3. Copy the CSV rows from the LLM response into this file (replace the example rows below)
+# 4. Save the file and import it in Alaya Pulse: Create page > Import / Merge > Import questions in CSV
+# -------------------------------------------------------------------
+# LLM PROMPT -- copy everything between the markers:
+# >>> START
+# Convert the questions below into CSV rows using this exact format:
+# type,question,option_a,option_b,option_c,option_d,option_e,option_f,correct,explanation,timer
+# Rules:
+# - type must be one of: mcq | wordcloud | openended | rating
+# - MCQ: fill option_a to option_f (only as many options as the question has, max 6), correct = single letter e.g. B or multiple e.g. A|C|D, explanation = why the answer is correct
+# - wordcloud / openended / rating: leave option_a to option_f, correct, and explanation empty
+# - timer: use 30 unless a specific time is stated
+# - Output data rows only. No header row. No extra text or explanation.
+# [Paste your questions here]
+# >>> END
+# -------------------------------------------------------------------
+# FORMAT RULES (quick reference):
+# type:    mcq | wordcloud | openended | rating
+# correct: single answer = B  |  multiple answers = A|C|D
+# Non-MCQ: leave option_a to option_f, correct, and explanation blank
+# timer:   seconds per question -- leave blank to default to 30 seconds
+# ===================================================================
+type,question,option_a,option_b,option_c,option_d,option_e,option_f,correct,explanation,timer
+mcq,Example MCQ -- single correct answer,Option A,Option B,Option C,Option D,,,B,This is why B is the correct answer.,30
+mcq,Example MCQ -- multiple correct answers,Option A,Option B,Option C,Option D,Option E,Option F,A|C,A and C are both correct because of this reason.,30
+wordcloud,Example Word Cloud -- what one word comes to mind?,,,,,,,,,30
+openended,Example Open Ended -- what is one thing you will do differently after today?,,,,,,,,,30
+rating,Example Rating -- how confident do you feel about this topic?,,,,,,,,,30
