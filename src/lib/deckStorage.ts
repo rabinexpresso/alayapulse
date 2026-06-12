@@ -39,6 +39,11 @@ export interface ResultResponse {
   value: string
   /** Unix ms when this response was submitted */
   time:  number
+  /** Quiz mode only — points earned on this answer, captured at submission
+   *  time on the audience device. `answer` = 100 if correct else 0;
+   *  `speed`  = 0..100 bonus based on remaining timer. Absent for non-quiz
+   *  sessions and for sessions run before points capture was added. */
+  quizPoints?: { answer: number; speed: number }
 }
 
 export interface ResultQuestion {

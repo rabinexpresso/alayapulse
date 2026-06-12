@@ -3130,6 +3130,10 @@ function buildResultsSnapshot(
         // Firestore Timestamp → unix ms (handles plain objects too)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         time:  ((r.submittedAt as any)?.toMillis?.() ?? Date.now()) as number,
+        // Quiz mode: preserve the score breakdown so the Leaderboard export
+        // matches the live on-screen scores. Conditionally spread — Firestore
+        // rejects `undefined`, and non-quiz responses have no points.
+        ...(r.quizPoints ? { quizPoints: r.quizPoints } : {}),
       }))
       .sort((a, b) => a.time - b.time)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -213,9 +213,57 @@ export default function Results() {
         }
       })
 
+      // ── Leaderboard tab (quiz mode only) ───────────────────────────────
+      // Scoreable questions = MCQ slides with a correct answer marked. Only
+      // these contribute points; word cloud / open-ended / rating don't.
+      const scoreableQuestions = results.questions.filter(
+        q => q.type === 'mcq' && (q.correctAnswers?.length ?? 0) > 0,
+      )
+      // Tally points per respondent across all scoreable questions.
+      const tally: Record<string, { correct: number; correctPts: number; speedPts: number }> = {}
+      scoreableQuestions.forEach(q => {
+        q.responses.forEach(r => {
+          const name = r.name || 'Anonymous'
+          if (!tally[name]) tally[name] = { correct: 0, correctPts: 0, speedPts: 0 }
+          const t = tally[name]
+          const correct = isResponseCorrect(r, q) === true
+          if (correct) t.correct += 1
+          // Prefer stored quiz points — these match the live leaderboard exactly.
+          if (r.quizPoints) {
+            t.correctPts += r.quizPoints.answer
+            t.speedPts   += r.quizPoints.speed
+          } else if (correct) {
+            // Legacy session (no points captured): 100 per correct is still
+            // recoverable; the speed bonus is gone, so it stays 0.
+            t.correctPts += 100
+          }
+        })
+      })
+      const totalScoreable = scoreableQuestions.length
+      const leaderboard = Object.entries(tally)
+        .map(([name, t]) => ({ name, ...t, total: t.correctPts + t.speedPts }))
+        // Highest total first; ties broken alphabetically for a stable order.
+        .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
+
       const wb = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(scorecardRows), 'Scorecard')
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Question summary')
+
+      // Only add the Leaderboard if this deck is a quiz with at least one
+      // scoreable question — otherwise the tab is omitted entirely (no clutter).
+      if (deck.isQuiz && leaderboard.length > 0 && totalScoreable > 0) {
+        const leaderboardRows = leaderboard.map(row => ({
+          // Standard competition ranking: tied totals share a rank, the next
+          // distinct total skips ahead (e.g. 1, 2, 2, 4).
+          'Rank':            1 + leaderboard.filter(o => o.total > row.total).length,
+          'Name':            row.name,
+          'Correct Answers': `${row.correct} / ${totalScoreable}`,
+          'Correct Points':  row.correctPts,
+          'Speed Points':    row.speedPts,
+          'Total Points':    row.total,
+        }))
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(leaderboardRows), 'Leaderboard')
+      }
 
       const safeTitle = deck.title.replace(/[^a-z0-9\-_ ]/gi, '').trim() || 'results'
       const date = new Date(results.conductedAt).toISOString().slice(0, 10)
@@ -581,7 +629,7 @@ function QuestionResult({ index, question, audienceCount }: {
       {/* Question header */}
       <div className="border-b border-midnight-sky-100 px-6 py-5">
         <div className="mb-2 flex items-center gap-2">
-          <span className="text-[11px] font-bold uppercase tracking-wider text-midnight-sky-400">
+          <span className="rounded-full bg-midnight-sky-900 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-white">
             Q{index + 1}
           </span>
           <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider', meta.bg, meta.text)}>
