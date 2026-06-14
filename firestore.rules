@@ -2,6 +2,25 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // Admin check: the permanent bootstrap admin, or any email listed in
+    // config/admins.emails. Mirrors assertAdmin() in the exportAllSessions
+    // Cloud Function — keep the two in sync.
+    function isAdmin() {
+      return request.auth != null && (
+        request.auth.token.email == 'rabin.r@homeloanexperts.com.au' ||
+        (exists(/databases/$(database)/documents/config/admins) &&
+         request.auth.token.email in get(/databases/$(database)/documents/config/admins).data.emails)
+      );
+    }
+
+    // App config (admin allowlist lives here). Any signed-in user may read it
+    // so the client can decide whether to show the admin panel; only admins
+    // may change who is an admin.
+    match /config/{docId} {
+      allow read:  if request.auth != null;
+      allow write: if isAdmin();
+    }
+
     // Sessions — read/create open for unauthenticated audience + browser-mode presenters.
     // Update/delete on the session document itself is restricted to the owner.
     // Browser-mode sessions (ownerId == null) remain writable by anyone since

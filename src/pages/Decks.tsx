@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Plus, Trash2, Monitor, Cloud, LogOut, Clock, Layers, ArrowRightLeft, FileText, Download, Upload, Copy, Search, X as XIcon, ChevronDown, Check, Share2, Link2 } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
+import { AdminExport } from '@/components/AdminExport'
 import { cn } from '@/lib/utils'
 import {
   getStorageBackend, setStorageBackend, clearStorageBackend,
@@ -605,6 +606,7 @@ export default function Decks() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <AdminExport />
             <input
               ref={importRef}
               type="file"

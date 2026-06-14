@@ -24,14 +24,17 @@
  */
 
 const { onSchedule } = require('firebase-functions/v2/scheduler')
+const { onCall, HttpsError } = require('firebase-functions/v2/https')
 const { defineSecret } = require('firebase-functions/params')
 const logger = require('firebase-functions/logger')
 const { initializeApp } = require('firebase-admin/app')
 const { getFirestore } = require('firebase-admin/firestore')
+const { getAuth } = require('firebase-admin/auth')
 const cloudinary = require('cloudinary').v2
 
 initializeApp()
 const db = getFirestore()
+const adminAuth = getAuth()
 
 // Public — appears in every image URL, so it's safe to hardcode.
 const CLOUD_NAME = 'dkyljxt2j'
@@ -158,5 +161,113 @@ exports.sweepOrphanImages = onSchedule(
       deleted += batch.length
     }
     logger.info(`Sweep done: deleted ${deleted} orphaned images.`)
+  },
+)
+
+/* ─────────────────────────────────────────────────────────────────────────
+   exportAllSessions — admin-only cross-account data export.
+
+   Reads every saved session (the results sub-collection under every deck of
+   every user) across ALL accounts,
+   optionally filtered by date, and returns it as JSON for the browser to turn
+   into an Excel workbook. The privileged cross-account read runs here (Admin
+   SDK bypasses security rules) so the browser never gets blanket read access.
+
+   Authorization: caller must be signed in AND be an admin — either the
+   bootstrap admin below, or an email listed in config/admins.emails.
+   ───────────────────────────────────────────────────────────────────────── */
+
+// Permanent first admin — can never be locked out, even if config/admins is empty.
+const BOOTSTRAP_ADMIN = 'rabin.r@homeloanexperts.com.au'
+
+/** Throws unless the caller is an admin. Returns the caller's email. */
+async function assertAdmin(request) {
+  const email = request.auth && request.auth.token && request.auth.token.email
+  if (!email) throw new HttpsError('unauthenticated', 'Please sign in.')
+  if (email === BOOTSTRAP_ADMIN) return email
+  const snap = await db.doc('config/admins').get()
+  const emails = snap.exists && Array.isArray(snap.get('emails')) ? snap.get('emails') : []
+  if (!emails.includes(email)) {
+    throw new HttpsError('permission-denied', 'This action is for admins only.')
+  }
+  return email
+}
+
+exports.exportAllSessions = onCall(
+  { region: 'asia-south2', timeoutSeconds: 300, memory: '512MiB' },
+  async (request) => {
+    const callerEmail = await assertAdmin(request)
+
+    // Optional date window. Dates arrive as 'YYYY-MM-DD'; endDate is inclusive.
+    const { startDate, endDate } = request.data || {}
+    const startMs = startDate ? new Date(startDate).getTime() : 0
+    const endMs = endDate
+      ? new Date(endDate).getTime() + 24 * 3600 * 1000 - 1
+      : Number.MAX_SAFE_INTEGER
+
+    // Every saved session across all accounts (Admin SDK bypasses rules).
+    const resultsSnap = await db.collectionGroup('results').get()
+
+    const picked = []
+    const uidSet = new Set()
+    const deckRefByPath = new Map()
+
+    resultsSnap.forEach((d) => {
+      const data = d.data() || {}
+      const conductedAt = Number(data.conductedAt) || 0
+      if (conductedAt < startMs || conductedAt > endMs) return
+      const deckRef = d.ref.parent.parent // users/{uid}/decks/{deckId}
+      const userRef = deckRef && deckRef.parent.parent // users/{uid}
+      if (!deckRef || !userRef) return
+      uidSet.add(userRef.id)
+      deckRefByPath.set(deckRef.path, deckRef)
+      picked.push({ uid: userRef.id, deckPath: deckRef.path, data })
+    })
+
+    // Resolve deck titles + quiz flag (batched).
+    const deckMeta = {}
+    const deckRefs = [...deckRefByPath.values()]
+    for (let i = 0; i < deckRefs.length; i += 100) {
+      const got = await db.getAll(...deckRefs.slice(i, i + 100))
+      got.forEach((s) => {
+        deckMeta[s.ref.path] = {
+          title: (s.exists && s.get('title')) || 'Untitled deck',
+          isQuiz: !!(s.exists && s.get('isQuiz')),
+        }
+      })
+    }
+
+    // Resolve owner emails from Firebase Auth (batched, 100 at a time).
+    const emailByUid = {}
+    const uids = [...uidSet]
+    for (let i = 0; i < uids.length; i += 100) {
+      const chunk = uids.slice(i, i + 100).map((uid) => ({ uid }))
+      try {
+        const res = await adminAuth.getUsers(chunk)
+        res.users.forEach((u) => { emailByUid[u.uid] = u.email || u.uid })
+      } catch (e) {
+        logger.warn('getUsers failed for a chunk; falling back to uid', e)
+      }
+    }
+
+    const sessions = picked.map(({ uid, deckPath, data }) => {
+      const meta = deckMeta[deckPath] || {}
+      return {
+        ownerEmail: emailByUid[uid] || uid,
+        deckTitle: meta.title || 'Untitled deck',
+        isQuiz: !!meta.isQuiz,
+        id: data.id || '',
+        sessionCode: data.sessionCode || '',
+        conductedAt: Number(data.conductedAt) || 0,
+        endedAt: typeof data.endedAt === 'number' ? data.endedAt : null,
+        audienceCount: Number(data.audienceCount) || 0,
+        trimmed: !!data.trimmed,
+        questions: Array.isArray(data.questions) ? data.questions : [],
+      }
+    })
+
+    sessions.sort((a, b) => b.conductedAt - a.conductedAt) // newest first
+    logger.info(`exportAllSessions: ${callerEmail} exported ${sessions.length} session(s).`)
+    return { sessions, count: sessions.length }
   },
 )
