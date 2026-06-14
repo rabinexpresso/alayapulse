@@ -194,6 +194,14 @@ export async function getUniqueDeckTitle(
 
 export async function browserDeleteDeck(id: string): Promise<void> {
   const idb = await getIDB()
+  // Also clear this deck's saved session results (stored in a separate object
+  // store, keyed by deckId) so nothing is left orphaned in IndexedDB.
+  try {
+    const keys = await idb.getAllKeysFromIndex(IDB_RESULTS, 'deckId', id)
+    await Promise.all(keys.map(k => idb.delete(IDB_RESULTS, k)))
+  } catch (e) {
+    console.error('[alaya-pulse] browserDeleteDeck: failed to clear results', e)
+  }
   await idb.delete(IDB_STORE, id)
 }
 
@@ -345,6 +353,15 @@ export async function cloudSaveDeck(deck: Deck): Promise<void> {
 export async function cloudDeleteDeck(id: string): Promise<void> {
   const user = auth.currentUser
   if (!user) throw new Error('Not signed in')
+  // Firestore does NOT auto-delete a document's subcollections. Clear this
+  // deck's saved session results first, otherwise they linger as orphaned
+  // data that still counts toward storage and is no longer reachable in the UI.
+  try {
+    const resultsSnap = await getDocs(resultsCollection(user.uid, id))
+    await Promise.all(resultsSnap.docs.map(d => deleteDoc(d.ref)))
+  } catch (e) {
+    console.error('[alaya-pulse] cloudDeleteDeck: failed to clear results subcollection', e)
+  }
   await deleteDoc(doc(decksRef(user.uid), id))
 }
 

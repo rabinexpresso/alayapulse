@@ -1,0 +1,14 @@
+{
+  "name": "functions",
+  "description": "Alaya Pulse Cloud Functions — Cloudinary orphan image cleanup",
+  "private": true,
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "cloudinary": "^2.5.1",
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^6.1.0"
+  }
+}

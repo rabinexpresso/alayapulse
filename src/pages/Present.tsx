@@ -1063,11 +1063,18 @@ export default function Present() {
                     if (isRealSession) {
                       try {
                         const all = await fetchAllSessionResponses(code)
-                        lastResults = buildResultsSnapshot(
+                        const snapshot = buildResultsSnapshot(
                           deck, all, code,
                           sessionStartedAt.current,
                           peakViewerRef.current,
                         )
+                        // Only keep a results record if at least one question
+                        // actually received a response. Skips empty history from
+                        // content-only runs or sessions nobody answered, so the
+                        // saved data (and the all-data export) stays meaningful.
+                        if (snapshot.questions.some(q => q.responseCount > 0)) {
+                          lastResults = snapshot
+                        }
                       } catch (e) {
                         console.error('Failed to capture session results:', e)
                       }

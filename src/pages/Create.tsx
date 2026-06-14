@@ -1512,27 +1512,30 @@ export default function Create() {
           </div>
 
           {(() => {
-            const hasResults = !!lastResults && lastResults.questions.length > 0
+            // Enabled whenever the deck is saved (so its past sessions can be
+            // viewed) or a session just ended. The Results page shows a friendly
+            // "no results yet" state if this deck has never been presented.
+            const canViewResults = !!currentDeckId || !!lastResults
             return (
               <motion.button
                 onClick={async () => {
-                  if (!hasResults) return
+                  if (!canViewResults) return
                   let targetId = currentDeckId
                   if (!targetId) {
                     targetId = await saveDeck() ?? undefined
                   }
                   if (targetId) navigate(`/results/${targetId}`)
                 }}
-                disabled={!hasResults || isSaving}
-                whileTap={hasResults ? { scale: 0.96 } : {}}
+                disabled={!canViewResults || isSaving}
+                whileTap={canViewResults ? { scale: 0.96 } : {}}
                 title={
-                  !hasResults
-                    ? 'No poll results yet — start a session and collect responses first'
-                    : 'View live poll results'
+                  !canViewResults
+                    ? 'Save the deck first — then you can view its poll results'
+                    : 'View saved poll results'
                 }
                 className={cn(
                   'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-medium transition-all duration-200',
-                  hasResults && !isSaving
+                  canViewResults && !isSaving
                     ? 'border-hot-pink/50 bg-hot-pink/5 text-hot-pink hover:border-hot-pink/70 hover:bg-hot-pink/10'
                     : 'cursor-not-allowed border-white/10 text-white/30',
                 )}
@@ -2030,7 +2033,7 @@ function SlidePanel({
               disabled={isImporting}
               className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-[#f97316] py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-[#ea6c0a] active:scale-95 disabled:opacity-40"
             >
-              {isImporting ? <LoadingDots /> : 'Import / Merge'}
+              {isImporting ? <LoadingDots /> : 'Import'}
             </button>
             <AnimatePresence>
               {importMenuOpen && (
@@ -2061,7 +2064,7 @@ function SlidePanel({
                     className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-xs text-white/80 transition hover:bg-white/8 hover:text-white"
                   >
                     <Copy className="size-3.5 shrink-0 text-white/50" />
-                    Merge deck
+                    Append deck
                   </button>
                 </motion.div>
               )}
@@ -2071,7 +2074,7 @@ function SlidePanel({
           <button
             onClick={onOpenSorter}
             title="Slide overview"
-            className="flex items-center justify-center rounded-xl bg-white/8 px-3 py-2 text-white/60 transition-all hover:bg-white/15 hover:text-white active:scale-95"
+            className="flex items-center justify-center rounded-xl border border-sky-blue/40 bg-sky-blue/15 px-3 py-2 text-sky-blue transition-all hover:bg-sky-blue/25 hover:text-white active:scale-95"
           >
             <LayoutGrid className="size-4" />
           </button>

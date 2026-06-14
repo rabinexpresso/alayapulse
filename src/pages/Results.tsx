@@ -344,7 +344,7 @@ export default function Results() {
           <h1 className="text-4xl font-bold tracking-tight text-midnight-sky-900 sm:text-5xl">
             {deckTitle}
           </h1>
-          <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-midnight-sky-600">
+          <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-midnight-sky-700">
             <span className="flex items-center gap-1.5">
               <Clock className="size-3.5" />
               {formatTimestamp(results.conductedAt)}
@@ -357,7 +357,7 @@ export default function Results() {
 
           {/* Session history — switch between past sessions for this deck */}
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            <span className="flex items-center gap-1 text-xs font-medium uppercase tracking-wider text-midnight-sky-400">
+            <span className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-midnight-sky-600">
               <History className="size-3.5" />
               {sessionsList.length > 1 ? 'Sessions' : 'Session'}
             </span>
