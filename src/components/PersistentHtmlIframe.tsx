@@ -284,6 +284,43 @@ export function injectPersistentHtmlNavScript(
       document.addEventListener(t, interceptClick, true);
     });
 
+    // Also neutralise "click empty area to advance" navigation. Some decks
+    // attach a window/document click handler that treats any non-interactive
+    // click as next/prev (e.g. right half of screen = next). In split mode
+    // Pulse owns navigation, so a stray background click must NOT advance the
+    // deck's internal slide — that silently desyncs it from Pulse. Clicks on
+    // genuine controls (buttons, links, inputs, or anything with onclick /
+    // role=button / an "interactive"-style class like flip cards, accordions)
+    // pass through so the slide's own widgets keep working.
+    var CLICKABLE_TAGS = { BUTTON:1, A:1, INPUT:1, SELECT:1, TEXTAREA:1, LABEL:1, OPTION:1, SUMMARY:1 };
+    function isInteractiveTarget(node) {
+      var el = node, hops = 0;
+      while (el && el.nodeType === 1 && hops < 6) {
+        if (CLICKABLE_TAGS[el.tagName]) return true;
+        try {
+          if (el.hasAttribute && (el.hasAttribute('onclick') || el.getAttribute('role') === 'button')) return true;
+        } catch (ex) {}
+        try {
+          var cls = el.className;
+          if (cls && cls.baseVal !== undefined) cls = cls.baseVal;  // SVG
+          cls = String(cls || '').toLowerCase();
+          if (cls.indexOf('interactive') >= 0 || cls.indexOf('clickable') >= 0 ||
+              cls.indexOf('accordion') >= 0 || cls.indexOf('flip') >= 0 ||
+              cls.indexOf('card') >= 0 || cls.indexOf('toggle') >= 0) return true;
+        } catch (ex) {}
+        el = el.parentElement; hops++;
+      }
+      return false;
+    }
+    function blockAreaNav(e) {
+      if (!e.isTrusted) return;
+      if (isInteractiveTarget(e.target)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+    }
+    document.addEventListener('click', blockAreaNav, true);
+
     // ── Drag-to-scroll for vertically long slides ───────────────────────
     // Only enabled when Pulse owns navigation (interceptKeys=true). For
     // unsplit HTML decks the iframe is fully interactive — we leave all
@@ -504,19 +541,39 @@ export function injectPersistentHtmlNavScript(
         done(); return;
       }
     } catch (e) {}
-    // 3) AI-generated / custom slideshow: try common 1-based function names.
-    //    AI tools (Claude, ChatGPT, etc.) consistently produce gotoSlide(N),
-    //    showSlide(N), etc. with 1-based indexing. Check before falling back
-    //    to keypress navigation which these slideshows typically ignore.
+    // 3) AI-generated / custom slideshow: try common goto function names.
+    //    AI tools (Claude, ChatGPT, etc.) emit gotoSlide(N)/goToSlide(N)/etc,
+    //    but the indexing convention VARIES — some decks are 1-based, some are
+    //    0-based. Rather than blindly assume 1-based (which silently breaks
+    //    0-based decks: every slide off by one, first slide unreachable, last
+    //    slide stuck), we CALL then VERIFY against the on-screen "N / M"
+    //    counter and self-correct. Both synchronous guesses paint only their
+    //    final state, so there's no visible flicker.
     try {
       var _fns = ['gotoSlide', 'showSlide', 'goToSlide', 'changeSlide'];
       for (var _fi = 0; _fi < _fns.length; _fi++) {
-        if (typeof window[_fns[_fi]] === 'function') {
-          log('using direct fn', _fns[_fi]);
-          window[_fns[_fi]](target + 1);  // 0-based Pulse index → 1-based HTML index
+        if (typeof window[_fns[_fi]] !== 'function') continue;
+        var _fn = window[_fns[_fi]];
+        log('using direct fn', _fns[_fi]);
+        _fn(target + 1);                        // guess #1: 1-based
+        var _after1 = detectCurrentSlide();
+        if (_after1 === target) { currentIndex = target; done(); return; }
+        _fn(target);                            // guess #2: 0-based
+        var _after0 = detectCurrentSlide();
+        if (_after0 === target) { currentIndex = target; done(); return; }
+        if (_after1 === null && _after0 === null) {
+          // No readable counter to verify against — fall back to the old
+          // 1-based assumption (best effort) and trust it.
+          _fn(target + 1);
           currentIndex = target;
           done(); return;
         }
+        // A counter exists but neither convention hit the target — record
+        // where we actually ended up so keypress nav starts from the truth,
+        // then let it take over below.
+        if (_after0 !== null) currentIndex = _after0;
+        else if (_after1 !== null) currentIndex = _after1;
+        break;
       }
     } catch (e) {}
     // 4) Hash navigation

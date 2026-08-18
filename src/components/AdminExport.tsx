@@ -75,7 +75,64 @@ function sessionParticipation(s: { questions: ResultQuestion[]; audienceCount: n
   )
 }
 
-/** Build the cross-account workbook: Tab 1 = session index, Tab 2 = flat answers. */
+/** One-line aggregate summary for a question (used in the "All Questions" tab). */
+function summarizeQuestion(q: ResultQuestion): string {
+  const total = q.responseCount
+
+  if (q.type === 'mcq') {
+    const counts = new Array(q.options.length).fill(0)
+    q.responses.forEach(r => {
+      let indices: number[]
+      try { const p = JSON.parse(r.value); indices = Array.isArray(p) ? p as number[] : [parseInt(r.value, 10)] }
+      catch { indices = [parseInt(r.value, 10)] }
+      indices.forEach(idx => { if (counts[idx] !== undefined) counts[idx]++ })
+    })
+    const breakdown = q.options.map((opt, i) => {
+      const pct = total > 0 ? Math.round((counts[i] / total) * 100) : 0
+      const correct = q.correctAnswers?.includes(i) ? ' ✓' : ''
+      return `${String.fromCharCode(65 + i)}. ${opt}: ${counts[i]} (${pct}%)${correct}`
+    }).join(', ')
+    if (q.correctAnswers && q.correctAnswers.length > 0) {
+      const correctCount = q.responses.filter(r => isResponseCorrect(r, q)).length
+      const ratePct = total > 0 ? Math.round((correctCount / total) * 100) : 0
+      return `${breakdown}  |  Correct: ${ratePct}%`
+    }
+    return breakdown
+  }
+
+  if (q.type === 'rating') {
+    const ratingMax = q.ratingMax === 10 ? 10 : 5
+    const labels = q.options.length > 0 ? q.options : ['Rating']
+    const sums = new Array(labels.length).fill(0)
+    const counts = new Array(labels.length).fill(0)
+    q.responses.forEach(r => {
+      try {
+        const arr = JSON.parse(r.value) as number[]
+        arr.forEach((v, i) => { if (sums[i] !== undefined) { sums[i] += v; counts[i]++ } })
+      } catch { /* skip malformed */ }
+    })
+    return labels.map((label, i) => {
+      const avg = counts[i] > 0 ? (sums[i] / counts[i]).toFixed(1) : '–'
+      return `${label || `P${i + 1}`}: ${avg}/${ratingMax}`
+    }).join('  |  ')
+  }
+
+  if (q.type === 'wordcloud') {
+    const freq = new Map<string, number>()
+    q.responses.forEach(r => {
+      const word = r.value.trim().toLowerCase()
+      if (!word) return
+      freq.set(word, (freq.get(word) || 0) + 1)
+    })
+    const top = [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)
+    return top.map(([word, count]) => `${word} (${count})`).join(', ')
+  }
+
+  // open-ended — individual answers are in the "All Responses" tab
+  return total === 1 ? '1 response' : `${total} responses`
+}
+
+/** Build the cross-account workbook: Tab 1 = session index, Tab 2 = flat answers, Tab 3 = per-question summary. */
 async function buildAllSessionsWorkbook(sessions: ExportSession[], startDate: string, endDate: string) {
   const XLSX = await import('xlsx')
 
@@ -117,6 +174,25 @@ async function buildAllSessionsWorkbook(sessions: ExportSession[], startDate: st
     })
   })
 
+  // ── Tab 3: All Questions (one row per question, aggregated) ──────────
+  const questionRows: Record<string, string | number>[] = []
+  sessions.forEach(s => {
+    const date = new Date(s.conductedAt).toISOString().slice(0, 10)
+    s.questions.forEach((q, qi) => {
+      questionRows.push({
+        'Date':      date,
+        'Owner':     s.ownerEmail,
+        'Deck':      s.deckTitle,
+        'Session':   s.sessionCode,
+        'Q#':        qi + 1,
+        'Question':  q.question || '(Untitled question)',
+        'Type':      TYPE_LABELS[q.type] ?? q.type,
+        'Responses': q.responseCount,
+        'Summary':   summarizeQuestion(q),
+      })
+    })
+  })
+
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sessionRows), 'All Sessions')
   XLSX.utils.book_append_sheet(
@@ -127,6 +203,15 @@ async function buildAllSessionsWorkbook(sessions: ExportSession[], startDate: st
         : [{ Note: 'No individual responses in range (large sessions may have been trimmed to aggregate counts only).' }],
     ),
     'All Responses',
+  )
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet(
+      questionRows.length
+        ? questionRows
+        : [{ Note: 'No questions in range.' }],
+    ),
+    'All Questions',
   )
 
   const stamp = (startDate || endDate)

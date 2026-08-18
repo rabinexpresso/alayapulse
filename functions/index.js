@@ -126,6 +126,8 @@ exports.sweepOrphanImages = onSchedule(
     const cutoff = Date.now() - MIN_AGE_HOURS * 3600 * 1000
     const orphans = []
     let scanned = 0
+    let inUse = 0
+    let tooNew = 0
     let cursor
 
     do {
@@ -139,15 +141,16 @@ exports.sweepOrphanImages = onSchedule(
         scanned++
         const id = asset.public_id
         if (!id || !id.startsWith(FOLDER_PREFIX)) continue // safety: images/ only
-        if (referenced.has(id)) continue // still in use
-        if (new Date(asset.created_at).getTime() > cutoff) continue // too new — skip
+        if (referenced.has(id)) { inUse++; continue } // still in use
+        if (new Date(asset.created_at).getTime() > cutoff) { tooNew++; continue } // too new — skip
         orphans.push(id)
       }
       cursor = res.next_cursor
     } while (cursor)
 
     logger.info(
-      `Sweep scan: ${scanned} images in "${FOLDER_PREFIX}", ${orphans.length} orphaned` +
+      `Sweep scan: ${scanned} images in "${FOLDER_PREFIX}" — ${inUse} in use, ` +
+        `${tooNew} unused but under ${MIN_AGE_HOURS}h old, ${orphans.length} orphaned` +
         (DRY_RUN ? ' (DRY RUN — nothing deleted).' : '.'),
     )
     if (orphans.length) logger.info('Orphan public_ids: ' + orphans.join(', '))

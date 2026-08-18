@@ -60,6 +60,12 @@ function Nav() {
         </nav>
         <div className="flex items-center gap-3">
           <Link
+            to="/guide"
+            className="hidden rounded-full border border-hot-pink/40 px-4 py-2 text-sm font-medium text-hot-pink transition-all hover:scale-[1.02] hover:border-hot-pink/70 hover:text-white sm:inline-flex"
+          >
+            User Guide
+          </Link>
+          <Link
             to="/join"
             className="hidden rounded-full bg-sky-blue px-4 py-2 text-sm font-semibold text-white shadow-[0_0_14px_-4px] shadow-sky-blue/50 transition-all hover:scale-[1.02] hover:shadow-[0_0_20px_-2px] hover:shadow-sky-blue/70 sm:inline-flex"
           >
@@ -937,6 +943,7 @@ function FooterStrip() {
           <a href="#features" className="transition hover:text-white">Features</a>
           <Link to="/join"  className="transition hover:text-white">Join a session</Link>
           <Link to="/decks" className="transition hover:text-white">Create a session</Link>
+          <Link to="/guide" className="transition hover:text-white">User guide</Link>
         </nav>
       </div>
       {/* Copyright strip */}

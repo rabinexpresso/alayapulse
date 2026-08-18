@@ -1214,7 +1214,7 @@ function OpenEndedQuestion({
 }) {
   const [text,        setText]        = useState('')
   const [recentlySent, setRecentlySent] = useState(false)
-  const MAX = 280
+  const MAX = 1000
   const allUsed = submissionsUsed >= maxSubmissions
 
   const handleSubmit = () => {

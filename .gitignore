@@ -45,3 +45,8 @@ lerna-debug.log*
 
 # Vite
 .vite
+
+# Scratch files for the tutorial-video recording (raw clips + throwaway scripts)
+*.tmp.mjs
+*.tmp.html
+vid-tmp/

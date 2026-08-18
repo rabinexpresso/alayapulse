@@ -934,10 +934,10 @@ export default function Present() {
               {/* Hide HUD */}
               <button
                 onClick={() => setShowHUD(false)}
-                className="rounded-lg p-1.5 text-white/25 transition hover:text-white/60"
+                className="rounded-lg p-1.5 text-white/50 transition hover:bg-white/10 hover:text-white"
                 title="Hide info bar (press I)"
               >
-                <ChevronDown className="size-3.5" />
+                <ChevronDown className="size-4" />
               </button>
             </div>
           </motion.div>
@@ -2908,11 +2908,12 @@ function OpenEndedResults({
               >
                 <Pin className={cn('size-3', isPinned && 'fill-current')} />
               </button>
+              {/* The respondent's name is deliberately NOT rendered here — open-ended
+                  answers stay anonymous on the live screen so nobody in the room knows
+                  who wrote what. The name is still captured and appears in the Results
+                  page and the Excel export, so the presenter can follow up afterwards. */}
               <p className="pr-5 text-sm font-light leading-relaxed" style={{ color: c.fg }}>
                 "{ans.text}"
-              </p>
-              <p className="mt-2 text-[11px] font-medium" style={{ color: c.fgDim }}>
-                — {ans.name}
               </p>
             </motion.div>
           )
