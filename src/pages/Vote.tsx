@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Check, Send, LogOut, Clock } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, optionLabel } from '@/lib/utils'
 import {
   subscribeToSession, submitResponse, joinAsViewer, sendReaction,
   type Session, type QType, type ReactionType,
@@ -293,7 +293,7 @@ export default function Vote() {
           speedPts = Math.round((remaining / (timerDuration * 1000)) * 100)
         }
         quizPoints = { answer: answerPts, speed: speedPts }
-        quizFeedback = { isCorrect, answerPts, speedPts, correctAnswer: qs.correctAnswers.map(i => String.fromCharCode(65 + i)).join(', ') }
+        quizFeedback = { isCorrect, answerPts, speedPts, correctAnswer: qs.correctAnswers.map(i => optionLabel(i, qs.options.length)).join(', ') }
       }
     }
 
@@ -855,8 +855,6 @@ function WrapState({ session: _session, attendeeName }: { session: Session; atte
    1. MCQ — tap-to-select option cards
    ───────────────────────────────────────────────────────────────────────── */
 
-const OPTION_LABELS = ['A', 'B', 'C', 'D', 'E', 'F']
-
 function MCQQuestion({
   options, submitting, onSubmit, multiSelect = false,
 }: {
@@ -933,7 +931,7 @@ function MCQQuestion({
               'mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-semibold transition-all duration-200',
               isSelected ? 'bg-hot-pink text-white' : 'bg-midnight-sky-100 text-midnight-sky-600',
             )}>
-              {OPTION_LABELS[i]}
+              {optionLabel(i, options.length)}
             </span>
 
             <span className={cn(

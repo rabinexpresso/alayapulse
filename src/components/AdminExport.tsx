@@ -4,6 +4,7 @@ import { Globe, Table2, Trash2, Users } from 'lucide-react'
 import { doc, getDoc, setDoc } from 'firebase/firestore'
 import { getFunctions, httpsCallable } from 'firebase/functions'
 import { app, db } from '@/lib/firebase'
+import { optionLabel } from '@/lib/utils'
 import {
   isResponseCorrect, onAuthStateChanged, auth,
   type ResultQuestion, type ResultResponse,
@@ -49,7 +50,7 @@ function formatResponseAsText(r: ResultResponse, q: ResultQuestion): string {
     let indices: number[]
     try { const p = JSON.parse(r.value); indices = Array.isArray(p) ? p as number[] : [parseInt(r.value, 10)] }
     catch { indices = [parseInt(r.value, 10)] }
-    return indices.map(idx => `${String.fromCharCode(65 + idx)}. ${q.options[idx] || `Option ${String.fromCharCode(65 + idx)}`}`).join(', ')
+    return indices.map(idx => `${optionLabel(idx, q.options.length)}. ${q.options[idx] || `Option ${optionLabel(idx, q.options.length)}`}`).join(', ')
   }
   if (q.type === 'rating') {
     const ratingMax = q.ratingMax === 10 ? 10 : 5
@@ -90,7 +91,7 @@ function summarizeQuestion(q: ResultQuestion): string {
     const breakdown = q.options.map((opt, i) => {
       const pct = total > 0 ? Math.round((counts[i] / total) * 100) : 0
       const correct = q.correctAnswers?.includes(i) ? ' ✓' : ''
-      return `${String.fromCharCode(65 + i)}. ${opt}: ${counts[i]} (${pct}%)${correct}`
+      return `${optionLabel(i, q.options.length)}. ${opt}: ${counts[i]} (${pct}%)${correct}`
     }).join(', ')
     if (q.correctAnswers && q.correctAnswers.length > 0) {
       const correctCount = q.responses.filter(r => isResponseCorrect(r, q)).length

@@ -7,7 +7,7 @@ import {
   Trash2, History, CheckCircle2, Table2, Check,
 } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
-import { cn } from '@/lib/utils'
+import { cn, optionLabel } from '@/lib/utils'
 import {
   listResults, deleteResults, isResponseCorrect, getStorageBackend, onAuthStateChanged, auth,
   browserListDecks, cloudListDecks,
@@ -200,7 +200,7 @@ export default function Results() {
           : 0
         const correctAnswerText = hasCorrectAnswer
           ? (q.correctAnswers ?? []).slice().sort((a, b) => a - b)
-              .map(idx => `${String.fromCharCode(65 + idx)} — ${(q.options[idx] || '').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()}`)
+              .map(idx => `${optionLabel(idx, q.options.length)} — ${(q.options[idx] || '').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()}`)
               .join('; ')
           : ''
         return {
@@ -733,13 +733,13 @@ function MCQVisual({ q }: { q: ResultQuestion }) {
               isWinner ? 'bg-hot-pink text-white' : 'bg-midnight-sky-100 text-midnight-sky-600',
               isCorrect && 'ring-2 ring-fresh-green ring-offset-1',
             )}>
-              {String.fromCharCode(65 + i)}
+              {optionLabel(i, q.options.length)}
             </span>
             <span className={cn(
               'flex w-32 shrink-0 items-center gap-1 text-sm font-medium sm:w-48',
               isWinner ? 'text-midnight-sky-900' : 'text-midnight-sky-700',
             )}>
-              <span className="truncate">{opt || `Option ${String.fromCharCode(65 + i)}`}</span>
+              <span className="truncate">{opt || `Option ${optionLabel(i, q.options.length)}`}</span>
               {isCorrect && <CheckCircle2 className="size-3.5 shrink-0 text-fresh-green" />}
             </span>
             <div className="relative h-7 min-w-0 flex-1 overflow-hidden rounded-lg bg-midnight-sky-100">
@@ -1006,9 +1006,9 @@ function formatResponseValue(r: ResultResponse, q: ResultQuestion): React.ReactN
         {indices.map(idx => (
           <span key={idx} className="inline-flex items-center gap-1">
             <span className="flex size-5 items-center justify-center rounded-md bg-hot-pink/10 text-[10px] font-bold text-hot-pink">
-              {String.fromCharCode(65 + idx)}
+              {optionLabel(idx, q.options.length)}
             </span>
-            {q.options[idx] || `Option ${String.fromCharCode(65 + idx)}`}
+            {q.options[idx] || `Option ${optionLabel(idx, q.options.length)}`}
           </span>
         ))}
       </span>
@@ -1166,7 +1166,7 @@ function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckRes
       // "Correct answer: X" line, if a correct answer was marked — full
       // option text isn't repeated here since it's shown in the table below.
       if (correctSet.size > 0) {
-        const letters = [...correctSet].sort((a, b) => a - b).map(i => String.fromCharCode(65 + i)).join(', ')
+        const letters = [...correctSet].sort((a, b) => a - b).map(i => optionLabel(i, q.options.length)).join(', ')
         doc.setFont('helvetica', 'bold')
         doc.setFontSize(11)
         doc.setTextColor(0, 130, 70)
@@ -1181,7 +1181,7 @@ function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckRes
         const pct = total > 0 ? Math.round((votes[i] / total) * 100) : 0
         const cleanOpt = (opt || '-').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()
         const label = correctSet.has(i) ? `${cleanOpt}  (correct)` : cleanOpt
-        return [String.fromCharCode(65 + i), label, String(votes[i]), `${pct}%`]
+        return [optionLabel(i, q.options.length), label, String(votes[i]), `${pct}%`]
       })
       autoTable(doc, {
         startY: cursorY,
@@ -1285,7 +1285,7 @@ function formatResponseAsText(r: ResultResponse, q: ResultQuestion): string {
     let indices: number[]
     try { const p = JSON.parse(r.value); indices = Array.isArray(p) ? p as number[] : [parseInt(r.value, 10)] }
     catch { indices = [parseInt(r.value, 10)] }
-    return indices.map(idx => `${String.fromCharCode(65 + idx)}. ${q.options[idx] || `Option ${String.fromCharCode(65 + idx)}`}`).join(', ')
+    return indices.map(idx => `${optionLabel(idx, q.options.length)}. ${q.options[idx] || `Option ${optionLabel(idx, q.options.length)}`}`).join(', ')
   }
   if (q.type === 'rating') {
     const ratingMax = q.ratingMax === 10 ? 10 : 5

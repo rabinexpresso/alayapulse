@@ -22,7 +22,7 @@ import {
 } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
 import { PersistentHtmlIframe } from '@/components/PersistentHtmlIframe'
-import { cn } from '@/lib/utils'
+import { cn, optionLabel, MAX_MCQ_OPTIONS, MAX_VIZ_OPTIONS } from '@/lib/utils'
 import { injectSlideNavigation } from '@/lib/importFile'
 import {
   getStorageBackend, setStorageBackend,
@@ -3526,29 +3526,130 @@ function MCQEditor({ slide, onUpdate, onPushHistory }: {
   onUpdate: (patch: Partial<QuestionSlide>) => void
   onPushHistory?: () => void
 }) {
+  const [mode,      setMode]      = useState<'single' | 'paste'>('single')
+  const [pasteText, setPasteText] = useState('')
+
+  const total      = slide.options.length
+  const vizType    = slide.vizType ?? 'bar'
+  const vizLocked  = total > MAX_VIZ_OPTIONS   // too many slices for pie/donut
+
+  /** Pie/donut stop being readable past MAX_VIZ_OPTIONS — force bars back on. */
+  const withVizGuard = (patch: Partial<QuestionSlide>): Partial<QuestionSlide> =>
+    (patch.options?.length ?? 0) > MAX_VIZ_OPTIONS && vizType !== 'bar'
+      ? { ...patch, vizType: 'bar' }
+      : patch
+
   const setOption = (i: number, val: string) => {
     const next = [...slide.options]
     next[i] = val
     onUpdate({ options: next })
   }
   const addOption = () => {
-    if (slide.options.length >= 6) return
+    if (total >= MAX_MCQ_OPTIONS) return
     onPushHistory?.()
-    onUpdate({ options: [...slide.options, ''] })
+    onUpdate(withVizGuard({ options: [...slide.options, ''] }))
   }
   const removeOption = (i: number) => {
-    if (slide.options.length <= 2) return
+    if (total <= 2) return
     onPushHistory?.()
-    onUpdate({ options: slide.options.filter((_, idx) => idx !== i) })
+    // correctAnswers holds option indexes, so everything after the removed
+    // one shifts down by one — without this, quiz answers silently point at
+    // the wrong option (or off the end of the list).
+    const nextCorrect = (slide.correctAnswers ?? [])
+      .filter(x => x !== i)
+      .map(x => (x > i ? x - 1 : x))
+    onUpdate({
+      options:        slide.options.filter((_, idx) => idx !== i),
+      correctAnswers: nextCorrect,
+    })
+  }
+
+  /* One option per pasted line, blanks dropped, capped at the maximum. */
+  const rawLines    = pasteText.split('\n').map(s => s.trim()).filter(Boolean)
+  const pastedLines = rawLines.slice(0, MAX_MCQ_OPTIONS)
+  const overflowed  = rawLines.length > MAX_MCQ_OPTIONS
+
+  const applyPaste = () => {
+    if (pastedLines.length < 2) return
+    onPushHistory?.()
+    // A wholesale replace invalidates every correctAnswers index, so clear them.
+    onUpdate(withVizGuard({ options: pastedLines, correctAnswers: [] }))
+    setPasteText('')
+    setMode('single')
   }
 
   return (
     <div className="mb-4 space-y-2">
-      <label className="mb-2 block text-xs font-semibold text-midnight-sky-700">
-        Answer options
-        <span className="ml-1 font-normal text-midnight-sky-600">({slide.options.length}/6)</span>
-      </label>
-      {slide.options.map((opt, i) => {
+      <div className="mb-2 flex items-end justify-between gap-2">
+        <label className="block text-xs font-semibold text-midnight-sky-700">
+          Answer options
+          <span className="ml-1 font-normal text-midnight-sky-600">({total}/{MAX_MCQ_OPTIONS})</span>
+        </label>
+        {/* Entry mode — type them one at a time, or paste a whole list */}
+        <div className="flex shrink-0 gap-0.5 rounded-lg bg-midnight-sky-100 p-0.5">
+          {([
+            { key: 'single' as const, label: 'One at a time' },
+            { key: 'paste'  as const, label: 'Paste list'    },
+          ]).map(m => (
+            <button
+              key={m.key}
+              onClick={() => setMode(m.key)}
+              className={cn(
+                'rounded-md px-2 py-1 text-[11px] transition-all',
+                mode === m.key
+                  ? 'bg-white font-semibold text-midnight-sky-900 shadow-sm'
+                  : 'text-midnight-sky-600 hover:text-midnight-sky-900',
+              )}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {mode === 'paste' && (
+        <div className="rounded-xl border border-midnight-sky-200 bg-midnight-sky-50/50 p-3">
+          <p className="mb-2 text-[11px] leading-relaxed text-midnight-sky-600">
+            Paste one option per line — straight from Excel or a document.
+            Each line becomes its own answer, replacing what's there now.
+          </p>
+          <textarea
+            value={pasteText}
+            onChange={e => setPasteText(e.target.value)}
+            rows={7}
+            autoFocus
+            placeholder={'Marketing\nSales\nEngineering\nFinance\nPeople & Culture'}
+            className="w-full resize-y rounded-lg border border-midnight-sky-200 bg-white px-3 py-2 font-mono text-[11px] leading-relaxed text-midnight-sky-900 placeholder:text-midnight-sky-400 outline-none transition-all focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/15"
+          />
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <span className="text-[11px] text-midnight-sky-600">
+              {rawLines.length === 0
+                ? 'Nothing pasted yet'
+                : `${pastedLines.length} option${pastedLines.length === 1 ? '' : 's'} found`}
+              {overflowed && (
+                <span className="text-midnight-sky-500">
+                  {' '}— {rawLines.length - MAX_MCQ_OPTIONS} extra line
+                  {rawLines.length - MAX_MCQ_OPTIONS === 1 ? '' : 's'} ignored
+                </span>
+              )}
+            </span>
+            <button
+              onClick={applyPaste}
+              disabled={pastedLines.length < 2}
+              className="shrink-0 rounded-lg bg-hot-pink px-3 py-1.5 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:bg-midnight-sky-200 disabled:text-midnight-sky-500"
+            >
+              Replace with {pastedLines.length} option{pastedLines.length === 1 ? '' : 's'}
+            </button>
+          </div>
+          {(slide.correctAnswers ?? []).length > 0 && (
+            <p className="mt-2 text-[11px] text-midnight-sky-600">
+              Note: your correct-answer marks will be cleared, since they point at the current options.
+            </p>
+          )}
+        </div>
+      )}
+
+      {mode === 'single' && slide.options.map((opt, i) => {
         const isCorrect = (slide.correctAnswers ?? []).includes(i)
         return (
           <div key={i} className="flex items-start gap-2">
@@ -3556,13 +3657,13 @@ function MCQEditor({ slide, onUpdate, onPushHistory }: {
               'mt-2 flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold transition-colors',
               isCorrect ? 'bg-fresh-green/15 text-fresh-green' : 'bg-midnight-sky-200 text-midnight-sky-800',
             )}>
-              {String.fromCharCode(65 + i)}
+              {optionLabel(i, total)}
             </span>
             <textarea
               value={opt}
               rows={1}
               onChange={e => setOption(i, e.target.value)}
-              placeholder={`Option ${String.fromCharCode(65 + i)}`}
+              placeholder={`Option ${optionLabel(i, total)}`}
               style={{ fieldSizing: 'content' } as React.CSSProperties}
               className="flex-1 resize-none overflow-hidden rounded-xl border border-midnight-sky-200 bg-white px-3 py-2 text-sm leading-snug text-midnight-sky-900 placeholder:text-midnight-sky-400 outline-none transition-all focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/15"
             />
@@ -3594,12 +3695,12 @@ function MCQEditor({ slide, onUpdate, onPushHistory }: {
           </div>
         )
       })}
-      {(slide.correctAnswers ?? []).length > 0 && (
+      {mode === 'single' && (slide.correctAnswers ?? []).length > 0 && (
         <p className="mt-1 text-[11px] font-medium text-fresh-green">
-          {(slide.correctAnswers!).map(i => String.fromCharCode(65 + i)).join(', ')} marked correct — press Reveal Answer on the results screen.
+          {[...slide.correctAnswers!].sort((a, b) => a - b).map(i => optionLabel(i, total)).join(', ')} marked correct — press Reveal Answer on the results screen.
         </p>
       )}
-      {slide.options.length < 6 && (
+      {mode === 'single' && total < MAX_MCQ_OPTIONS && (
         <button
           onClick={addOption}
           className="mt-1 flex items-center gap-1.5 rounded-xl border border-dashed border-midnight-sky-200 px-3.5 py-2.5 text-sm text-midnight-sky-600 transition hover:border-hot-pink hover:text-hot-pink"
@@ -3624,22 +3725,32 @@ function MCQEditor({ slide, onUpdate, onPushHistory }: {
                 <circle cx="8" cy="8" r="5" stroke="currentColor" strokeWidth="4" />
               </svg>
             )},
-          ]).map(v => (
-            <button
-              key={v.type}
-              onClick={() => onUpdate({ vizType: v.type })}
-              className={cn(
-                'flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm transition-all',
-                (slide.vizType ?? 'bar') === v.type
-                  ? 'border-sky-blue bg-sky-blue/10 font-medium text-sky-blue'
-                  : 'border-midnight-sky-200 text-midnight-sky-500 hover:border-midnight-sky-400 hover:text-midnight-sky-700',
-              )}
-            >
-              {v.icon}
-              {v.label}
-            </button>
-          ))}
+          ])
+            // Past MAX_VIZ_OPTIONS the slices are thinner than a hairline and the
+            // six-colour palette repeats — bars are the only readable option.
+            .filter(v => !vizLocked || v.type === 'bar')
+            .map(v => (
+              <button
+                key={v.type}
+                onClick={() => onUpdate({ vizType: v.type })}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm transition-all',
+                  vizType === v.type
+                    ? 'border-sky-blue bg-sky-blue/10 font-medium text-sky-blue'
+                    : 'border-midnight-sky-200 text-midnight-sky-500 hover:border-midnight-sky-400 hover:text-midnight-sky-700',
+                )}
+              >
+                {v.icon}
+                {v.label}
+              </button>
+            ))}
         </div>
+        {vizLocked && (
+          <p className="mt-2 text-[11px] font-light text-midnight-sky-500">
+            Pie and donut are available up to {MAX_VIZ_OPTIONS} options — past that the
+            slices are too thin to read, so results show as ranked bars.
+          </p>
+        )}
       </div>
 
       {/* Timer — per-question time limit (also used for speed points in quiz mode) */}
@@ -3850,25 +3961,40 @@ function SlidePreviewCard({ slide }: { slide: QuestionSlide }) {
 
 
 
-  // MCQ options — styled like the actual presenter slide option cards
-  const mcqOptions = slide.type === 'mcq' ? (
-    <div className="mt-3 flex flex-col gap-1.5">
-      {(slide.options.length > 0 ? slide.options : ['Option A', 'Option B', 'Option C']).map((opt, i) => (
-        <div key={i} className="flex min-w-0 items-start gap-2 rounded-xl px-3 py-2"
-          style={{ border: `1px solid ${c.cardBorder}`, backgroundColor: c.cardBg }}
-        >
-          <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md text-[9px] font-bold"
-            style={{ backgroundColor: c.text, color: c.bg }}>
-            {String.fromCharCode(65 + i)}
-          </span>
-          <span className="min-w-0 break-words text-xs font-medium leading-snug"
-            style={{ color: opt ? c.text : c.textDim }}>
-            {opt || `Option ${String.fromCharCode(65 + i)}`}
-          </span>
+  // MCQ options — styled like the actual presenter slide option cards.
+  // Long lists go two-up and get cut short: this preview pane is narrow, and
+  // the real presenter screen lays the same options out far wider.
+  const mcqOptions = slide.type === 'mcq' ? (() => {
+    const opts = slide.options.length > 0 ? slide.options : ['Option A', 'Option B', 'Option C']
+    const PREVIEW_MAX = 10
+    const shown  = opts.slice(0, PREVIEW_MAX)
+    const hidden = opts.length - shown.length
+    return (
+      <div className="mt-3">
+        <div className={cn('grid gap-1.5', opts.length > 5 ? 'grid-cols-2' : 'grid-cols-1')}>
+          {shown.map((opt, i) => (
+            <div key={i} className="flex min-w-0 items-start gap-2 rounded-xl px-3 py-2"
+              style={{ border: `1px solid ${c.cardBorder}`, backgroundColor: c.cardBg }}
+            >
+              <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md text-[9px] font-bold"
+                style={{ backgroundColor: c.text, color: c.bg }}>
+                {optionLabel(i, opts.length)}
+              </span>
+              <span className="min-w-0 break-words text-xs font-medium leading-snug"
+                style={{ color: opt ? c.text : c.textDim }}>
+                {opt || `Option ${optionLabel(i, opts.length)}`}
+              </span>
+            </div>
+          ))}
         </div>
-      ))}
-    </div>
-  ) : slide.type === 'wordcloud' ? (
+        {hidden > 0 && (
+          <p className="mt-1.5 text-center text-[10px]" style={{ color: c.textDim }}>
+            + {hidden} more on the presenter screen
+          </p>
+        )}
+      </div>
+    )
+  })() : slide.type === 'wordcloud' ? (
     <div className="mt-3 flex flex-wrap gap-1.5">
       {['culture', 'growth', 'trust', 'innovation', 'team'].map(w => (
         <span key={w} className="rounded-full px-2 py-0.5 text-[9px] font-medium"

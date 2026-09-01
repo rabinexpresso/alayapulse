@@ -8,7 +8,7 @@ import {
   Eye, EyeOff, Pin, Check, RotateCcw, Trophy, Crown,
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
-import { cn } from '@/lib/utils'
+import { cn, optionLabel, MAX_VIZ_OPTIONS } from '@/lib/utils'
 import {
   updateSessionState, endSession, subscribeToSlideResponses, subscribeToViewerCount, subscribeToViewers,
   fetchAllSessionResponses, getSessionByCode, startTimer, clearTimer, resetSlideAndTimer, updateQuestionMeta,
@@ -1827,6 +1827,16 @@ const QTYPE_META: Record<QType, { label: string; ring: string; bg: string; text:
   rating:    { label: 'Rating',           ring: 'border-hot-pink/40',    bg: 'bg-hot-pink/10',    text: 'text-hot-pink'    },
 }
 
+/** Option-card sizing per density tier — 0 is roomiest, 2 is tightest.
+ *  Roomy tiers let long answers wrap as they always have; the tightest tier
+ *  truncates instead, since a wrapped line there would push the grid
+ *  off-screen. Tailwind only sees whole class names, hence the lookup. */
+const OPTION_DENSITY = [
+  { gap: 'gap-2',   pad: 'px-3 py-2',    badge: 'size-6', badgeText: 'text-[10px]', text: 'text-sm',     wrap: 'break-words' },
+  { gap: 'gap-2',   pad: 'px-2.5 py-1.5', badge: 'size-5', badgeText: 'text-[9px]',  text: 'text-[13px]', wrap: 'break-words' },
+  { gap: 'gap-1.5', pad: 'px-2 py-1',    badge: 'size-4', badgeText: 'text-[8px]',  text: 'text-[11px]', wrap: 'truncate'    },
+]
+
 function QuestionSlideView({
   slide, responseCount, onReveal,
 }: {
@@ -1860,33 +1870,42 @@ function QuestionSlideView({
   // Framer Motion enter animations → visible flash on every join/submit.
   // JSX variables are plain React elements; React reconciles them in-place.
 
-  const mcqOptions = slide.type === 'mcq' ? (
-    // 5+ options → 2-col; ≤4 → single column.
-    // w-fit shrinks the container to its widest child so options never
-    // bleed into empty space — max-w-[80%] caps very long option text.
-    <div
-      className="mt-4 gap-2 w-fit max-w-[80%]"
-      style={slide.options.length >= 5
-        ? { display: 'grid', gridTemplateColumns: 'auto auto' }
-        : { display: 'flex', flexDirection: 'column' }}
-    >
-      {slide.options.map((opt, i) => (
-        <motion.div
-          key={i}
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.10 + i * 0.05, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-          className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left backdrop-blur-sm"
-          style={{ border: `1px solid ${c.cardBorder}`, backgroundColor: c.cardBg }}
-        >
-          <span className="flex size-6 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold" style={{ backgroundColor: c.fg, color: c.bg }}>
-            {String.fromCharCode(65 + i)}
-          </span>
-          <span className="min-w-0 break-words text-sm font-medium leading-snug" style={{ color: c.fg }}>{opt}</span>
-        </motion.div>
-      ))}
-    </div>
-  ) : null
+  const mcqOptions = slide.type === 'mcq' ? (() => {
+    // Columns and density scale with the option count so even 50 short answers
+    // fit on one screen without scrolling. w-fit shrinks the container to its
+    // widest child so options never bleed into empty space; the max-width cap
+    // grows with the column count.
+    const n    = slide.options.length
+    const cols = n <= 4 ? 1 : n <= 12 ? 2 : n <= 24 ? 3 : n <= 36 ? 4 : 5
+    const d    = OPTION_DENSITY[n <= 12 ? 0 : n <= 24 ? 1 : 2]
+    // Long lists appear faster — a 0.05s-per-item stagger would take 2.5s at 50.
+    const step = n <= 12 ? 0.05 : n <= 24 ? 0.025 : 0.01
+
+    return (
+      <div
+        className={cn('mt-4 w-fit', d.gap, cols >= 4 ? 'max-w-[96%]' : cols === 3 ? 'max-w-[92%]' : 'max-w-[80%]')}
+        style={cols === 1
+          ? { display: 'flex', flexDirection: 'column' }
+          : { display: 'grid', gridTemplateColumns: `repeat(${cols}, auto)` }}
+      >
+        {slide.options.map((opt, i) => (
+          <motion.div
+            key={i}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.10 + i * step, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+            className={cn('flex w-full items-center rounded-xl text-left backdrop-blur-sm', d.pad, d.gap)}
+            style={{ border: `1px solid ${c.cardBorder}`, backgroundColor: c.cardBg }}
+          >
+            <span className={cn('flex shrink-0 items-center justify-center rounded-lg font-bold', d.badge, d.badgeText)} style={{ backgroundColor: c.fg, color: c.bg }}>
+              {optionLabel(i, n)}
+            </span>
+            <span className={cn('min-w-0 font-medium leading-snug', d.text, d.wrap)} style={{ color: c.fg }}>{opt}</span>
+          </motion.div>
+        ))}
+      </div>
+    )
+  })() : null
 
   const ratingParams = slide.type === 'rating' ? (() => {
     const rmax   = slide.ratingMax === 10 ? 10 : 5
@@ -2253,8 +2272,11 @@ function MCQResults({ options, votes, respondentCount, vizType = 'bar', correctA
   explanationRevealed?: boolean
   theme?:               string
 }) {
-  if (vizType === 'pie')   return <MCQPieChart   options={options} votes={votes} respondentCount={respondentCount} correctAnswers={correctAnswers} revealed={revealed} />
-  if (vizType === 'donut') return <MCQDonutChart options={options} votes={votes} respondentCount={respondentCount} correctAnswers={correctAnswers} revealed={revealed} />
+  // Safety net for decks saved before the cap existed: past MAX_VIZ_OPTIONS the
+  // slices are thinner than a hairline and the palette repeats, so force bars.
+  const readablePie = options.length <= MAX_VIZ_OPTIONS
+  if (vizType === 'pie'   && readablePie) return <MCQPieChart   options={options} votes={votes} respondentCount={respondentCount} correctAnswers={correctAnswers} revealed={revealed} />
+  if (vizType === 'donut' && readablePie) return <MCQDonutChart options={options} votes={votes} respondentCount={respondentCount} correctAnswers={correctAnswers} revealed={revealed} />
   return <MCQBarChart options={options} votes={votes} respondentCount={respondentCount} correctAnswers={correctAnswers} revealed={revealed} explanationRevealed={explanationRevealed} theme={theme} />
 }
 
@@ -2270,12 +2292,25 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
   const total   = respondentCount ?? votes.reduce((s, v) => s + v, 0)
   const maxV    = Math.max(...votes, 1)
   const corrSet = new Set(correctAnswers ?? [])
-  const dense   = options.length >= 5
+  const n       = options.length
+  const dense   = n >= 5
   const c       = qColors(theme)
   const acc     = mcqAccents(theme)
 
+  // Past this many options the stacked label-above-bar rows are taller than the
+  // screen, so switch to single-line rows in columns, ranked highest-first.
+  const compact     = n > 16
+  const compactCols = n > 32 ? 3 : 2
+  // Sort indexes, not options — each answer keeps its own letter when reordered.
+  const order = compact
+    ? options.map((_, i) => i).sort((a, b) => (votes[b] ?? 0) - (votes[a] ?? 0))
+    : options.map((_, i) => i)
+
   const mountedRef = useRef(false)
   useEffect(() => { mountedRef.current = true }, [])
+  // First mount gets a staggered cascade; later renders (live votes) respond
+  // immediately. Only the stacked layout staggers — see the compact one below.
+  const isMounted = mountedRef.current
 
   const [flashReveal, setFlashReveal] = useState(false)
   const prevRevealedRef = useRef(false)
@@ -2287,6 +2322,75 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
     }
     prevRevealedRef.current = !!revealed
   }, [revealed])
+
+  /* Compact ranked layout — everything on one line, in columns, so 50 options
+     still fit on a single screen. Keeps the quiz reveal colours and dimming. */
+  if (compact) {
+    return (
+      <div className={cn('grid gap-x-5 gap-y-1.5', compactCols === 3 ? 'grid-cols-3' : 'grid-cols-2')}>
+        {order.map((idx, pos) => {
+          const v         = votes[idx] ?? 0
+          const pct       = total > 0 ? Math.round((v / total) * 100) : 0
+          const isWinner  = v > 0 && v === maxV
+          const isCorrect = revealed && corrSet.has(idx)
+          const isWrong   = revealed && corrSet.size > 0 && !corrSet.has(idx)
+
+          const accentColor = isCorrect ? acc.correct : isWinner ? acc.selected : null
+
+          return (
+            <motion.div
+              key={idx}
+              initial={{ opacity: 0, x: -12 }}
+              animate={{
+                opacity: isWrong ? 0.28 : 1,
+                x: 0,
+                scale: flashReveal && isCorrect ? [1, 1.03, 1] : 1,
+              }}
+              transition={{
+                opacity: { delay: flashReveal && isWrong ? 0.25 : pos * 0.012, duration: 0.4 },
+                x:       { delay: pos * 0.012, duration: 0.4, ease: [0.16, 1, 0.3, 1] },
+                scale:   flashReveal && isCorrect
+                  ? { duration: 0.55, times: [0, 0.3, 1], ease: 'easeOut' }
+                  : { duration: 0 },
+              }}
+              className="flex min-w-0 items-center gap-2"
+            >
+              <span
+                className="flex size-6 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold"
+                style={{ backgroundColor: accentColor ?? `${c.fg}18`, color: accentColor ? '#ffffff' : `${c.fg}80` }}
+              >
+                {isCorrect ? <Check className="size-3.5" strokeWidth={2.5} /> : optionLabel(idx, n)}
+              </span>
+              <span
+                className="w-[34%] shrink-0 truncate text-xs font-medium leading-tight"
+                style={{ color: accentColor ?? `${c.fg}a6` }}
+              >
+                {options[idx]}
+              </span>
+              <div className="relative h-2 min-w-0 flex-1 overflow-hidden rounded-full" style={{ backgroundColor: `${c.fg}18` }}>
+                <motion.div
+                  className="absolute inset-y-0 left-0 rounded-full"
+                  style={{ backgroundColor: accentColor ?? `${c.fg}40` }}
+                  initial={{ width: '0%' }}
+                  animate={{ width: `${pct}%` }}
+                  // No entrance stagger here — the rows already cascade in, and
+                  // at 50 options a per-row delay would leave a live vote up to
+                  // 0.8s behind the count.
+                  transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+                />
+              </div>
+              <span
+                className="w-9 shrink-0 text-right text-sm font-bold tabular-nums"
+                style={{ color: accentColor ?? `${c.fg}80` }}
+              >
+                {pct}%
+              </span>
+            </motion.div>
+          )
+        })}
+      </div>
+    )
+  }
 
   return (
     <motion.div
@@ -2335,7 +2439,7 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
                 className={cn('flex shrink-0 items-center justify-center rounded-xl font-bold', dense ? 'size-8 text-xs' : 'size-10 text-sm')}
                 style={{ backgroundColor: badgeBg, color: badgeFg }}
               >
-                {isCorrect ? <Check className={dense ? 'size-4' : 'size-5'} strokeWidth={2.5} /> : String.fromCharCode(65 + i)}
+                {isCorrect ? <Check className={dense ? 'size-4' : 'size-5'} strokeWidth={2.5} /> : optionLabel(i, n)}
               </span>
               <span
                 className={cn('min-w-0 flex-1 break-words font-medium leading-snug', dense ? 'text-sm' : 'text-base')}
@@ -2361,7 +2465,7 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
                   style={{ backgroundColor: barFill }}
                   initial={{ width: '0%' }}
                   animate={{ width: `${pct}%` }}
-                  transition={mountedRef.current
+                  transition={isMounted
                     // Live update — respond immediately, no entrance delay
                     ? { duration: 0.5, ease: [0.16, 1, 0.3, 1] }
                     // First mount — staggered entrance so bars cascade in
