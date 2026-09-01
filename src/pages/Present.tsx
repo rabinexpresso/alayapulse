@@ -1875,18 +1875,26 @@ function QuestionSlideView({
     // fit on one screen without scrolling. w-fit shrinks the container to its
     // widest child so options never bleed into empty space; the max-width cap
     // grows with the column count.
-    const n    = slide.options.length
-    const cols = n <= 4 ? 1 : n <= 12 ? 2 : n <= 24 ? 3 : n <= 36 ? 4 : 5
-    const d    = OPTION_DENSITY[n <= 12 ? 0 : n <= 24 ? 1 : 2]
+    const n = slide.options.length
+    // Up to 6 options keeps the original content-width layout untouched — every
+    // deck built before the cap was raised lives there. Above 6 the columns are
+    // equal-width and span the full content area, so a long list fills the
+    // screen instead of stranding a narrow block in the top-left corner.
+    const wide = n > 6
+    // Roughly 17 option rows fit the height of a 16:9 presenter screen, so pick
+    // the fewest columns that keep the list within that. Fewer, wider columns
+    // fill the slide top-to-bottom instead of leaving the lower half empty.
+    const cols = n <= 4 ? 1 : Math.min(5, Math.max(2, Math.ceil(n / 17)))
+    const d    = OPTION_DENSITY[n <= 14 ? 0 : n <= 34 ? 1 : 2]
     // Long lists appear faster — a 0.05s-per-item stagger would take 2.5s at 50.
     const step = n <= 12 ? 0.05 : n <= 24 ? 0.025 : 0.01
 
     return (
       <div
-        className={cn('mt-4 w-fit', d.gap, cols >= 4 ? 'max-w-[96%]' : cols === 3 ? 'max-w-[92%]' : 'max-w-[80%]')}
+        className={cn('mt-4', d.gap, wide ? 'w-full' : 'w-fit max-w-[80%]')}
         style={cols === 1
           ? { display: 'flex', flexDirection: 'column' }
-          : { display: 'grid', gridTemplateColumns: `repeat(${cols}, auto)` }}
+          : { display: 'grid', gridTemplateColumns: wide ? `repeat(${cols}, minmax(0, 1fr))` : 'auto auto' }}
       >
         {slide.options.map((opt, i) => (
           <motion.div
