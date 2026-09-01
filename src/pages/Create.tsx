@@ -342,7 +342,6 @@ function parseCsvQuestions(csvText: string): CsvParseResult {
   const lines = csvText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
   const slides: QuestionSlide[] = []
   const errors: Array<{ row: number; message: string }> = []
-  const LETTER_IDX: Record<string, number> = { A: 0, B: 1, C: 2, D: 3, E: 4, F: 5 }
 
   let headerIdx = -1
   let headers: string[] = []
@@ -361,6 +360,13 @@ function parseCsvQuestions(csvText: string): CsvParseResult {
 
   const ci = (name: string) => headers.indexOf(name)
   const VALID_TYPES = ['mcq', 'wordcloud', 'openended', 'rating']
+
+  // Option columns come from the header rather than a fixed list, so a sheet can
+  // carry as many as it needs: option_a…option_z, or option_1…option_50 for
+  // lists too long for letters. Order follows the header.
+  const optionCols = headers
+    .map((h, idx) => ({ key: h.replace(/^option_/, '').toUpperCase(), idx }))
+    .filter((_, i) => /^option_([a-z]|\d{1,2})$/.test(headers[i]))
 
   for (let i = headerIdx + 1; i < lines.length; i++) {
     const t = lines[i].trim()
@@ -391,17 +397,31 @@ function parseCsvQuestions(csvText: string): CsvParseResult {
     }
 
     if (type === 'mcq') {
-      const optKeys = ['option_a', 'option_b', 'option_c', 'option_d', 'option_e', 'option_f']
-      slide.options = optKeys.map(k => get(k)).filter(o => o !== '')
+      // Blank columns are skipped, but `correct` still names a column (B, or 34),
+      // so remember where each column's answer actually landed.
+      const colToIdx = new Map<string, number>()
+      const options: string[] = []
+      let dropped = 0
+      for (const col of optionCols) {
+        const v = (vals[col.idx] ?? '').trim()
+        if (v === '') continue
+        if (options.length >= MAX_MCQ_OPTIONS) { dropped++; continue }
+        colToIdx.set(col.key, options.length)
+        options.push(v)
+      }
+      slide.options = options
       if (slide.options.length < 2) {
         errors.push({ row: i + 1, message: `Row ${i + 1}: MCQ needs at least 2 options — skipped.` })
         continue
       }
+      if (dropped > 0) {
+        errors.push({ row: i + 1, message: `Row ${i + 1}: only the first ${MAX_MCQ_OPTIONS} options were kept — ${dropped} more ignored.` })
+      }
       const correctRaw = get('correct')
       if (correctRaw) {
         const idxs = correctRaw.toUpperCase().split('|')
-          .map(l => LETTER_IDX[l.trim()])
-          .filter((n): n is number => n !== undefined && n < slide.options.length)
+          .map(l => colToIdx.get(l.trim()))
+          .filter((n): n is number => n !== undefined)
         if (idxs.length) slide.correctAnswers = idxs
       }
       const expl = get('explanation')

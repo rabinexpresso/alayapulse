@@ -13,7 +13,8 @@
 # type,question,option_a,option_b,option_c,option_d,option_e,option_f,correct,explanation,timer
 # Rules:
 # - type must be one of: mcq | wordcloud | openended | rating
-# - MCQ: fill option_a to option_f (only as many options as the question has, max 6), correct = single letter e.g. B or multiple e.g. A|C|D, explanation = why the answer is correct
+# - MCQ: fill option_a to option_f (only as many options as the question has), correct = single letter e.g. B or multiple e.g. A|C|D, explanation = why the answer is correct
+# - If a question needs more than 6 options, add more columns to the header: option_g, option_h ... up to option_z (26), or use option_1 ... option_50 for longer lists. Maximum 50 options.
 # - wordcloud / openended / rating: leave option_a to option_f, correct, and explanation empty
 # - timer: use 30 unless a specific time is stated
 # - Output data rows only. No header row. No extra text or explanation.
@@ -24,6 +25,8 @@
 # type:    mcq | wordcloud | openended | rating
 # correct: single answer = B  |  multiple answers = A|C|D
 # Non-MCQ: leave option_a to option_f, correct, and explanation blank
+# More options: add option_g ... option_z to the header, or switch to option_1 ... option_50 (max 50)
+#          correct refers to the column name, so with numbered columns use e.g. 34 or 3|17|22
 # timer:   seconds per question -- leave blank to default to 30 seconds
 # ===================================================================
 type,question,option_a,option_b,option_c,option_d,option_e,option_f,correct,explanation,timer
