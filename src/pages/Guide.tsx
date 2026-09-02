@@ -288,6 +288,25 @@ export default function Guide() {
             links that jump straight to an answer.
           </p>
 
+          {/* Walkthrough video — self-hosted (no third-party player), so
+              everything stays inside our own Google Cloud project. */}
+          <figure className="mt-8 overflow-hidden rounded-2xl border border-white/10 bg-black">
+            <video
+              controls
+              preload="metadata"
+              playsInline
+              poster="/guide/lobby-qr.png"
+              className="block w-full"
+            >
+              <source src="/alaya-pulse-tutorial.mp4" type="video/mp4" />
+              Your browser can’t play this video — the written steps below cover everything it shows.
+            </video>
+            <figcaption className="flex items-center gap-2 border-t border-white/10 px-4 py-2.5 text-[13px] text-white/50">
+              <Play className="size-3.5 shrink-0 text-hot-pink" />
+              Full walkthrough — 2 min 45 sec. Prefer reading? Every step is written out below.
+            </figcaption>
+          </figure>
+
           {GUIDE.map(stage => (
             <section key={stage.id} className="mt-12">
               <div className="mb-6 flex items-center gap-3">
