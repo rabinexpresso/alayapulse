@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react'
 import { PersistentHtmlIframe } from '@/components/PersistentHtmlIframe'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -1837,6 +1837,71 @@ const OPTION_DENSITY = [
   { gap: 'gap-1.5', pad: 'px-2 py-1',    badge: 'size-4', badgeText: 'text-[8px]',  text: 'text-[11px]', wrap: 'truncate'    },
 ]
 
+/**
+ * Shrinks its children just enough to fit the space the slide has left.
+ *
+ * Presenter screens vary far more than they look: a 14" laptop fits about ten
+ * option rows where a 24" monitor fits seventeen. Picking a fixed row count
+ * means the overflow is simply invisible to the room — options 31-50 silently
+ * off the bottom of the slide — which is worse than small text. So measure the
+ * real space and scale to fit.
+ *
+ * The width is widened by 1/scale before scaling so the result still spans the
+ * full slide rather than shrinking into a corner. Widening only ever reduces
+ * wrapping, so the scaled height can't exceed what we measured — one pass, no
+ * feedback loop between the measurement and the transform.
+ */
+function FitToHeight({ children, resetKey }: { children: React.ReactNode; resetKey: unknown }) {
+  const boxRef   = useRef<HTMLDivElement>(null)
+  const innerRef = useRef<HTMLDivElement>(null)
+
+  useLayoutEffect(() => {
+    const box = boxRef.current, inner = innerRef.current
+    if (!box || !inner) return
+
+    /** Nearest clipping ancestor — that's what decides how much is actually on screen. */
+    const clipParent = (): HTMLElement | null => {
+      for (let p = box.parentElement; p; p = p.parentElement) {
+        const oy = getComputedStyle(p).overflowY
+        if (oy === 'auto' || oy === 'scroll' || oy === 'hidden') return p
+      }
+      return null
+    }
+
+    const fit = () => {
+      const sp = clipParent()
+      if (!sp) return
+      // Measure at natural size — the transform doesn't affect layout, but the
+      // widened width does, so clear both before reading.
+      inner.style.width = '100%'
+      inner.style.transform = 'none'
+      const top     = box.getBoundingClientRect().top - sp.getBoundingClientRect().top
+      const avail   = sp.clientHeight - top
+      const natural = inner.scrollHeight
+      if (avail <= 0 || !natural || natural <= avail) return
+      const scale = Math.max(0.35, avail / natural)   // floor: past this it's unreadable anyway
+      inner.style.width = `${100 / scale}%`
+      inner.style.transform = `scale(${scale})`
+      inner.style.transformOrigin = 'top left'
+    }
+
+    fit()
+    // Watch the clipping parent only. Observing the box would loop, since
+    // widening the child changes the box's own height.
+    const sp = clipParent()
+    if (!sp) return
+    const ro = new ResizeObserver(fit)
+    ro.observe(sp)
+    return () => ro.disconnect()
+  }, [resetKey])
+
+  return (
+    <div ref={boxRef}>
+      <div ref={innerRef}>{children}</div>
+    </div>
+  )
+}
+
 function QuestionSlideView({
   slide, responseCount, onReveal,
 }: {
@@ -1890,6 +1955,7 @@ function QuestionSlideView({
     const step = n <= 12 ? 0.05 : n <= 24 ? 0.025 : 0.01
 
     return (
+      <FitToHeight resetKey={`${slide.id}:${n}`}>
       <div
         className={cn('mt-4', d.gap, wide ? 'w-full' : 'w-fit max-w-[80%]')}
         style={cols === 1
@@ -1912,6 +1978,7 @@ function QuestionSlideView({
           </motion.div>
         ))}
       </div>
+      </FitToHeight>
     )
   })() : null
 

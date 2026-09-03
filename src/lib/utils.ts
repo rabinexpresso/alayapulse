@@ -15,7 +15,7 @@ export function cn(...inputs: ClassValue[]) {
    ───────────────────────────────────────────────────────────────────────── */
 
 /** Most answer options an MCQ slide can hold. */
-export const MAX_MCQ_OPTIONS = 50
+export const MAX_MCQ_OPTIONS = 100
 
 /**
  * Above this many options, pie and donut slices get too thin to read and the

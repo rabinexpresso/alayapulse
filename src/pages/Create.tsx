@@ -362,11 +362,11 @@ function parseCsvQuestions(csvText: string): CsvParseResult {
   const VALID_TYPES = ['mcq', 'wordcloud', 'openended', 'rating']
 
   // Option columns come from the header rather than a fixed list, so a sheet can
-  // carry as many as it needs: option_a…option_z, or option_1…option_50 for
+  // carry as many as it needs: option_a…option_z, or option_1…option_100 for
   // lists too long for letters. Order follows the header.
   const optionCols = headers
     .map((h, idx) => ({ key: h.replace(/^option_/, '').toUpperCase(), idx }))
-    .filter((_, i) => /^option_([a-z]|\d{1,2})$/.test(headers[i]))
+    .filter((_, i) => /^option_([a-z]|\d{1,3})$/.test(headers[i]))
 
   for (let i = headerIdx + 1; i < lines.length; i++) {
     const t = lines[i].trim()
