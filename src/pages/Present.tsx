@@ -1851,6 +1851,39 @@ const OPTION_DENSITY = [
  * wrapping, so the scaled height can't exceed what we measured — one pass, no
  * feedback loop between the measurement and the transform.
  */
+/** Viewport height, kept live — option columns are chosen from it. */
+function useViewportHeight() {
+  const [vh, setVh] = useState(() => (typeof window === 'undefined' ? 800 : window.innerHeight))
+  useEffect(() => {
+    const on = () => setVh(window.innerHeight)
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [])
+  return vh
+}
+
+/**
+ * How many columns a list of `n` options should use.
+ *
+ * Adding a column is always better than shrinking the text: a 100-option list
+ * has short answers and acres of unused width, so splitting it wider costs
+ * nothing and keeps the font readable. Shrinking is the fallback (FitToHeight),
+ * not the first move.
+ *
+ * `rowH` is the height of one row at the density being used, and `reserve` is
+ * the space taken by the header, question and bottom bar.
+ */
+function columnsFor(
+  n: number, vh: number, longest: number,
+  { rowH, reserve, cap }: { rowH: number; reserve: number; cap: number },
+) {
+  const rowsFit = Math.max(6, Math.floor((vh - reserve) / rowH))
+  // Narrow columns truncate long answers, so the longest option caps the split.
+  const byText = longest <= 12 ? cap : longest <= 24 ? Math.min(cap, 6)
+              : longest <= 40 ? Math.min(cap, 4) : Math.min(cap, 3)
+  return Math.min(byText, Math.max(2, Math.ceil(n / rowsFit)))
+}
+
 function FitToHeight({ children, resetKey }: { children: React.ReactNode; resetKey: unknown }) {
   const boxRef   = useRef<HTMLDivElement>(null)
   const innerRef = useRef<HTMLDivElement>(null)
@@ -1912,6 +1945,7 @@ function QuestionSlideView({
   const meta   = QTYPE_META[slide.type]
   const c      = qColors(slide.theme)
   const layout = slide.imgLayout ?? 'top'
+  const vh     = useViewportHeight()
 
   // 'reference', 'top', 'right' all use the smart reference layout.
   // 'background' keeps the full-bleed overlay style.
@@ -1946,11 +1980,15 @@ function QuestionSlideView({
     // equal-width and span the full content area, so a long list fills the
     // screen instead of stranding a narrow block in the top-left corner.
     const wide = n > 6
-    // Roughly 17 option rows fit the height of a 16:9 presenter screen, so pick
-    // the fewest columns that keep the list within that. Fewer, wider columns
-    // fill the slide top-to-bottom instead of leaving the lower half empty.
-    const cols = n <= 4 ? 1 : Math.min(5, Math.max(2, Math.ceil(n / 17)))
     const d    = OPTION_DENSITY[n <= 14 ? 0 : n <= 34 ? 1 : 2]
+    // Columns come from the real screen height, not a fixed guess. A 13" laptop
+    // fits far fewer rows than a 24" monitor, and going wider there keeps the
+    // text readable instead of leaving FitToHeight to shrink it.
+    const longest = slide.options.reduce((m, o) => Math.max(m, (o ?? '').length), 0)
+    const rowH    = n <= 14 ? 46 : n <= 34 ? 34 : 27      // matches the density preset above
+    const cols    = n <= 4
+      ? 1
+      : columnsFor(n, vh, longest, { rowH, reserve: 320, cap: 10 })
     // Long lists appear faster — a 0.05s-per-item stagger would take 2.5s at 50.
     const step = n <= 12 ? 0.05 : n <= 24 ? 0.025 : 0.01
 
@@ -2368,14 +2406,19 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
   const maxV    = Math.max(...votes, 1)
   const corrSet = new Set(correctAnswers ?? [])
   const n       = options.length
+  const vh      = useViewportHeight()
   const dense   = n >= 5
   const c       = qColors(theme)
   const acc     = mcqAccents(theme)
 
   // Past this many options the stacked label-above-bar rows are taller than the
   // screen, so switch to single-line rows in columns, ranked highest-first.
-  const compact     = n > 16
-  const compactCols = n > 32 ? 3 : 2
+  const compact = n > 16
+  // Capped lower than the question view: each row also carries a bar and a
+  // percentage, so columns can't get as narrow before the bar stops meaning
+  // anything.
+  const longestOpt  = options.reduce((m, o) => Math.max(m, (o ?? '').length), 0)
+  const compactCols = columnsFor(n, vh, longestOpt, { rowH: 30, reserve: 300, cap: 6 })
   // Sort indexes, not options — each answer keeps its own letter when reordered.
   const order = compact
     ? options.map((_, i) => i).sort((a, b) => (votes[b] ?? 0) - (votes[a] ?? 0))
@@ -2402,7 +2445,11 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
      still fit on a single screen. Keeps the quiz reveal colours and dimming. */
   if (compact) {
     return (
-      <div className={cn('grid gap-x-5 gap-y-1.5', compactCols === 3 ? 'grid-cols-3' : 'grid-cols-2')}>
+      <FitToHeight resetKey={`${n}:${compactCols}`}>
+      <div
+        className="grid gap-x-5 gap-y-1.5"
+        style={{ gridTemplateColumns: `repeat(${compactCols}, minmax(0, 1fr))` }}
+      >
         {order.map((idx, pos) => {
           const v         = votes[idx] ?? 0
           const pct       = total > 0 ? Math.round((v / total) * 100) : 0
@@ -2464,6 +2511,7 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
           )
         })}
       </div>
+      </FitToHeight>
     )
   }
 
