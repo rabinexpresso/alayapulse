@@ -1878,10 +1878,46 @@ function columnsFor(
   { rowH, reserve, cap }: { rowH: number; reserve: number; cap: number },
 ) {
   const rowsFit = Math.max(6, Math.floor((vh - reserve) / rowH))
-  // Narrow columns truncate long answers, so the longest option caps the split.
-  const byText = longest <= 12 ? cap : longest <= 24 ? Math.min(cap, 6)
-              : longest <= 40 ? Math.min(cap, 4) : Math.min(cap, 3)
-  return Math.min(byText, Math.max(2, Math.ceil(n / rowsFit)))
+  return Math.min(colCapFor(longest, cap), Math.max(2, Math.ceil(n / rowsFit)))
+}
+
+/** Narrow columns truncate long answers, so the longest option caps the split. */
+function colCapFor(longest: number, cap: number) {
+  return longest <= 12 ? cap
+       : longest <= 24 ? Math.min(cap, 6)
+       : longest <= 40 ? Math.min(cap, 4)
+       : Math.min(cap, 3)
+}
+
+/** Row height of each OPTION_DENSITY preset, including its vertical gap. */
+const DENSITY_ROW_H = [46, 34, 27]
+
+/**
+ * Picks the option text size *and* column count together.
+ *
+ * Text size used to come from the option count alone, so any list over 34
+ * options got the smallest preset even with room to spare — measured at 1440x820,
+ * a 60-option results slide left 199px of empty space while running 12px type.
+ *
+ * Bigger text needs taller rows and therefore more columns, which is free while
+ * the answers are short and prevented by colCapFor when they're long. So try the
+ * largest preset first and take the first one that genuinely fits.
+ */
+function pickOptionLayout(
+  n: number, vh: number, longest: number,
+  { reserve, cap }: { reserve: number; cap: number },
+) {
+  const avail  = Math.max(120, vh - reserve)
+  const colCap = colCapFor(longest, cap)
+  for (let i = 0; i < DENSITY_ROW_H.length; i++) {
+    const rowH = DENSITY_ROW_H[i]
+    const rows = Math.max(1, Math.floor(avail / rowH))
+    const cols = Math.min(colCap, Math.max(2, Math.ceil(n / rows)))
+    if (Math.ceil(n / cols) * rowH <= avail) return { density: i, cols }
+  }
+  // Nothing fits even at the smallest size — take it anyway and let
+  // FitToHeight scale the remainder rather than hiding anything.
+  return { density: DENSITY_ROW_H.length - 1, cols: colCap }
 }
 
 function FitToHeight({ children, resetKey }: { children: React.ReactNode; resetKey: unknown }) {
@@ -1980,15 +2016,14 @@ function QuestionSlideView({
     // equal-width and span the full content area, so a long list fills the
     // screen instead of stranding a narrow block in the top-left corner.
     const wide = n > 6
-    const d    = OPTION_DENSITY[n <= 14 ? 0 : n <= 34 ? 1 : 2]
-    // Columns come from the real screen height, not a fixed guess. A 13" laptop
-    // fits far fewer rows than a 24" monitor, and going wider there keeps the
-    // text readable instead of leaving FitToHeight to shrink it.
+    // Text size and columns are chosen together from the real screen height —
+    // a 13" laptop fits far fewer rows than a 24" monitor. Reserve is measured,
+    // not guessed: at 1440x820 the options get 580px, so ~240px goes to the
+    // question, badge and the Show results bar.
     const longest = slide.options.reduce((m, o) => Math.max(m, (o ?? '').length), 0)
-    const rowH    = n <= 14 ? 46 : n <= 34 ? 34 : 27      // matches the density preset above
-    const cols    = n <= 4
-      ? 1
-      : columnsFor(n, vh, longest, { rowH, reserve: 320, cap: 10 })
+    const picked  = pickOptionLayout(n, vh, longest, { reserve: 240, cap: 10 })
+    const d       = OPTION_DENSITY[picked.density]
+    const cols    = n <= 4 ? 1 : picked.cols
     // Long lists appear faster — a 0.05s-per-item stagger would take 2.5s at 50.
     const step = n <= 12 ? 0.05 : n <= 24 ? 0.025 : 0.01
 
@@ -2418,7 +2453,7 @@ function MCQBarChart({ options, votes, respondentCount, correctAnswers, revealed
   // percentage, so columns can't get as narrow before the bar stops meaning
   // anything.
   const longestOpt  = options.reduce((m, o) => Math.max(m, (o ?? '').length), 0)
-  const compactCols = columnsFor(n, vh, longestOpt, { rowH: 30, reserve: 300, cap: 6 })
+  const compactCols = columnsFor(n, vh, longestOpt, { rowH: 30, reserve: 190, cap: 6 })
   // Sort indexes, not options — each answer keeps its own letter when reordered.
   const order = compact
     ? options.map((_, i) => i).sort((a, b) => (votes[b] ?? 0) - (votes[a] ?? 0))
