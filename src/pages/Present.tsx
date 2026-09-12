@@ -974,28 +974,36 @@ export default function Present() {
               exit={{ opacity: 0, scale: 0.85 }}
               transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
               onClick={e => e.stopPropagation()}
-              className="flex flex-col items-center gap-6 rounded-3xl bg-white p-10 shadow-2xl"
+              className="flex max-h-[96vh] flex-col items-center gap-5 rounded-3xl bg-white p-8 shadow-2xl"
             >
-              <QRCodeSVG
-                value={joinUrl}
-                size={260}
-                bgColor="#ffffff"
-                fgColor="#000079"
-                level="M"
-              />
-              <div className="text-center">
+              {/* The code takes whatever height is left once the URL, session
+                  code and Close button have theirs — QR_MODAL_CHROME is that
+                  reserve. Sizing from the viewport rather than a fixed number
+                  keeps it huge on a projector without running off a laptop
+                  screen, where a hard-coded size would push Close out of view. */}
+              <div className="shrink-0" style={{ width: QR_MODAL_SIZE }}>
+                <QRCodeSVG
+                  value={joinUrl}
+                  size={900}
+                  bgColor="#ffffff"
+                  fgColor="#000079"
+                  level="M"
+                  className="block h-auto w-full"
+                />
+              </div>
+              <div className="shrink-0 text-center">
                 <p className="text-sm font-medium text-midnight-sky-500">Join at</p>
-                <p className="mt-0.5 text-base font-semibold text-midnight-sky-800">
+                <p className="mt-0.5 text-lg font-semibold text-midnight-sky-800">
                   {window.location.host}/join
                 </p>
               </div>
-              <div className="flex flex-col items-center gap-1">
+              <div className="flex shrink-0 flex-col items-center gap-0.5">
                 <p className="text-xs font-medium uppercase tracking-wider text-midnight-sky-400">Session code</p>
                 <p className="font-mono text-4xl font-bold tracking-[0.2em] text-midnight-sky-900">{code}</p>
               </div>
               <button
                 onClick={() => setShowQRModal(false)}
-                className="mt-1 rounded-xl bg-midnight-sky-100 px-6 py-2.5 text-sm font-medium text-midnight-sky-700 transition hover:bg-midnight-sky-200"
+                className="shrink-0 rounded-xl bg-midnight-sky-100 px-6 py-2.5 text-sm font-medium text-midnight-sky-700 transition hover:bg-midnight-sky-200"
               >
                 Close
               </button>
@@ -1148,6 +1156,13 @@ const MAX_LOBBY_TILE = 120
 /** Share of the width the QR block claims, collapsed and enlarged. */
 const QR_FRAC_SMALL = 0.075
 const QR_FRAC_BIG   = 0.42
+/** Height the QR modal reserves for the URL, session code, Close button, card
+ *  padding and gaps. Measured at 262px; the extra is deliberate slack so a
+ *  longer host name wrapping to a second line can never squeeze the button
+ *  off-screen. */
+const QR_MODAL_CHROME = 288
+/** Modal QR edge: as tall as the screen allows, never wider than it. */
+const QR_MODAL_SIZE = `min(96vh - ${QR_MODAL_CHROME}px, 86vw, 900px)`
 /** White margin inside the code — scanners need it to find the edges. */
 const QR_QUIET = 0.035
 
