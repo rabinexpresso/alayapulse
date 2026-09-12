@@ -1109,6 +1109,48 @@ export default function Present() {
    Press ← from slide 1 to come back here. Escape → exit confirm modal.
    ───────────────────────────────────────────────────────────────────────── */
 
+interface LobbyGrid {
+  cols: number; rows: number     // whole grid
+  qc:   number; qr:   number     // cells the QR block claims
+  cw:   number; ch:   number     // one cell
+}
+
+/**
+ * Largest tile that still fits everyone *plus* the QR block.
+ *
+ * Rows come from the available height rather than the headcount, so the grid
+ * fills the screen exactly and the QR can sit hard in the bottom-right corner
+ * with name tiles flowing around it in an L. Searching downward from a
+ * generous size and stopping at the first fit gives the biggest tile possible.
+ */
+function solveLobbyGrid(W: number, H: number, n: number, qrFrac: number, gap: number): LobbyGrid | null {
+  // Cap the tile: without it a near-empty room gives 300px tiles, and the QR
+  // block — measured in cells — can then never be smaller than one huge cell,
+  // so enlarging it would do nothing visible.
+  const start = Math.min(MAX_LOBBY_TILE, Math.floor(Math.min(W / 3, H / 2)))
+  for (let c = start; c >= 14; c--) {
+    const cols = Math.floor((W + gap) / (c + gap))
+    const rows = Math.floor((H + gap) / (c + gap))
+    if (cols < 3 || rows < 3) continue
+    const cw = (W - gap * (cols - 1)) / cols
+    const ch = (H - gap * (rows - 1)) / rows
+    const qPx = qrFrac * W
+    const qc = Math.max(2, Math.min(cols - 1, Math.ceil((qPx + gap) / (cw + gap))))
+    const qr = Math.max(2, Math.min(rows - 1, Math.ceil((qPx + gap) / (ch + gap))))
+    if (cols * rows - qc * qr >= n) return { cols, rows, qc, qr, cw, ch }
+  }
+  return null
+}
+
+const LOBBY_GAP = 8
+/** Biggest a name tile may get, however empty the room is. */
+const MAX_LOBBY_TILE = 120
+/** Share of the width the QR block claims, collapsed and enlarged. */
+const QR_FRAC_SMALL = 0.075
+const QR_FRAC_BIG   = 0.42
+/** White margin inside the code — scanners need it to find the edges. */
+const QR_QUIET = 0.035
+
 function WaitingRoom({
   code, joinUrl, viewers, isQuiz, onStart,
 }: {
@@ -1119,13 +1161,50 @@ function WaitingRoom({
   onStart: () => void
 }) {
   const count = viewers.length
+  const [qrBig, setQrBig] = useState(false)
+  const stageRef = useRef<HTMLDivElement>(null)
+  const [stage, setStage] = useState({ w: 0, h: 0 })
 
-  // Tiles shrink as room fills; scroll kicks in when tiles hit ≤48 px
-  const tileMin =
-    count <= 30  ? 110 :
-    count <= 60  ? 88  :
-    count <= 120 ? 70  :
-    count <= 200 ? 56  : 48
+  useEffect(() => {
+    const el = stageRef.current
+    if (!el) return
+    const ro = new ResizeObserver(entries => {
+      const r = entries[0].contentRect
+      setStage({ w: Math.round(r.width), h: Math.round(r.height) })
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  const qrFrac = qrBig ? QR_FRAC_BIG : QR_FRAC_SMALL
+  const L = useMemo(() => {
+    if (!stage.w || !stage.h) return null
+    return solveLobbyGrid(stage.w, stage.h, count, qrFrac, LOBBY_GAP)
+        ?? solveLobbyGrid(stage.w, stage.h, 0, qrFrac, LOBBY_GAP)
+  }, [stage.w, stage.h, count, qrFrac])
+
+  /* QR block: measure the text first, then give the code whatever height is
+     left — guessing here is what let it ride up over the tiles. */
+  const blockW = L ? L.qc * L.cw + LOBBY_GAP * (L.qc - 1) : 0
+  const blockH = L ? L.qr * L.ch + LOBBY_GAP * (L.qr - 1) : 0
+  const codeFs = Math.max(10, blockH * 0.075)
+  const urlFs  = qrBig ? Math.max(8, blockH * 0.040) : 0
+  const lead   = blockH * 0.022
+  const textH  = codeFs * 1.2 + (qrBig ? urlFs * 1.2 : 0) + lead
+  const boxPx  = Math.max(36, Math.min(blockW, blockH - textH) * 0.98)
+  const qrPx   = Math.max(24, Math.round(boxPx * (1 - QR_QUIET * 2)))
+  /* The code is nearly always limited by height — the code and URL below it eat
+     into the block — which leaves the cell wider than the code needs. Trim the
+     block to the columns it actually uses: the dead strip between the code and
+     the screen edge goes away, and those columns go back to the name tiles. */
+  const qcTight = L
+    ? Math.max(2, Math.min(L.qc, Math.ceil((boxPx + LOBBY_GAP) / (L.cw + LOBBY_GAP))))
+    : 0
+
+  const tileMin = L ? Math.min(L.cw, L.ch) : 0
+  const emojiFs = Math.max(9,   tileMin * 0.42)
+  const nameFs  = Math.min(14, Math.max(7, tileMin * 0.19))
+  const shown   = L ? Math.min(count, L.cols * L.rows - qcTight * L.qr) : 0
 
   return (
     <div className="flex h-full w-full flex-col bg-midnight-sky-900 text-white">
@@ -1166,34 +1245,81 @@ function WaitingRoom({
         )}
       </header>
 
-      {/* Viewer grid — right-padded to avoid QR overlap */}
-      <main className="relative z-10 flex-1 overflow-y-auto pl-8 pr-52 pb-8 [scrollbar-width:thin]">
-        {count === 0 ? (
-          <div className="flex h-full items-center justify-center">
-            <p className="text-center text-base font-light text-white/25">
-              Waiting for people to scan and join…
-            </p>
-          </div>
-        ) : (
+      {/* Viewer grid — fills the stage; the QR is a cell in it, not an overlay */}
+      <main ref={stageRef} className="relative z-10 min-h-0 flex-1 overflow-hidden px-8 pb-8">
+        {L && (
           <div
-            className="grid gap-2"
-            style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${tileMin}px, 1fr))` }}
+            className="grid h-full w-full"
+            style={{
+              gap:                 `${LOBBY_GAP}px`,
+              gridTemplateColumns: `repeat(${L.cols}, 1fr)`,
+              gridTemplateRows:    `repeat(${L.rows}, 1fr)`,
+            }}
           >
+            {/* QR + code + URL — pinned to the bottom-right corner cells.
+                Clipped so its contents can never paint over a name tile. */}
+            <button
+              onClick={() => setQrBig(b => !b)}
+              title={qrBig ? 'Click to shrink the QR code' : 'Click to enlarge the QR code'}
+              aria-label={qrBig ? 'Shrink QR code' : 'Enlarge QR code'}
+              className="flex min-h-0 min-w-0 cursor-pointer flex-col items-end justify-end overflow-hidden rounded-lg transition-opacity hover:opacity-85"
+              style={{
+                gridColumn: `${L.cols - qcTight + 1} / span ${qcTight}`,
+                gridRow:    `${L.rows - L.qr + 1} / span ${L.qr}`,
+              }}
+            >
+              <div
+                className="shrink-0 rounded-lg bg-white shadow-2xl"
+                style={{ padding: `${boxPx * QR_QUIET}px` }}
+              >
+                <QRCodeSVG value={joinUrl} size={qrPx} bgColor="#ffffff" fgColor="#000079" level="M" />
+              </div>
+              <div className="shrink-0 text-center" style={{ marginTop: `${lead}px`, width: `${boxPx}px` }}>
+                <p
+                  className="font-mono font-bold tracking-[0.18em] text-white"
+                  style={{ fontSize: `${codeFs}px`, lineHeight: 1.2 }}
+                >
+                  {code}
+                </p>
+                {qrBig && (
+                  <p
+                    className="font-semibold text-white/65"
+                    style={{ fontSize: `${urlFs}px`, lineHeight: 1.2 }}
+                  >
+                    {window.location.host}/join
+                  </p>
+                )}
+              </div>
+            </button>
+
+            {/* Nothing to show yet — sit the prompt above the QR, never behind it */}
+            {count === 0 && (
+              <div
+                className="flex items-center justify-center"
+                style={{ gridColumn: '1 / -1', gridRow: `1 / span ${Math.max(1, L.rows - L.qr)}` }}
+              >
+                <p className="text-center text-base font-light text-white/25">
+                  Waiting for people to scan and join…
+                </p>
+              </div>
+            )}
+
             <AnimatePresence initial={false}>
-              {viewers.map(v => (
+              {viewers.slice(0, shown).map(v => (
                 <motion.div
                   key={v.id}
                   initial={{ opacity: 0, scale: 0.7 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.5 }}
                   transition={{ duration: 0.3, ease: [0.34, 1.56, 0.64, 1] }}
-                  className="flex flex-col items-center justify-center gap-0.5 rounded-xl border border-white/10 bg-white/5 px-1.5 py-2"
+                  className="flex min-w-0 flex-col items-center justify-center gap-0.5 overflow-hidden rounded-xl border border-white/10 bg-white/5 px-1"
                 >
-                  <span style={{ fontSize: tileMin >= 88 ? '1.5rem' : tileMin >= 65 ? '1.2rem' : '1rem', lineHeight: 1 }}>
-                    {v.emoji}
-                  </span>
+                  <span style={{ fontSize: `${emojiFs}px`, lineHeight: 1 }}>{v.emoji}</span>
                   {v.name && (
-                    <span className="w-full truncate text-center font-medium text-white/65" style={{ fontSize: '10px' }}>
+                    <span
+                      className="w-full truncate text-center font-medium text-white/65"
+                      style={{ fontSize: `${nameFs}px`, lineHeight: 1.1 }}
+                    >
                       {v.name}
                     </span>
                   )}
@@ -1214,17 +1340,6 @@ function WaitingRoom({
           <ChevronRight className="size-6 text-white" />
         </div>
       </button>
-
-      {/* Bottom-right: QR code + session code + join URL */}
-      <div className="absolute bottom-6 right-8 z-20 flex flex-col items-end gap-3">
-        <div className="rounded-2xl bg-white p-3 shadow-2xl">
-          <QRCodeSVG value={joinUrl} size={120} bgColor="#ffffff" fgColor="#000079" level="M" />
-        </div>
-        <div className="text-right">
-          <p className="font-mono text-xl font-bold tracking-[0.22em] text-white">{code}</p>
-          <p className="text-sm font-semibold text-white/70">{window.location.host}/join</p>
-        </div>
-      </div>
     </div>
   )
 }
