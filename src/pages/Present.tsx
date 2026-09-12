@@ -1203,9 +1203,11 @@ function WaitingRoom({
   const blockW = L ? L.qc * L.cw + LOBBY_GAP * (L.qc - 1) : 0
   const blockH = L ? L.qr * L.ch + LOBBY_GAP * (L.qr - 1) : 0
   const codeFs = Math.max(10, blockH * 0.075)
-  const urlFs  = qrBig ? Math.max(8, blockH * 0.040) : 0
+  // The join URL shows in both states — it is the fallback for anyone whose
+  // camera will not scan, and the lobby has always carried it.
+  const urlFs  = Math.max(14, blockH * 0.040)
   const lead   = blockH * 0.022
-  const textH  = codeFs * 1.2 + (qrBig ? urlFs * 1.2 : 0) + lead
+  const textH  = codeFs * 1.2 + urlFs * 1.2 + lead
   const boxPx  = Math.max(36, Math.min(blockW, blockH - textH) * 0.98)
   const qrPx   = Math.max(24, Math.round(boxPx * (1 - QR_QUIET * 2)))
   /* The code is nearly always limited by height — the code and URL below it eat
@@ -1296,14 +1298,12 @@ function WaitingRoom({
                 >
                   {code}
                 </p>
-                {qrBig && (
-                  <p
-                    className="font-semibold text-white/65"
-                    style={{ fontSize: `${urlFs}px`, lineHeight: 1.2 }}
-                  >
-                    {window.location.host}/join
-                  </p>
-                )}
+                <p
+                  className="truncate font-semibold text-white/65"
+                  style={{ fontSize: `${urlFs}px`, lineHeight: 1.2 }}
+                >
+                  {window.location.host}/join
+                </p>
               </div>
             </button>
 
