@@ -240,14 +240,8 @@ export default function Guide() {
     <div className="min-h-screen bg-midnight-sky-900 text-white">
       {/* Header */}
       <header className="sticky top-0 z-20 border-b border-white/5 bg-midnight-sky-900/85 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+        <div className="mx-auto flex max-w-6xl items-center px-6 py-4">
           <Link to="/"><AlayaMark className="text-white" /></Link>
-          <Link
-            to="/"
-            className="rounded-full border border-white/15 px-4 py-1.5 text-sm text-white/70 transition hover:border-white/40 hover:text-white"
-          >
-            Back
-          </Link>
         </div>
       </header>
 
