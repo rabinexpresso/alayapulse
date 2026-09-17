@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   ChevronLeft, ChevronRight, X,
   BarChart2, ChevronDown, ChevronUp, Clock,
-  Eye, EyeOff, Pin, Check, RotateCcw, Trophy, Crown, Maximize2, Minimize2,
+  Eye, EyeOff, Pin, Check, RotateCcw, Trophy, Crown,
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { cn, optionLabel, MAX_VIZ_OPTIONS } from '@/lib/utils'
@@ -1156,9 +1156,8 @@ function solveLobbyGrid(W: number, H: number, n: number, qrFrac: number, gap: nu
 const LOBBY_GAP = 8
 /** Biggest a name tile may get, however empty the room is. */
 const MAX_LOBBY_TILE = 120
-/** Share of the width the QR block claims, collapsed and enlarged. */
-const QR_FRAC_SMALL = 0.075
-const QR_FRAC_BIG   = 0.42
+/** Share of the width the QR block claims in the lobby corner. */
+const QR_FRAC = 0.075
 /** Height the QR modal reserves for the URL, session code, Close button, card
  *  padding and gaps. Measured at 262px; the extra is deliberate slack so a
  *  longer host name wrapping to a second line can never squeeze the button
@@ -1179,11 +1178,8 @@ function WaitingRoom({
   onStart: () => void
 }) {
   const count = viewers.length
-  // Two separate views of the QR, both kept on purpose:
-  //  - qrBig: enlarges it inside the lobby grid, so everyone's names stay visible.
-  //  - qrFull: a full-screen QR plus live headcount for the back of a big room,
-  //    with no names — at a hundred people they'd crowd the code out.
-  const [qrBig, setQrBig]   = useState(false)
+  // Full-screen QR plus live headcount for the back of a big room, with no
+  // names — at a hundred people they'd crowd the code out.
   const [qrFull, setQrFull] = useState(false)
 
   // While full-screen is open, Esc closes it instead of reaching the lobby's
@@ -1215,12 +1211,11 @@ function WaitingRoom({
     return () => ro.disconnect()
   }, [])
 
-  const qrFrac = qrBig ? QR_FRAC_BIG : QR_FRAC_SMALL
   const L = useMemo(() => {
     if (!stage.w || !stage.h) return null
-    return solveLobbyGrid(stage.w, stage.h, count, qrFrac, LOBBY_GAP)
-        ?? solveLobbyGrid(stage.w, stage.h, 0, qrFrac, LOBBY_GAP)
-  }, [stage.w, stage.h, count, qrFrac])
+    return solveLobbyGrid(stage.w, stage.h, count, QR_FRAC, LOBBY_GAP)
+        ?? solveLobbyGrid(stage.w, stage.h, 0, QR_FRAC, LOBBY_GAP)
+  }, [stage.w, stage.h, count])
 
   /* QR block: measure the text first, then give the code whatever height is
      left — guessing here is what let it ride up over the tiles. */
@@ -1284,16 +1279,6 @@ function WaitingRoom({
             <span className="text-sm font-semibold text-golden-sun">Quiz mode</span>
           </div>
         )}
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            onClick={() => setQrBig(b => !b)}
-            title={qrBig ? 'Shrink the QR code back into the corner' : 'Make the QR code bigger while keeping names visible'}
-            className="flex items-center gap-1.5 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-sm text-white/60 transition hover:border-white/35 hover:text-white"
-          >
-            {qrBig ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
-            {qrBig ? 'Smaller QR' : 'Bigger QR'}
-          </button>
-        </div>
       </header>
 
       {/* Viewer grid — fills the stage; the QR is a cell in it, not an overlay */}
