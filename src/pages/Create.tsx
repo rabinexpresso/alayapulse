@@ -463,6 +463,50 @@ function parseCsvQuestions(csvText: string): CsvParseResult {
   return { slides, errors }
 }
 
+/* ── CSV import modal: step list + copyable AI prompt ─────────────────── */
+
+const CSV_AI_PROMPT =
+  'Fill in this CSV template with the questions from my document. Keep the exact column layout.'
+
+function CsvStep({ n, children }: { n: number; children: ReactNode }) {
+  return (
+    <li className="flex gap-2.5">
+      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-midnight-sky-800 text-[10px] font-bold text-white">
+        {n}
+      </span>
+      <div className="min-w-0 flex-1 pt-px">{children}</div>
+    </li>
+  )
+}
+
+function CsvPromptBox({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1800)
+    } catch { /* clipboard blocked — the text is still visible to select by hand */ }
+  }
+  return (
+    <div className="mt-1.5 flex items-start gap-2 rounded-lg border border-midnight-sky-200 bg-white px-3 py-2">
+      <p className="min-w-0 flex-1 select-all italic text-midnight-sky-800">“{text}”</p>
+      <button
+        onClick={e => { e.stopPropagation(); copy() }}
+        className={cn(
+          'flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold transition',
+          copied
+            ? 'border-fresh-green/40 bg-fresh-green/10 text-fresh-green'
+            : 'border-midnight-sky-200 text-midnight-sky-700 hover:border-midnight-sky-400',
+        )}
+      >
+        {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </div>
+  )
+}
+
 /* ── Content slide helpers ─────────────────────────────────────────────── */
 
 type CThemeKey = 'navy' | 'pink' | 'sky' | 'green' | 'golden' | 'white' | 'transparent'
@@ -1908,21 +1952,38 @@ function CsvImportModal({ onClose, onImport }: {
         </div>
 
         <div className="flex flex-col gap-4 overflow-y-auto p-5">
-          {/* Download template */}
-          <div className="flex items-center justify-between rounded-xl border border-midnight-sky-100 bg-midnight-sky-50 px-4 py-3">
-            <div>
-              <p className="text-xs font-medium text-midnight-sky-700">Need the template?</p>
-              <p className="mt-0.5 text-[11px] text-midnight-sky-500">Fill it in, or use ChatGPT / Claude to convert your Word doc</p>
-            </div>
-            <a
-              href="/alaya_pulse_import_template.csv"
-              download="alaya_pulse_import_template.csv"
-              className="flex shrink-0 items-center gap-1.5 rounded-lg bg-midnight-sky-800 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-midnight-sky-700"
-              onClick={e => e.stopPropagation()}
-            >
-              <Upload className="size-3 rotate-180" />
-              Download template
-            </a>
+          {/* How to import — step by step */}
+          <div className="rounded-xl border border-midnight-sky-100 bg-midnight-sky-50 px-4 py-3.5">
+            <p className="text-sm font-semibold text-midnight-sky-800">How to import your questions</p>
+            <ol className="mt-2.5 space-y-2.5 text-xs leading-relaxed text-midnight-sky-700">
+              <CsvStep n={1}>
+                <strong>Prepare your questions</strong> in a Word document, including the correct answers and explanations if you need them.
+              </CsvStep>
+              <CsvStep n={2}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span><strong>Download the template</strong>, then upload it to Gemini (or ChatGPT / Claude) together with your Word document.</span>
+                  <a
+                    href="/alaya_pulse_import_template.csv"
+                    download="alaya_pulse_import_template.csv"
+                    className="flex shrink-0 items-center gap-1.5 rounded-lg bg-midnight-sky-800 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-midnight-sky-700"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <Upload className="size-3 rotate-180" />
+                    Download template
+                  </a>
+                </div>
+              </CsvStep>
+              <CsvStep n={3}>
+                <strong>Paste this prompt</strong> into the AI chat:
+                <CsvPromptBox text={CSV_AI_PROMPT} />
+              </CsvStep>
+              <CsvStep n={4}>
+                <strong>Download the CSV file</strong> the AI gives you.
+              </CsvStep>
+              <CsvStep n={5}>
+                <strong>Upload it here</strong> — drop the file below or click to browse.
+              </CsvStep>
+            </ol>
           </div>
 
           {/* Upload area or parsed results */}
