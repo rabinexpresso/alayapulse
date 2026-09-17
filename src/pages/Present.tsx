@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   ChevronLeft, ChevronRight, X,
   BarChart2, ChevronDown, ChevronUp, Clock,
-  Eye, EyeOff, Pin, Check, RotateCcw, Trophy, Crown,
+  Eye, EyeOff, Pin, Check, RotateCcw, Trophy, Crown, Maximize2, Minimize2,
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { cn, optionLabel, MAX_VIZ_OPTIONS } from '@/lib/utils'
@@ -1179,7 +1179,28 @@ function WaitingRoom({
   onStart: () => void
 }) {
   const count = viewers.length
-  const [qrBig, setQrBig] = useState(false)
+  // Two separate views of the QR, both kept on purpose:
+  //  - qrBig: enlarges it inside the lobby grid, so everyone's names stay visible.
+  //  - qrFull: a full-screen QR plus live headcount for the back of a big room,
+  //    with no names — at a hundred people they'd crowd the code out.
+  const [qrBig, setQrBig]   = useState(false)
+  const [qrFull, setQrFull] = useState(false)
+
+  // While full-screen is open, Esc closes it instead of reaching the lobby's
+  // own Esc handler (which asks whether to exit the show). Capture phase runs
+  // before that handler, so stopping here is enough. Arrow keys pass through:
+  // → still starts the show, and the lobby — overlay included — goes away.
+  useEffect(() => {
+    if (!qrFull) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      setQrFull(false)
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [qrFull])
   const stageRef = useRef<HTMLDivElement>(null)
   const [stage, setStage] = useState({ w: 0, h: 0 })
 
@@ -1263,6 +1284,16 @@ function WaitingRoom({
             <span className="text-sm font-semibold text-golden-sun">Quiz mode</span>
           </div>
         )}
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => setQrBig(b => !b)}
+            title={qrBig ? 'Shrink the QR code back into the corner' : 'Make the QR code bigger while keeping names visible'}
+            className="flex items-center gap-1.5 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-sm text-white/60 transition hover:border-white/35 hover:text-white"
+          >
+            {qrBig ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+            {qrBig ? 'Smaller QR' : 'Bigger QR'}
+          </button>
+        </div>
       </header>
 
       {/* Viewer grid — fills the stage; the QR is a cell in it, not an overlay */}
@@ -1279,9 +1310,9 @@ function WaitingRoom({
             {/* QR + code + URL — pinned to the bottom-right corner cells.
                 Clipped so its contents can never paint over a name tile. */}
             <button
-              onClick={() => setQrBig(b => !b)}
-              title={qrBig ? 'Click to shrink the QR code' : 'Click to enlarge the QR code'}
-              aria-label={qrBig ? 'Shrink QR code' : 'Enlarge QR code'}
+              onClick={() => setQrFull(true)}
+              title="Click to show the QR code full screen"
+              aria-label="Show QR code full screen"
               className="flex min-h-0 min-w-0 cursor-pointer flex-col items-end justify-end overflow-hidden rounded-lg transition-opacity hover:opacity-85"
               style={{
                 gridColumn: `${L.cols - qcTight + 1} / span ${qcTight}`,
@@ -1347,6 +1378,76 @@ function WaitingRoom({
           </div>
         )}
       </main>
+
+      {/* Full-screen QR — click anywhere or press Esc to return to the lobby */}
+      <AnimatePresence>
+        {qrFull && (
+          <motion.button
+            key="qr-full"
+            onClick={() => setQrFull(false)}
+            aria-label="Close full-screen QR code"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="absolute inset-0 z-[60] flex cursor-pointer items-center justify-center gap-[5vw] bg-midnight-sky-900 px-[4vw] text-white"
+          >
+            <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+              <div className="absolute -bottom-40 -left-40 size-[600px] rounded-full bg-hot-pink/10 blur-[130px]" />
+              <div className="absolute -right-40 -top-40 size-[500px] rounded-full bg-sky-blue/10 blur-[110px]" />
+            </div>
+
+            <motion.div
+              initial={{ scale: 0.92 }}
+              animate={{ scale: 1 }}
+              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              className="relative shrink-0 rounded-2xl bg-white shadow-2xl"
+              style={{ padding: 'min(2.4vh, 2vw)' }}
+            >
+              <QRCodeSVG
+                value={joinUrl}
+                bgColor="#ffffff"
+                fgColor="#000079"
+                level="M"
+                style={{ width: 'min(84vh, 52vw)', height: 'min(84vh, 52vw)', display: 'block' }}
+              />
+            </motion.div>
+
+            <div className="relative flex min-w-0 flex-col items-start text-left">
+              <p className="text-[clamp(18px,2.4vw,40px)] font-semibold text-white/70">Scan to join</p>
+
+              <div className="mt-[3vh] flex items-baseline gap-[1vw]">
+                <motion.span
+                  key={count}
+                  initial={{ scale: 1.25, color: '#ff0065' }}
+                  animate={{ scale: 1, color: '#ffffff' }}
+                  transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+                  className="origin-left font-bold tabular-nums leading-none"
+                  style={{ fontSize: 'clamp(64px, 11vw, 220px)' }}
+                >
+                  {count}
+                </motion.span>
+                <span className="text-[clamp(18px,2.4vw,44px)] font-medium text-white/60">
+                  {count === 1 ? 'person joined' : 'people joined'}
+                </span>
+              </div>
+
+              <p className="mt-[4vh] text-[clamp(14px,1.4vw,24px)] text-white/50">or go to</p>
+              <p className="truncate font-semibold text-white text-[clamp(18px,2.2vw,40px)]">
+                {window.location.host}/join
+              </p>
+              <p className="mt-[1.5vh] text-[clamp(14px,1.4vw,24px)] text-white/50">and enter</p>
+              <p className="font-mono font-bold tracking-[0.18em] text-white text-[clamp(28px,4vw,72px)] leading-tight">
+                {code}
+              </p>
+
+              <p className="mt-[5vh] text-[clamp(11px,0.9vw,15px)] text-white/30">
+                Click anywhere or press Esc to go back
+              </p>
+            </div>
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       {/* Right hover zone — click or hover to advance to slide 1 */}
       <button
