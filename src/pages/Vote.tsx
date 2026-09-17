@@ -248,7 +248,7 @@ export default function Vote() {
   const alreadySubmitted = submittedSlides.has(roundKey)
 
   // ── Handle submit for any question type ───────────────────────────────
-  const INTERACTIVE_TYPES = new Set(['mcq', 'wordcloud', 'openended', 'rating'])
+  const INTERACTIVE_TYPES = new Set(['mcq', 'wordcloud', 'openended', 'rating', 'ranking'])
 
   const handleSubmit = async (value: string) => {
     const sType = (slideData as { type: string } | undefined)?.type ?? ''
@@ -622,6 +622,13 @@ export default function Vote() {
                     />
                   )
                 })()}
+                {slideData.type === 'ranking' && (
+                  <RankingQuestion
+                    items={(slideData as { options: string[] }).options}
+                    submitting={submitting}
+                    onSubmit={order => handleSubmit(JSON.stringify(order))}
+                  />
+                )}
               </>
             )}
           </motion.div>
@@ -1469,6 +1476,102 @@ function FullPageMessage({ title, body, icon }: { title: string; body: string; i
 /* ─────────────────────────────────────────────────────────────────────────
    Shared hot-pink submit button
    ───────────────────────────────────────────────────────────────────────── */
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Ranking — tap the items in order of importance
+   ───────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Tapping rather than dragging: dragging a list on a phone is fiddly, and this
+ * runs mid-session for people who've never seen the app. First tap is #1, next
+ * is #2, and tapping a ranked item takes it back out (everything after it moves
+ * up one), so a mistake is always one tap to fix.
+ *
+ * Submits the option indexes in chosen order — e.g. [2,0,3,1] means item 2 was
+ * this person's #1.
+ */
+function RankingQuestion({ items, submitting, onSubmit }: {
+  items:      string[]
+  submitting: boolean
+  onSubmit:   (order: number[]) => void
+}) {
+  const [order, setOrder] = useState<number[]>([])
+  const complete = order.length === items.length && items.length > 0
+
+  const toggle = (i: number) => {
+    if (submitting) return
+    setOrder(prev => (prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i]))
+  }
+
+  return (
+    <div className="flex flex-1 flex-col gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-medium text-midnight-sky-700">
+          {complete
+            ? 'All ranked — check your order, then submit'
+            : order.length === 0
+              ? 'Tap your #1 first, then keep going'
+              : `Now tap your #${order.length + 1}`}
+        </p>
+        {order.length > 0 && (
+          <button
+            onClick={() => !submitting && setOrder([])}
+            className="shrink-0 text-xs font-semibold text-midnight-sky-500 underline-offset-2 hover:text-hot-pink hover:underline"
+          >
+            Start over
+          </button>
+        )}
+      </div>
+
+      {items.map((item, i) => {
+        const pos = order.indexOf(i)
+        const ranked = pos >= 0
+        return (
+          <motion.button
+            key={i}
+            onClick={() => toggle(i)}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: i * 0.06, ease: [0.16, 1, 0.3, 1] }}
+            whileTap={{ scale: 0.98 }}
+            className={cn(
+              'flex w-full touch-manipulation items-center gap-3 rounded-2xl border-2 px-4 py-3.5 text-left transition-colors focus:outline-none',
+              ranked
+                ? 'border-hot-pink/40 bg-hot-pink/5'
+                : 'border-midnight-sky-200 bg-white hover:border-hot-pink/30',
+            )}
+          >
+            <span className={cn(
+              'flex size-8 shrink-0 items-center justify-center rounded-full text-sm font-extrabold tabular-nums transition-colors',
+              ranked
+                ? 'bg-hot-pink text-white shadow-[0_0_14px_-2px] shadow-hot-pink/40'
+                : 'border-2 border-dashed border-midnight-sky-300 text-midnight-sky-400',
+            )}>
+              {ranked ? pos + 1 : ''}
+            </span>
+            <span className={cn('min-w-0 flex-1 break-words text-base font-semibold leading-snug',
+              ranked ? 'text-midnight-sky-900' : 'text-midnight-sky-700')}>
+              {item}
+            </span>
+          </motion.button>
+        )
+      })}
+
+      <AnimatePresence>
+        {complete && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <SubmitButton onClick={() => onSubmit(order)} label="Submit ranking" loading={submitting} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
 
 function SubmitButton({
   onClick, label = 'Submit', loading = false,

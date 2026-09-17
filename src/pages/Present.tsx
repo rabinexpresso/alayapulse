@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { cn, optionLabel, MAX_VIZ_OPTIONS } from '@/lib/utils'
+import { aggregateRanking, rankingOrder, type RankingResult } from '@/lib/ranking'
 import {
   updateSessionState, endSession, subscribeToSlideResponses, subscribeToViewerCount, subscribeToViewers,
   fetchAllSessionResponses, getSessionByCode, startTimer, clearTimer, resetSlideAndTimer, updateQuestionMeta,
@@ -43,7 +44,7 @@ import type {
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
-type QType      = 'mcq' | 'wordcloud' | 'openended' | 'rating'
+type QType      = 'mcq' | 'wordcloud' | 'openended' | 'rating' | 'ranking'
 type SlidePhase = 'question' | 'results'
 
 interface PdfSlide {
@@ -573,6 +574,7 @@ export default function Present() {
   const ratingMax  = (qSlide?.ratingMax === 10 ? 10 : 5)
   const ratingAvgs = isRealSession ? aggregateRating(responses, optCount)                            : DEMO_RATING_AVGS
   const ratingDist = isRealSession ? aggregateRatingDistribution(responses, optCount, ratingMax)     : DEMO_RATING_DIST
+  const rankingRes = aggregateRanking(isRealSession ? responses.map(r => r.value) : [], optCount)
 
   // ── Persistent HTML iframe groups ─────────────────────────────────────
   // Each unique HTML source file (split or whole) gets its own iframe that
@@ -658,6 +660,7 @@ export default function Present() {
               openAnswers={openAns}
               ratingAvgs={ratingAvgs}
               ratingDist={ratingDist}
+              ranking={rankingRes}
               onReveal={() => { setTransType('phase'); setDirection(1); setPhase('results') }}
               sessionCode={code}
               deck={deck}
@@ -1395,7 +1398,7 @@ function ReactionParticle({ reaction, onComplete }: { reaction: Reaction; onComp
 
 function SlideContent({
   slide, phase, responseCount,
-  mcqVotes, cloudWords, openAnswers, ratingAvgs, ratingDist,
+  mcqVotes, cloudWords, openAnswers, ratingAvgs, ratingDist, ranking,
   onReveal, sessionCode, deck, questionMeta, timerActive,
 }: {
   slide:          AnySlide
@@ -1406,6 +1409,7 @@ function SlideContent({
   openAnswers:    { name: string; text: string }[]
   ratingAvgs:     number[]
   ratingDist:     number[][]
+  ranking:        RankingResult
   onReveal:       () => void
   sessionCode:    string
   deck:           AnySlide[]
@@ -1428,6 +1432,7 @@ function SlideContent({
       openAnswers={openAnswers}
       ratingAvgs={ratingAvgs}
       ratingDist={ratingDist}
+      ranking={ranking}
       timerActive={timerActive}
     />
   )
@@ -1955,6 +1960,7 @@ const QTYPE_META: Record<QType, { label: string; ring: string; bg: string; text:
   wordcloud: { label: 'Word Cloud',       ring: 'border-fresh-green/40', bg: 'bg-fresh-green/10', text: 'text-fresh-green' },
   openended: { label: 'Open-ended',       ring: 'border-golden-sun/40',  bg: 'bg-golden-sun/10',  text: 'text-golden-sun'  },
   rating:    { label: 'Rating',           ring: 'border-hot-pink/40',    bg: 'bg-hot-pink/10',    text: 'text-hot-pink'    },
+  ranking:   { label: 'Ranking',          ring: 'border-sky-blue/40',    bg: 'bg-sky-blue/10',    text: 'text-sky-blue'    },
 }
 
 /** Option-card sizing per density tier — 0 is roomiest, 2 is tightest.
@@ -2222,6 +2228,29 @@ function QuestionSlideView({
     )
   })() : null
 
+  // Ranking: list the items so the room can read them while ranking on their
+  // phones. No numbers — the order is each person's to choose.
+  const rankingItems = slide.type === 'ranking' ? (
+    <div className="mt-4">
+      <p className="mb-2 text-xs font-medium" style={{ color: c.fgDim }}>
+        Rank these on your phone — tap them from most to least important
+      </p>
+      <div className={cn('grid max-w-4xl gap-2', slide.options.length > 5 ? 'grid-cols-2' : 'grid-cols-1')}>
+        {slide.options.map((opt, i) => (
+          <motion.div key={i} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 + i * 0.05, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+            className="flex items-center gap-3 rounded-xl px-4 py-3 backdrop-blur-sm"
+            style={{ border: `1px solid ${c.cardBorder}`, backgroundColor: c.cardBg }}
+          >
+            <span className="flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold"
+              style={{ border: `1.5px dashed ${c.fgFaint}`, color: c.fgDim }}>?</span>
+            <span className="min-w-0 break-words text-base font-medium leading-snug" style={{ color: c.fg }}>{opt}</span>
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  ) : null
+
   const bottomBar = (
     <div className="flex flex-wrap items-center gap-3">
       <div className="flex items-center gap-2.5 rounded-full px-5 py-2.5 backdrop-blur-sm"
@@ -2282,6 +2311,7 @@ function QuestionSlideView({
             </motion.h1>
             {mcqOptions}
             {ratingParams}
+            {rankingItems}
           </div>
         </div>
         <div className="relative z-10 px-14 pb-0">{bottomBar}</div>
@@ -2323,6 +2353,7 @@ function QuestionSlideView({
             </motion.h1>
             {mcqOptions}
             {ratingParams}
+            {rankingItems}
           </div>
           {bottomBar}
         </div>
@@ -2364,6 +2395,7 @@ function QuestionSlideView({
         </motion.h1>
         {mcqOptions}
         {ratingParams}
+        {rankingItems}
       </div>
       {bottomBar}
     </div>
@@ -2375,7 +2407,7 @@ function QuestionSlideView({
    ───────────────────────────────────────────────────────────────────────── */
 
 function ResultsSlideView({
-  slide, mcqVotes, respondentCount, cloudWords, openAnswers, ratingAvgs, ratingDist, timerActive = false,
+  slide, mcqVotes, respondentCount, cloudWords, openAnswers, ratingAvgs, ratingDist, ranking, timerActive = false,
 }: {
   slide:           QSlide
   mcqVotes:        number[]
@@ -2385,6 +2417,7 @@ function ResultsSlideView({
   openAnswers:     { name: string; text: string }[]
   ratingAvgs:      number[]
   ratingDist:      number[][]
+  ranking:         RankingResult
 }) {
   const c         = qColors(slide.theme)
   const ratingMax = slide.ratingMax === 10 ? 10 : 5
@@ -2407,6 +2440,7 @@ function ResultsSlideView({
     && slide.type !== 'wordcloud'
     && slide.type !== 'mcq'
     && slide.type !== 'rating'
+    && slide.type !== 'ranking'
     && slide.type !== 'openended'
 
   const vizWrap = needsDarkPanel
@@ -2526,6 +2560,9 @@ function ResultsSlideView({
               />
             )
           })()}
+          {slide.type === 'ranking' && (
+            <RankingResults items={slide.options} result={ranking} theme={slide.theme} />
+          )}
         </div>
       )}
     </div>
@@ -3327,6 +3364,87 @@ function rankOrdinal(rank: number): string {
 }
 const RANK_BADGE_STYLE = { bg: 'bg-golden-sun/25', text: 'text-golden-sun', border: 'border-golden-sun/40' }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Ranking results — items in overall order, most important first
+   ───────────────────────────────────────────────────────────────────────── */
+
+function RankingResults({ items, result, theme }: {
+  items:  string[]
+  result: RankingResult
+  theme?: string
+}) {
+  const c   = qColors(theme)
+  const acc = mcqAccents(theme)
+  const n   = items.length
+
+  if (result.voters === 0) {
+    return (
+      <div className="flex min-h-[160px] items-center justify-center text-sm" style={{ color: c.fgFaint }}>
+        Waiting for rankings…
+      </div>
+    )
+  }
+
+  const order = rankingOrder(result, n)
+  // Bar = share of the most points an item could possibly earn (every voter
+  // putting it first), so a full bar genuinely means "everyone's #1".
+  const maxPossible = result.voters * n
+  const dense = n > 6
+
+  return (
+    <div className={cn('mx-auto flex w-full max-w-5xl flex-col', dense ? 'gap-2' : 'gap-3')}>
+      {order.map((idx, pos) => {
+        const isTop = pos === 0
+        const pct   = maxPossible > 0 ? (result.points[idx] / maxPossible) * 100 : 0
+        return (
+          <motion.div
+            key={idx}
+            layout
+            transition={{ layout: { duration: 0.5, ease: [0.16, 1, 0.3, 1] } }}
+            className={cn('flex items-center rounded-2xl', dense ? 'gap-3 px-4 py-2' : 'gap-4 px-5 py-3')}
+            style={{
+              border: `1px solid ${isTop ? acc.selected : c.cardBorder}`,
+              backgroundColor: c.cardBg,
+            }}
+          >
+            <span
+              className={cn('flex shrink-0 items-center justify-center rounded-full font-bold tabular-nums',
+                dense ? 'size-8 text-sm' : 'size-10 text-base')}
+              style={isTop
+                ? { backgroundColor: acc.selected, color: '#ffffff' }
+                : { backgroundColor: c.cardBorder, color: c.fg }}
+            >
+              {pos + 1}
+            </span>
+            <span
+              className={cn('w-[34%] min-w-0 shrink-0 truncate font-semibold', dense ? 'text-base' : 'text-lg')}
+              style={{ color: c.fg }}
+              title={items[idx]}
+            >
+              {items[idx]}
+            </span>
+            <div className={cn('flex-1 overflow-hidden rounded-full', dense ? 'h-2.5' : 'h-3')} style={{ backgroundColor: c.cardBorder }}>
+              <motion.div
+                className="h-full rounded-full"
+                initial={{ width: 0 }}
+                animate={{ width: `${pct}%` }}
+                transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+                style={{ backgroundColor: isTop ? acc.selected : c.fgDim }}
+              />
+            </div>
+            <span className={cn('shrink-0 text-right tabular-nums', dense ? 'w-24 text-sm' : 'w-28 text-base')} style={{ color: c.fgDim }}>
+              avg <span className="font-bold" style={{ color: c.fg }}>{result.avgPos[idx].toFixed(1)}</span>
+            </span>
+          </motion.div>
+        )
+      })}
+      <p className="mt-1 text-center text-xs" style={{ color: c.fgFaint }}>
+        {result.voters} {result.voters === 1 ? 'ranking' : 'rankings'} · “avg” is the average position people gave it, lower is better
+      </p>
+    </div>
+  )
+}
+
 function RatingResults({ params, avgs, distributions, ratingMax = 5, leftLabels = [], rightLabels = [], darkBg = false, theme }: {
   params:        string[]
   avgs:          number[]
@@ -3509,7 +3627,7 @@ function buildResultsSnapshot(
   startedAt: number,
   peakAudience: number,
 ): DeckResults {
-  const QTYPES = new Set<string>(['mcq', 'wordcloud', 'openended', 'rating'])
+  const QTYPES = new Set<string>(['mcq', 'wordcloud', 'openended', 'rating', 'ranking'])
   // Group responses by slideId for fast lookup
   const byId = new Map<string, FirestoreResponse[]>()
   for (const r of responses) {

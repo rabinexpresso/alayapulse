@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
 import { cn, optionLabel } from '@/lib/utils'
+import { aggregateRanking, parseRanking, rankingOrder } from '@/lib/ranking'
 import {
   listResults, deleteResults, isResponseCorrect, getStorageBackend, onAuthStateChanged, auth,
   browserListDecks, cloudListDecks,
@@ -210,6 +211,7 @@ export default function Results() {
           'Correct Answer': correctAnswerText,
           'Responses':      q.responseCount,
           '% Correct':      hasCorrectAnswer ? `${Math.round((correctCount / Math.max(1, q.responseCount)) * 100)}%` : '',
+          'Overall Ranking': q.type === 'ranking' ? overallRankingText(q) : '',
         }
       })
 
@@ -598,12 +600,14 @@ const TYPE_LABELS: Record<string, string> = {
   wordcloud: 'Word Cloud',
   openended: 'Open-ended',
   rating:    'Rating',
+  ranking:   'Ranking',
 }
 const TYPE_COLORS: Record<string, { bg: string; text: string }> = {
   mcq:       { bg: 'bg-sky-blue/10',    text: 'text-sky-blue'    },
   wordcloud: { bg: 'bg-fresh-green/10', text: 'text-fresh-green' },
   openended: { bg: 'bg-golden-sun/10',  text: 'text-golden-sun'  },
   rating:    { bg: 'bg-hot-pink/10',    text: 'text-hot-pink'    },
+  ranking:   { bg: 'bg-sky-blue/10',    text: 'text-sky-blue'    },
 }
 
 function QuestionResult({ index, question, audienceCount }: {
@@ -669,6 +673,7 @@ function QuestionResult({ index, question, audienceCount }: {
         {question.type === 'wordcloud' && <WordCloudVisual q={question} />}
         {question.type === 'openended' && <OpenEndedVisual q={question} />}
         {question.type === 'rating'    && <RatingVisual q={question} />}
+        {question.type === 'ranking'   && <RankingVisual q={question} />}
       </div>
 
       {/* Expandable per-respondent list */}
@@ -831,6 +836,52 @@ function rankOrdinal(rank: number): string {
   return `${n}${n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'}`
 }
 const RESULTS_RANK_BADGE_STYLE = { bg: 'bg-golden-sun/15', text: 'text-amber-700', border: 'border-amber-400/40' }
+
+function RankingVisual({ q }: { q: ResultQuestion }) {
+  const n      = q.options.length
+  const result = aggregateRanking(q.responses.map(r => r.value), n)
+  if (result.voters === 0) {
+    return <p className="text-sm italic text-midnight-sky-400">No complete rankings were submitted.</p>
+  }
+  const order       = rankingOrder(result, n)
+  const maxPossible = result.voters * n
+  return (
+    <div className="space-y-3">
+      {order.map((idx, pos) => {
+        const isTop = pos === 0
+        const pct   = maxPossible > 0 ? (result.points[idx] / maxPossible) * 100 : 0
+        return (
+          <div key={idx} className="flex items-center gap-3">
+            <span className={cn(
+              'flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold tabular-nums',
+              isTop ? 'bg-hot-pink text-white' : 'bg-midnight-sky-100 text-midnight-sky-600',
+            )}>
+              {pos + 1}
+            </span>
+            <span className={cn('w-32 shrink-0 truncate text-sm font-medium sm:w-48',
+              isTop ? 'text-midnight-sky-900' : 'text-midnight-sky-700')}>
+              {q.options[idx] || `Item ${idx + 1}`}
+            </span>
+            <div className="relative h-7 min-w-0 flex-1 overflow-hidden rounded-lg bg-midnight-sky-100">
+              <motion.div
+                className={cn('absolute inset-y-0 left-0 rounded-lg', isTop ? 'bg-hot-pink' : 'bg-midnight-sky-300')}
+                initial={{ width: '0%' }}
+                animate={{ width: `${pct}%` }}
+                transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
+              />
+            </div>
+            <span className="w-24 shrink-0 text-right text-sm tabular-nums text-midnight-sky-500">
+              avg <span className={cn('font-bold', isTop ? 'text-hot-pink' : 'text-midnight-sky-700')}>{result.avgPos[idx].toFixed(1)}</span>
+            </span>
+          </div>
+        )
+      })}
+      <p className="pt-1 text-xs text-midnight-sky-400">
+        {result.voters} complete {result.voters === 1 ? 'ranking' : 'rankings'} · "avg" is the average position people gave each item — lower is more important
+      </p>
+    </div>
+  )
+}
 
 function RatingVisual({ q }: { q: ResultQuestion }) {
   const ratingMax = q.ratingMax === 10 ? 10 : 5
@@ -1033,6 +1084,22 @@ function formatResponseValue(r: ResultResponse, q: ResultQuestion): React.ReactN
     } catch {
       return <span className="text-midnight-sky-400 italic">invalid</span>
     }
+  }
+  if (q.type === 'ranking') {
+    const order = parseRanking(r.value, q.options.length)
+    if (!order) return <span className="italic text-midnight-sky-400">incomplete ranking</span>
+    return (
+      <span className="inline-flex flex-wrap gap-x-3 gap-y-1">
+        {order.map((idx, pos) => (
+          <span key={idx} className="inline-flex items-center gap-1">
+            <span className="flex size-5 items-center justify-center rounded-full bg-sky-blue/10 text-[10px] font-bold text-sky-blue">
+              {pos + 1}
+            </span>
+            {q.options[idx] || `Item ${idx + 1}`}
+          </span>
+        ))}
+      </span>
+    )
   }
   // wordcloud / openended
   return <span className="break-words">{r.value}</span>
@@ -1238,6 +1305,27 @@ function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckRes
         margin: { left: margin, right: margin },
       })
       cursorY = (doc as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? cursorY + 50
+    } else if (q.type === 'ranking') {
+      const result = aggregateRanking(q.responses.map(r => r.value), q.options.length)
+      if (result.voters > 0) {
+        const body = rankingOrder(result, q.options.length).map((idx, pos) => [
+          String(pos + 1),
+          q.options[idx] || `Item ${idx + 1}`,
+          String(result.points[idx]),
+          result.avgPos[idx].toFixed(1),
+          String(result.firsts[idx]),
+        ])
+        autoTable(doc, {
+          startY: cursorY,
+          head:   [['Rank', 'Item', 'Points', 'Avg position', 'Ranked #1']],
+          body,
+          theme:  'striped',
+          headStyles: { fillColor: [0, 0, 121] },
+          styles: { fontSize: 10, cellPadding: 6 },
+          margin: { left: margin, right: margin },
+        })
+        cursorY = (doc as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? cursorY + 50
+      }
     } else if (q.type === 'wordcloud') {
       const freq = new Map<string, number>()
       q.responses.forEach(r => {
@@ -1280,6 +1368,15 @@ function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckRes
   })
 }
 
+/** "1. Trust  >  2. Growth  >  …" across everyone, for the Excel summary tab. */
+function overallRankingText(q: ResultQuestion): string {
+  const result = aggregateRanking(q.responses.map(r => r.value), q.options.length)
+  if (result.voters === 0) return ''
+  return rankingOrder(result, q.options.length)
+    .map((idx, pos) => `${pos + 1}. ${q.options[idx] || `Item ${idx + 1}`}`)
+    .join('  >  ')
+}
+
 function formatResponseAsText(r: ResultResponse, q: ResultQuestion): string {
   if (q.type === 'mcq') {
     let indices: number[]
@@ -1293,6 +1390,11 @@ function formatResponseAsText(r: ResultResponse, q: ResultQuestion): string {
       const arr = JSON.parse(r.value) as number[]
       return arr.map((v, i) => `${q.options[i] || `P${i + 1}`}: ${v}/${ratingMax}`).join('  |  ')
     } catch { return r.value }
+  }
+  if (q.type === 'ranking') {
+    const order = parseRanking(r.value, q.options.length)
+    if (!order) return '(incomplete ranking)'
+    return order.map((idx, pos) => `${pos + 1}. ${q.options[idx] || `Item ${idx + 1}`}`).join('  >  ')
   }
   return r.value
 }

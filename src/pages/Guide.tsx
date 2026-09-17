@@ -97,7 +97,8 @@ const GUIDE: Stage[] = [
         intro: 'Questions are what make a session interactive — mix them between your normal slides.',
         steps: [
           { text: <>Click <Btn color="pink">Add slide</Btn> (or <em>“Insert slide here”</em> between two slides in the sidebar).</>, image: 'add-slide-menu.png', imageAlt: 'Add slide menu showing all slide types' },
-          { text: <><strong>Question types:</strong> <Btn>MCQ</Btn> (multiple choice, supports correct answers), <Btn>Word Cloud</Btn> (short words build a live cloud), <Btn>Open Ended</Btn> (free-text answers), <Btn>Rating</Btn> (score items on a scale).</> },
+          { text: <><strong>Question types:</strong> <Btn>MCQ</Btn> (multiple choice, supports correct answers), <Btn>Word Cloud</Btn> (short words build a live cloud), <Btn>Open Ended</Btn> (free-text answers), <Btn>Rating</Btn> (score items on a scale), <Btn>Ranking</Btn> (put items in order of importance).</> },
+          { text: <><strong>Ranking:</strong> add 2–10 items. Everyone taps them on their phone from most to least important — tap an item again to take it back out. Results show the items in overall order: each 1st place earns the most points, and “avg” is the average position people gave each item (lower is more important). Ranking isn’t scored in Quiz mode, since there’s no right order for opinions.</> },
           { text: <><strong>Content types:</strong> <Btn>Heading</Btn>, <Btn>Bullets</Btn>, <Btn>Quote</Btn> and <Btn>Custom Slide</Btn> for anything you design yourself.</> },
           { text: <><strong>Leaderboard:</strong> add it after your quiz questions — during a quiz it shows the top scorers with points. (See the Quiz mode topic below.)</> },
           { text: <>Each question slide has its own settings on the right — options, correct answer(s), timer, and how many answers each person may submit.</> },

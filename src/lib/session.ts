@@ -9,7 +9,7 @@ import { db, auth } from './firebase'
    Shared types
    ───────────────────────────────────────────────────────────────────────── */
 
-export type QType      = 'mcq' | 'wordcloud' | 'openended' | 'rating'
+export type QType      = 'mcq' | 'wordcloud' | 'openended' | 'rating' | 'ranking'
 export type SlidePhase = 'question' | 'results'
 
 /** PDF slide as stored in Firestore — no imgUrl (too large for 1 MB doc limit) */

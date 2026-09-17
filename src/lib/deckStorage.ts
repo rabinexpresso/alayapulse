@@ -30,7 +30,7 @@ export interface Deck {
    doc gets its own 1 MB Firestore allowance.
    ───────────────────────────────────────────────────────────────────────── */
 
-export type ResultQuestionType = 'mcq' | 'wordcloud' | 'openended' | 'rating'
+export type ResultQuestionType = 'mcq' | 'wordcloud' | 'openended' | 'rating' | 'ranking'
 
 export interface ResultResponse {
   /** Display name. "Anonymous" if the audience didn't enter one. */

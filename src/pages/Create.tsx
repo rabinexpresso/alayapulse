@@ -18,7 +18,7 @@ import {
   Video, Type, List, Quote, Users, BarChart2, PieChart,
   X, Table2, Check, Undo2, Redo2, Trophy, ImageIcon,
   ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, Clock,
-  Share2, Link2,
+  Share2, Link2, ListOrdered,
 } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
 import { PersistentHtmlIframe } from '@/components/PersistentHtmlIframe'
@@ -182,7 +182,7 @@ function downloadDeckJSON(title: string, slides: unknown[]) {
    Types
    ───────────────────────────────────────────────────────────────────────── */
 
-type QType = 'mcq' | 'wordcloud' | 'openended' | 'rating'
+type QType = 'mcq' | 'wordcloud' | 'openended' | 'rating' | 'ranking'
 
 interface PdfSlide {
   id: string
@@ -297,7 +297,13 @@ const QTYPES: { type: QType; label: string; icon: ReactNode; color: string; badg
   { type: 'wordcloud', label: 'Word Cloud',       icon: <Cloud className="size-4" />,      color: 'text-fresh-green', badge: 'WC'  },
   { type: 'openended', label: 'Open-ended',       icon: <AlignLeft className="size-4" />,  color: 'text-golden-sun',  badge: 'OE'  },
   { type: 'rating',    label: 'Rating',           icon: <Star className="size-4" />,        color: 'text-hot-pink',    badge: 'RT'  },
+  { type: 'ranking',   label: 'Ranking',          icon: <ListOrdered className="size-4" />, color: 'text-sky-blue',    badge: 'RK'  },
 ]
+
+/** Ranking needs at least two items to compare, and past ten people stop
+ *  genuinely weighing them against each other and start guessing. */
+const MIN_RANK_ITEMS = 2
+const MAX_RANK_ITEMS = 10
 
 function uid() { return Math.random().toString(36).slice(2, 10) }
 
@@ -306,7 +312,7 @@ function makeQuestion(type: QType, isQuizMode = false): QuestionSlide {
     id: uid(),
     type,
     question: '',
-    options: type === 'mcq' ? ['', '', '', ''] : type === 'rating' ? ['', '', ''] : [],
+    options: type === 'mcq' ? ['', '', '', ''] : type === 'rating' ? ['', '', ''] : type === 'ranking' ? ['', '', '', ''] : [],
     // Default 30s timer on MCQ slides when quiz mode is on (needed for speed points)
     ...(isQuizMode && type === 'mcq' ? { timer: 30 } : {}),
   }
@@ -2557,7 +2563,7 @@ function SlideThumbnail({
     opacity: isDragging ? 0.4 : 1,
   }
 
-  const isQuestionSlide = slide.type === 'mcq' || slide.type === 'wordcloud' || slide.type === 'openended' || slide.type === 'rating'
+  const isQuestionSlide = slide.type === 'mcq' || slide.type === 'wordcloud' || slide.type === 'openended' || slide.type === 'rating' || slide.type === 'ranking'
   const isContentSlide  = slide.type === 'content'
   const qInfo = isQuestionSlide ? QTYPES.find(q => q.type === (slide as QuestionSlide).type) : null
   const cInfo = isContentSlide  ? CONTENT_TEMPLATES.find(t => t.template === (slide as ContentSlide).template) : null
@@ -3340,6 +3346,7 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
     wordcloud: 'e.g. In one word, describe your team\'s current culture.',
     openended: 'e.g. What one change would make the biggest difference to your team in the next 90 days?',
     rating:    'e.g. Rate your confidence in these leadership areas:',
+    ranking:   'e.g. Rank what matters most to you in a manager:',
   }
 
   return (
@@ -3356,7 +3363,7 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
 
           {/* Type accent stripe — 3 px top bar in question-type colour */}
           <div className={cn('h-[3px] w-full',
-            slide.type === 'mcq'       ? 'bg-sky-blue'    :
+            slide.type === 'mcq' || slide.type === 'ranking' ? 'bg-sky-blue' :
             slide.type === 'wordcloud' ? 'bg-fresh-green' :
             slide.type === 'openended' ? 'bg-golden-sun'  :
             'bg-hot-pink',
@@ -3367,7 +3374,7 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
             {/* Type chip */}
             <div className={cn(
               'mb-3 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold tracking-wide',
-              slide.type === 'mcq'       ? 'bg-sky-blue/10 text-sky-blue'       :
+              slide.type === 'mcq' || slide.type === 'ranking' ? 'bg-sky-blue/10 text-sky-blue' :
               slide.type === 'wordcloud' ? 'bg-fresh-green/10 text-fresh-green' :
               slide.type === 'openended' ? 'bg-golden-sun/10 text-golden-sun'   :
               'bg-hot-pink/10 text-hot-pink',
@@ -3394,6 +3401,7 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
             {/* Type-specific fields */}
             {slide.type === 'mcq' && <MCQEditor slide={slide} onUpdate={onUpdate} onPushHistory={onPushHistory} />}
             {slide.type === 'rating' && <RatingEditor slide={slide} onUpdate={onUpdate} onPushHistory={onPushHistory} />}
+            {slide.type === 'ranking' && <RankingEditor slide={slide} onUpdate={onUpdate} onPushHistory={onPushHistory} />}
             {slide.type === 'openended' && (
               <div className="mb-6 space-y-4">
                 <div className="flex items-start gap-2.5 rounded-xl bg-midnight-sky-50 p-4">
@@ -3820,6 +3828,86 @@ function MCQEditor({ slide, onUpdate, onPushHistory }: {
    Rating Editor — up to 5 named parameters
    ───────────────────────────────────────────────────────────────────────── */
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Ranking editor — the items the audience will put in order
+   ───────────────────────────────────────────────────────────────────────── */
+
+function RankingEditor({ slide, onUpdate, onPushHistory }: {
+  slide: QuestionSlide
+  onUpdate: (patch: Partial<QuestionSlide>) => void
+  onPushHistory?: () => void
+}) {
+  const items = slide.options.length > 0 ? slide.options : ['', '', '', '']
+
+  const setItem = (i: number, val: string) => {
+    const next = [...items]
+    next[i] = val
+    onUpdate({ options: next })
+  }
+  const addItem = () => {
+    if (items.length >= MAX_RANK_ITEMS) return
+    onPushHistory?.()
+    onUpdate({ options: [...items, ''] })
+  }
+  const removeItem = (i: number) => {
+    if (items.length <= MIN_RANK_ITEMS) return
+    onPushHistory?.()
+    onUpdate({ options: items.filter((_, idx) => idx !== i) })
+  }
+
+  return (
+    <div className="mb-6 space-y-3">
+      <div className="flex items-start gap-2.5 rounded-xl bg-midnight-sky-50 p-4">
+        <div className="mt-1.5 size-1.5 shrink-0 rounded-full bg-sky-blue" />
+        <p className="text-sm font-light leading-relaxed text-midnight-sky-700">
+          Everyone taps these into their own order of importance. Results combine all
+          the rankings — each 1st place earns the most points — and sort the items from
+          most to least important overall.
+        </p>
+      </div>
+
+      <label className="block text-xs font-semibold text-midnight-sky-700">
+        Items to rank <span className="ml-1 font-normal text-midnight-sky-600">({items.length}/{MAX_RANK_ITEMS})</span>
+      </label>
+
+      {items.map((item, i) => (
+        <div key={i} className="flex items-start gap-2">
+          <span className="mt-2 flex size-7 shrink-0 items-center justify-center rounded-lg bg-midnight-sky-200 text-xs font-bold text-midnight-sky-800">
+            {i + 1}
+          </span>
+          <textarea
+            value={item}
+            rows={1}
+            onChange={e => setItem(i, e.target.value)}
+            placeholder={`Item ${i + 1}`}
+            style={{ fieldSizing: 'content' } as React.CSSProperties}
+            className="flex-1 resize-none overflow-hidden rounded-xl border border-midnight-sky-200 bg-white px-3 py-2 text-sm leading-snug text-midnight-sky-900 placeholder:text-midnight-sky-400 outline-none transition-all focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/15"
+          />
+          {items.length > MIN_RANK_ITEMS && (
+            <button
+              onClick={() => removeItem(i)}
+              title="Remove item"
+              className="mt-1 rounded-lg p-1.5 text-midnight-sky-600 transition hover:bg-red-50 hover:text-red-500"
+            >
+              <Trash2 className="size-3.5" />
+            </button>
+          )}
+        </div>
+      ))}
+
+      {items.length < MAX_RANK_ITEMS && (
+        <button
+          onClick={addItem}
+          className="mt-1 flex items-center gap-1.5 rounded-xl border border-dashed border-midnight-sky-200 px-3.5 py-2.5 text-sm text-midnight-sky-600 transition hover:border-hot-pink hover:text-hot-pink"
+        >
+          <Plus className="size-3.5" />
+          Add item
+        </button>
+      )}
+    </div>
+  )
+}
+
 function RatingEditor({ slide, onUpdate, onPushHistory }: {
   slide: QuestionSlide
   onUpdate: (patch: Partial<QuestionSlide>) => void
@@ -4037,6 +4125,21 @@ function SlidePreviewCard({ slide }: { slide: QuestionSlide }) {
                 style={{ border: `1px solid ${c.cardBorder}`, color: c.textDim }}>{v}</div>
             ))}
           </div>
+        </div>
+      ))}
+    </div>
+  ) : slide.type === 'ranking' ? (
+    <div className="mt-3 flex flex-col gap-1.5">
+      {(slide.options.length > 0 ? slide.options : ['Item 1', 'Item 2', 'Item 3']).map((item, i) => (
+        <div key={i} className="flex min-w-0 items-center gap-2 rounded-xl px-3 py-2"
+          style={{ border: `1px solid ${c.cardBorder}`, backgroundColor: c.cardBg }}
+        >
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
+            style={{ border: `1px dashed ${c.textDim}`, color: c.textDim }}>?</span>
+          <span className="min-w-0 break-words text-xs font-medium leading-snug"
+            style={{ color: item ? c.text : c.textDim }}>
+            {item || `Item ${i + 1}`}
+          </span>
         </div>
       ))}
     </div>

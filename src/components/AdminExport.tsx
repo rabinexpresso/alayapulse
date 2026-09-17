@@ -5,6 +5,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore'
 import { getFunctions, httpsCallable } from 'firebase/functions'
 import { app, db } from '@/lib/firebase'
 import { optionLabel } from '@/lib/utils'
+import { aggregateRanking, parseRanking, rankingOrder } from '@/lib/ranking'
 import {
   isResponseCorrect, onAuthStateChanged, auth,
   type ResultQuestion, type ResultResponse,
@@ -29,6 +30,7 @@ const TYPE_LABELS: Record<string, string> = {
   wordcloud: 'Word Cloud',
   openended: 'Open-ended',
   rating:    'Rating',
+  ranking:   'Ranking',
 }
 
 interface ExportSession {
@@ -58,6 +60,11 @@ function formatResponseAsText(r: ResultResponse, q: ResultQuestion): string {
       const arr = JSON.parse(r.value) as number[]
       return arr.map((v, i) => `${q.options[i] || `P${i + 1}`}: ${v}/${ratingMax}`).join('  |  ')
     } catch { return r.value }
+  }
+  if (q.type === 'ranking') {
+    const order = parseRanking(r.value, q.options.length)
+    if (!order) return '(incomplete ranking)'
+    return order.map((idx, pos) => `${pos + 1}. ${q.options[idx] || `Item ${idx + 1}`}`).join('  >  ')
   }
   return r.value
 }
@@ -116,6 +123,14 @@ function summarizeQuestion(q: ResultQuestion): string {
       const avg = counts[i] > 0 ? (sums[i] / counts[i]).toFixed(1) : '–'
       return `${label || `P${i + 1}`}: ${avg}/${ratingMax}`
     }).join('  |  ')
+  }
+
+  if (q.type === 'ranking') {
+    const result = aggregateRanking(q.responses.map(r => r.value), q.options.length)
+    if (result.voters === 0) return 'No complete rankings'
+    return rankingOrder(result, q.options.length)
+      .map((idx, pos) => `${pos + 1}. ${q.options[idx] || `Item ${idx + 1}`} (avg ${result.avgPos[idx].toFixed(1)})`)
+      .join('  >  ')
   }
 
   if (q.type === 'wordcloud') {

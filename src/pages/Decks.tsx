@@ -85,6 +85,7 @@ const SLIDE_TYPE_META: Record<string, { label: string; chip: string }> = {
   wordcloud: { label: 'Word Cloud', chip: 'bg-fresh-green/15 text-fresh-green' },
   openended: { label: 'Open Ended', chip: 'bg-golden-sun/15 text-golden-sun'   },
   rating:    { label: 'Rating',     chip: 'bg-hot-pink/15 text-hot-pink'       },
+  ranking:   { label: 'Ranking',    chip: 'bg-sky-blue/15 text-sky-blue'       },
 }
 
 const DECK_TEMPLATES = [
@@ -1096,13 +1097,14 @@ function StorageChoiceScreen({
    ───────────────────────────────────────────────────────────────────────── */
 
 const TYPE_LABELS: Record<string, string> = {
-  mcq: 'MCQ', wordcloud: 'Word Cloud', openended: 'Open-ended', rating: 'Rating',
+  mcq: 'MCQ', wordcloud: 'Word Cloud', openended: 'Open-ended', rating: 'Rating', ranking: 'Ranking',
 }
 const TYPE_COLORS: Record<string, string> = {
   mcq: 'bg-sky-blue/10 text-sky-blue',
   wordcloud: 'bg-fresh-green/10 text-fresh-green',
   openended: 'bg-golden-sun/10 text-golden-sun',
   rating: 'bg-hot-pink/10 text-hot-pink',
+  ranking: 'bg-sky-blue/10 text-sky-blue',
 }
 
 /* ── Slide theme palette (mirrors Create.tsx CONTENT_COLORS / QSLIDE_COLORS) */

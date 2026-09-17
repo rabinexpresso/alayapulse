@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  BarChart2, Cloud, MessageSquare, Star, Trophy, FileText,
+  BarChart2, Cloud, MessageSquare, Star, Trophy, FileText, ListOrdered,
   Check, LogIn, Copy, AlertCircle, Users,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -23,6 +23,7 @@ const SLIDE_CONFIG: Record<string, {
   wordcloud:   { Icon: Cloud,        label: 'Word Cloud',   color: 'text-fresh-green'  },
   openended:   { Icon: MessageSquare,label: 'Open Ended',   color: 'text-golden-sun'   },
   rating:      { Icon: Star,         label: 'Rating',       color: 'text-hot-pink'     },
+  ranking:     { Icon: ListOrdered,  label: 'Ranking',      color: 'text-sky-blue'     },
   content:     { Icon: FileText,     label: 'Content',      color: 'text-midnight-sky-400' },
   leaderboard: { Icon: Trophy,       label: 'Leaderboard',  color: 'text-golden-sun'   },
   html:        { Icon: FileText,     label: 'HTML',         color: 'text-midnight-sky-400' },
@@ -33,6 +34,7 @@ const CHIP_COLORS: Record<string, string> = {
   wordcloud:   'bg-fresh-green/10 text-fresh-green',
   openended:   'bg-golden-sun/10 text-golden-sun',
   rating:      'bg-hot-pink/10 text-hot-pink',
+  ranking:     'bg-sky-blue/10 text-sky-blue',
   content:     'bg-midnight-sky-100 text-midnight-sky-500',
   leaderboard: 'bg-golden-sun/10 text-golden-sun',
   html:        'bg-midnight-sky-100 text-midnight-sky-600',
@@ -157,7 +159,7 @@ export default function Shared() {
   const slides = shared.slides as any[]
 
   // Unique interactive types for the chips row
-  const INTERACTIVE = new Set(['mcq', 'wordcloud', 'openended', 'rating', 'html'])
+  const INTERACTIVE = new Set(['mcq', 'wordcloud', 'openended', 'rating', 'ranking', 'html'])
   const typeSet = [...new Set(slides.map((s: any) => s.type as string).filter(t => INTERACTIVE.has(t)))]
 
   /* ── Preview page ─────────────────────────────────────────────────────── */
