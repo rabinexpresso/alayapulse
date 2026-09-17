@@ -1,40 +1,46 @@
 # ===================================================================
 # Alaya Pulse -- Question Import Template
 # ===================================================================
-# HOW TO USE:
-# 1. Copy the LLM prompt below into ChatGPT or Claude
-# 2. Paste your Word document questions after the prompt and send
-# 3. Copy the CSV rows from the LLM response into this file (replace the example rows below)
-# 4. Save the file and import it in Alaya Pulse: Create page > Import / Merge > Import questions in CSV
+# HOW TO USE
+# 1. Prepare your questions in a Word document with correct answers and explanations if needed
+# 2. Upload this template and your Word document to Gemini (or ChatGPT / Claude)
+# 3. Paste the prompt from the Alaya Pulse import window (it has a Copy button)
+# 4. Download the CSV file the AI gives you
+# 5. In Alaya Pulse open a deck and click Import > Import questions in CSV and upload the file
 # -------------------------------------------------------------------
-# LLM PROMPT -- copy everything between the markers:
-# >>> START
-# Convert the questions below into CSV rows using this exact format:
-# type,question,option_a,option_b,option_c,option_d,option_e,option_f,correct,explanation,timer
-# Rules:
-# - type must be one of: mcq | wordcloud | openended | rating | ranking
-# - MCQ: fill option_a to option_f (only as many options as the question has), correct = single letter e.g. B or multiple e.g. A|C|D, explanation = why the answer is correct
-# - If a question needs more than 6 options, add more columns to the header: option_g, option_h ... up to option_z (26), or use option_1 ... option_50 for longer lists. Maximum 50 options.
-# - ranking: put the items to rank in option_a onwards (2 to 10 items), leave correct and explanation empty
-# - wordcloud / openended / rating: leave option_a to option_f, correct, and explanation empty
-# - timer: use 30 unless a specific time is stated
-# - Output data rows only. No header row. No extra text or explanation.
-# [Paste your questions here]
-# >>> END
-# -------------------------------------------------------------------
-# FORMAT RULES (quick reference):
-# type:    mcq | wordcloud | openended | rating | ranking
-# ranking: items to rank go in option_a onwards (2 to 10), no correct answer
-# correct: single answer = B  |  multiple answers = A|C|D
-# Non-MCQ: leave option_a to option_f, correct, and explanation blank
-# More options: add option_g ... option_z to the header, or switch to option_1 ... option_50 (max 50)
-#          correct refers to the column name, so with numbered columns use e.g. 34 or 3|17|22
-# timer:   seconds per question -- leave blank to default to 30 seconds
+# RULES FOR FILLING IN THIS TEMPLATE (for you or the AI)
+# - Keep the header row (the row starting with type) exactly as it is
+# - Replace the example rows at the bottom with your own questions -- one question per row
+# - Lines starting with # are instructions and are ignored on import
+#
+# type -- one of: mcq | wordcloud | openended | rating | ranking
+#
+# mcq -- multiple choice
+#   Put the answer options in option_a onwards (2 to 100 options)
+#   correct = the column letter of the right answer e.g. B -- or several e.g. A|C|D
+#   explanation = why the answer is correct (optional -- shown after the answer is revealed)
+#   timer = seconds to answer -- leave blank for 30
+#
+# rating -- people score each item on a scale
+#   Put the things to rate in option_a onwards (1 to 5 items) e.g. Workload then Communication
+#   Leave correct / explanation / timer blank
+#
+# ranking -- people put items in order of importance
+#   Put the items to rank in option_a onwards (2 to 10 items)
+#   Leave correct / explanation / timer blank
+#
+# wordcloud and openended -- no options needed
+#   Leave option columns / correct / explanation / timer blank
+#
+# MORE THAN 6 OPTIONS
+#   Add more columns to the header: option_g then option_h and so on up to option_z
+#   For very long lists use numbered columns instead: option_1 to option_100
+#   With numbered columns write correct as the number e.g. 34 -- or several e.g. 3|17|22
 # ===================================================================
 type,question,option_a,option_b,option_c,option_d,option_e,option_f,correct,explanation,timer
 mcq,Example MCQ -- single correct answer,Option A,Option B,Option C,Option D,,,B,This is why B is the correct answer.,30
 mcq,Example MCQ -- multiple correct answers,Option A,Option B,Option C,Option D,Option E,Option F,A|C,A and C are both correct because of this reason.,30
-wordcloud,Example Word Cloud -- what one word comes to mind?,,,,,,,,,30
-openended,Example Open Ended -- what is one thing you will do differently after today?,,,,,,,,,30
-rating,Example Rating -- how confident do you feel about this topic?,,,,,,,,,30
+wordcloud,Example Word Cloud -- what one word comes to mind?,,,,,,,,,
+openended,Example Open Ended -- what is one thing you will do differently after today?,,,,,,,,,
+rating,Example Rating -- how do you feel about these areas?,Workload,Communication,Team support,,,,,,
 ranking,Example Ranking -- rank what matters most to you in a manager,Trust,Communication,Recognition,Growth,,,,,

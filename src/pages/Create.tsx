@@ -304,6 +304,8 @@ const QTYPES: { type: QType; label: string; icon: ReactNode; color: string; badg
  *  genuinely weighing them against each other and start guessing. */
 const MIN_RANK_ITEMS = 2
 const MAX_RANK_ITEMS = 10
+/** Rating slides take up to five things to rate — same limit as the editor. */
+const MAX_RATING_ITEMS = 5
 
 function uid() { return Math.random().toString(36).slice(2, 10) }
 
@@ -399,7 +401,23 @@ function parseCsvQuestions(csvText: string): CsvParseResult {
       type: type as QType,
       question,
       options: [],
-      timer: (!isNaN(timerVal) && timerVal > 0) ? timerVal : 30,
+      // Only MCQ has a timer. Other types used to get a 30s default too, which
+      // did nothing until the presenter reset the votes — then it started a
+      // countdown on a slide that has no time limit in the editor.
+      ...(type === 'mcq' ? { timer: (!isNaN(timerVal) && timerVal > 0) ? timerVal : 30 } : {}),
+    }
+
+    /** Non-blank option cells in header order, capped at `max`. */
+    const readItems = (max: number) => {
+      const items: string[] = []
+      let dropped = 0
+      for (const col of optionCols) {
+        const v = (vals[col.idx] ?? '').trim()
+        if (v === '') continue
+        if (items.length >= max) { dropped++; continue }
+        items.push(v)
+      }
+      return { items, dropped }
     }
 
     if (type === 'mcq') {
@@ -435,17 +453,8 @@ function parseCsvQuestions(csvText: string): CsvParseResult {
     }
 
     if (type === 'ranking') {
-      // Items come from the same option columns as MCQ. No correct answer and
-      // no timer: there's no right order for opinions, and a stored timer would
-      // start counting down whenever the presenter resets the votes.
-      const items: string[] = []
-      let dropped = 0
-      for (const col of optionCols) {
-        const v = (vals[col.idx] ?? '').trim()
-        if (v === '') continue
-        if (items.length >= MAX_RANK_ITEMS) { dropped++; continue }
-        items.push(v)
-      }
+      // Items come from the same option columns as MCQ, with no correct answer.
+      const { items, dropped } = readItems(MAX_RANK_ITEMS)
       if (items.length < MIN_RANK_ITEMS) {
         errors.push({ row: i + 1, message: `Row ${i + 1}: Ranking needs at least ${MIN_RANK_ITEMS} items — skipped.` })
         continue
@@ -454,7 +463,20 @@ function parseCsvQuestions(csvText: string): CsvParseResult {
         errors.push({ row: i + 1, message: `Row ${i + 1}: Ranking keeps up to ${MAX_RANK_ITEMS} items — ${dropped} more ignored.` })
       }
       slide.options = items
-      delete slide.timer
+    }
+
+    if (type === 'rating') {
+      // The things being rated live in the option columns too. These used to be
+      // ignored, so every imported Rating question arrived with nothing to rate.
+      const { items, dropped } = readItems(MAX_RATING_ITEMS)
+      if (items.length === 0) {
+        items.push('Overall')
+        errors.push({ row: i + 1, message: `Row ${i + 1}: Rating had nothing to rate in option_a — added "Overall", rename it in the editor.` })
+      }
+      if (dropped > 0) {
+        errors.push({ row: i + 1, message: `Row ${i + 1}: Rating keeps up to ${MAX_RATING_ITEMS} items — ${dropped} more ignored.` })
+      }
+      slide.options = items
     }
 
     slides.push(slide)
@@ -466,7 +488,7 @@ function parseCsvQuestions(csvText: string): CsvParseResult {
 /* ── CSV import modal: step list + copyable AI prompt ─────────────────── */
 
 const CSV_AI_PROMPT =
-  'Fill in this CSV template with the questions from my document. Keep the exact column layout.'
+  'Fill in this CSV template with the questions from my document. Replace the example rows with my questions and keep the exact column layout.'
 
 function CsvStep({ n, children }: { n: number; children: ReactNode }) {
   return (
@@ -4021,7 +4043,7 @@ function RatingEditor({ slide, onUpdate, onPushHistory }: {
     onUpdate({ rightLabels: next })
   }
   const addParam = () => {
-    if (params.length >= 5) return
+    if (params.length >= MAX_RATING_ITEMS) return
     onPushHistory?.()
     onUpdate({
       options:     [...params, ''],

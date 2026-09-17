@@ -111,7 +111,7 @@ const GUIDE: Stage[] = [
         intro: 'Typing 20 questions by hand is slow. If your questions already live in a Word document, let an AI convert them into the import template for you.',
         steps: [
           { text: <>Click <Btn color="orange">Import</Btn> → <Btn>Import questions in CSV</Btn>, then click <Btn>Download template</Btn> to save the CSV template.</>, image: 'csv-modal.png', imageAlt: 'Import questions modal with Download template' },
-          { text: <>Open an AI chat (e.g. Gemini). Attach <strong>both</strong> the template and your Word document, and ask: <em>“Fill this CSV template with the questions from my document. Keep the exact column layout. Include the question type, options, correct answers and a timer for each.”</em></> },
+          { text: <>Open Gemini (or ChatGPT / Claude). Attach <strong>both</strong> the template and your Word document, and paste the prompt shown in the import window — it has a <Btn>Copy</Btn> button: <em>“Fill in this CSV template with the questions from my document. Replace the example rows with my questions and keep the exact column layout.”</em></> },
           { text: <>Check the AI’s output (especially the correct answers!), save it as a <strong>.csv</strong> file.</> },
           { text: <>Back in Alaya Pulse, upload the finished CSV in the same <em>Import questions</em> window. Every question becomes a ready-made slide.</> },
         ],
