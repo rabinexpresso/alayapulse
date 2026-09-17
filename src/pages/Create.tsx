@@ -365,7 +365,7 @@ function parseCsvQuestions(csvText: string): CsvParseResult {
   }
 
   const ci = (name: string) => headers.indexOf(name)
-  const VALID_TYPES = ['mcq', 'wordcloud', 'openended', 'rating']
+  const VALID_TYPES = ['mcq', 'wordcloud', 'openended', 'rating', 'ranking']
 
   // Option columns come from the header rather than a fixed list, so a sheet can
   // carry as many as it needs: option_a…option_z, or option_1…option_100 for
@@ -385,7 +385,7 @@ function parseCsvQuestions(csvText: string): CsvParseResult {
     if (!type && !question) continue
 
     if (!VALID_TYPES.includes(type)) {
-      errors.push({ row: i + 1, message: `Row ${i + 1}: unknown type "${get('type')}" — must be mcq, wordcloud, openended, or rating.` })
+      errors.push({ row: i + 1, message: `Row ${i + 1}: unknown type "${get('type')}" — must be mcq, wordcloud, openended, rating, or ranking.` })
       continue
     }
     if (!question) {
@@ -432,6 +432,29 @@ function parseCsvQuestions(csvText: string): CsvParseResult {
       }
       const expl = get('explanation')
       if (expl) slide.explanation = expl
+    }
+
+    if (type === 'ranking') {
+      // Items come from the same option columns as MCQ. No correct answer and
+      // no timer: there's no right order for opinions, and a stored timer would
+      // start counting down whenever the presenter resets the votes.
+      const items: string[] = []
+      let dropped = 0
+      for (const col of optionCols) {
+        const v = (vals[col.idx] ?? '').trim()
+        if (v === '') continue
+        if (items.length >= MAX_RANK_ITEMS) { dropped++; continue }
+        items.push(v)
+      }
+      if (items.length < MIN_RANK_ITEMS) {
+        errors.push({ row: i + 1, message: `Row ${i + 1}: Ranking needs at least ${MIN_RANK_ITEMS} items — skipped.` })
+        continue
+      }
+      if (dropped > 0) {
+        errors.push({ row: i + 1, message: `Row ${i + 1}: Ranking keeps up to ${MAX_RANK_ITEMS} items — ${dropped} more ignored.` })
+      }
+      slide.options = items
+      delete slide.timer
     }
 
     slides.push(slide)
