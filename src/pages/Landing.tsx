@@ -54,17 +54,19 @@ function Nav() {
         <Link to="/">
           <AlayaMark className="text-white" />
         </Link>
-        <nav className="hidden items-center gap-8 text-sm font-light text-white/70 md:flex">
-          <a href="#how" className="transition hover:text-white">How it works</a>
-          <a href="#features" className="transition hover:text-white">Features</a>
-        </nav>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-6">
+          <nav className="hidden items-center gap-8 text-sm font-light text-white/70 md:flex">
+            <a href="#how" className="transition hover:text-white">How it works</a>
+            <a href="#features" className="transition hover:text-white">Features</a>
+          </nav>
           <Link
             to="/guide"
-            className="hidden rounded-full border border-hot-pink/40 px-4 py-2 text-sm font-medium text-hot-pink transition-all hover:scale-[1.02] hover:border-hot-pink/70 hover:text-white sm:inline-flex"
+            className="hidden rounded-full bg-hot-pink px-4 py-2 text-sm font-semibold text-white shadow-[0_0_14px_-4px] shadow-hot-pink/50 transition-all hover:scale-[1.02] hover:shadow-[0_0_20px_-2px] hover:shadow-hot-pink/70 sm:inline-flex"
           >
             User Guide
           </Link>
+        </div>
+        <div className="flex items-center gap-3">
           <Link
             to="/join"
             className="hidden rounded-full bg-sky-blue px-4 py-2 text-sm font-semibold text-white shadow-[0_0_14px_-4px] shadow-sky-blue/50 transition-all hover:scale-[1.02] hover:shadow-[0_0_20px_-2px] hover:shadow-sky-blue/70 sm:inline-flex"
