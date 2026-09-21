@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Check, Send, LogOut, Clock } from 'lucide-react'
@@ -34,44 +34,25 @@ export default function Vote() {
   const navigate        = useNavigate()
 
   const [session,        setSession]        = useState<Session | null | undefined>(undefined)
-  // Persist submitted slides to sessionStorage so a page refresh doesn't let someone vote twice
-  const storageKey = `alaya-submitted-${sessionCode ?? ''}`
-  const [submittedSlides, setSubmittedSlides] = useState<Set<string>>(() => {
-    try {
-      const stored = sessionStorage.getItem(`alaya-submitted-${sessionCode ?? ''}`)
-      return stored ? new Set<string>(JSON.parse(stored) as string[]) : new Set<string>()
-    } catch { return new Set<string>() }
-  })
-  // Word-cloud multi-submit: track how many submissions each person has made per slide
-  const wcStorageKey = `alaya-wc-${sessionCode ?? ''}`
-  const [wcSubmissions, setWcSubmissions] = useState<Record<string, number>>(() => {
-    try {
-      const stored = sessionStorage.getItem(`alaya-wc-${sessionCode ?? ''}`)
-      return stored ? JSON.parse(stored) as Record<string, number> : {}
-    } catch { return {} }
-  })
-  // Track the actual words each person submitted per slide — used to block duplicates
-  const wcWordsStorageKey = `alaya-wc-words-${sessionCode ?? ''}`
-  const [wcWords, setWcWords] = useState<Record<string, string[]>>(() => {
-    try {
-      const stored = sessionStorage.getItem(`alaya-wc-words-${sessionCode ?? ''}`)
-      return stored ? JSON.parse(stored) as Record<string, string[]> : {}
-    } catch { return {} }
-  })
-  // Open-ended multi-submit: track how many responses each person has submitted per slide
-  const oeStorageKey = `alaya-oe-${sessionCode ?? ''}`
-  const [oeSubmissions, setOeSubmissions] = useState<Record<string, number>>(() => {
-    try {
-      const stored = sessionStorage.getItem(`alaya-oe-${sessionCode ?? ''}`)
-      return stored ? JSON.parse(stored) as Record<string, number> : {}
-    } catch { return {} }
-  })
   const [submitting,      setSubmitting]      = useState(false)
   const [submitError,     setSubmitError]     = useState<string | null>(null)
   const [showLeaveModal,  setShowLeaveModal]  = useState(false)
   // Quiz mode — name entry + per-question score feedback
   const [quizName,        setQuizName]        = useState('')
   const [quizNameInput,   setQuizNameInput]   = useState('')
+  // What this person has already answered — kept per person (browser + name),
+  // not per tab, so a second tab or a rescan with the same name can't answer
+  // the same question again. Other tabs pick changes up live.
+  const personId = getViewerId(quizName || attendeeName)
+  const stored = (kind: string) => `alaya-${kind}-${sessionCode ?? ''}-${personId}`
+  const [submittedList, setSubmittedList] = useSharedStored<string[]>(stored('submitted'), [])
+  const submittedSlides = new Set(submittedList)
+  const markSubmitted   = (key: string) => setSubmittedList(prev => (prev.includes(key) ? prev : [...prev, key]))
+  // Word-cloud multi-submit: how many words, and which, each person sent per slide
+  const [wcSubmissions, setWcSubmissions] = useSharedStored<Record<string, number>>(stored('wc'), {})
+  const [wcWords,       setWcWords]       = useSharedStored<Record<string, string[]>>(stored('wc-words'), {})
+  // Open-ended multi-submit: how many responses each person has sent per slide
+  const [oeSubmissions, setOeSubmissions] = useSharedStored<Record<string, number>>(stored('oe'), {})
   const [quizScore,       setQuizScore]       = useState(0)
   const [lastQuizResult,  setLastQuizResult]  = useState<{
     isCorrect: boolean
@@ -89,10 +70,9 @@ export default function Vote() {
   // and we never double-register (quiz attendees wait until name gate is submitted)
   const viewerCleanupRef  = useRef<(() => void) | undefined>(undefined)
 
-  // Leave the room — clear locally stored submitted-slide markers so the
-  // attendee can vote fresh if they later rejoin a different session.
+  // Leave the room. What they answered stays remembered (it's per session
+  // code), so rejoining the same show can't be used to answer twice.
   const leaveRoom = () => {
-    try { sessionStorage.removeItem(storageKey) } catch {}
     navigate('/join')
   }
 
@@ -304,7 +284,7 @@ export default function Vote() {
         type:             slideData.type as QType,
         value,
         respondentName:   effectiveName,
-        respondentId:     getViewerId(),
+        respondentId:     personId,
         ...(attendeeEmoji ? { respondentEmoji: attendeeEmoji } : {}),
         ...(quizPoints ? { quizPoints } : {}),
       })
@@ -320,38 +300,19 @@ export default function Vote() {
         const newCount = (wcSubmissions[roundKey] ?? 0) + 1
         const updated  = { ...wcSubmissions, [roundKey]: newCount }
         setWcSubmissions(updated)
-        try { sessionStorage.setItem(wcStorageKey, JSON.stringify(updated)) } catch {}
         const updatedWords = { ...wcWords, [roundKey]: [...(wcWords[roundKey] ?? []), value.toLowerCase()] }
         setWcWords(updatedWords)
-        try { sessionStorage.setItem(wcWordsStorageKey, JSON.stringify(updatedWords)) } catch {}
-        if (newCount >= maxSubs) {
-          setSubmittedSlides(prev => {
-            const next = new Set([...prev, roundKey])
-            try { sessionStorage.setItem(storageKey, JSON.stringify([...next])) } catch {}
-            return next
-          })
-        }
+        if (newCount >= maxSubs) markSubmitted(roundKey)
       } else if (slideData.type === 'openended') {
         // Open-ended: allow multiple submissions up to oeMaxSubmissions
         const maxSubs  = (slideData as { oeMaxSubmissions?: number }).oeMaxSubmissions ?? 1
         const newCount = (oeSubmissions[roundKey] ?? 0) + 1
         const updated  = { ...oeSubmissions, [roundKey]: newCount }
         setOeSubmissions(updated)
-        try { sessionStorage.setItem(oeStorageKey, JSON.stringify(updated)) } catch {}
-        if (newCount >= maxSubs) {
-          setSubmittedSlides(prev => {
-            const next = new Set([...prev, roundKey])
-            try { sessionStorage.setItem(storageKey, JSON.stringify([...next])) } catch {}
-            return next
-          })
-        }
+        if (newCount >= maxSubs) markSubmitted(roundKey)
       } else {
         // All other types: lock after one submission
-        setSubmittedSlides(prev => {
-          const next = new Set([...prev, roundKey])
-          try { sessionStorage.setItem(storageKey, JSON.stringify([...next])) } catch {}
-          return next
-        })
+        markSubmitted(roundKey)
       }
     } catch (err) {
       console.error('Submit failed:', err)
@@ -1743,4 +1704,38 @@ function QuizFeedbackState({ result, totalScore }: {
       </p>
     </motion.div>
   )
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   useSharedStored — state kept in localStorage under `key`, so every tab of
+   this browser sees the same value. Re-reads when the key changes (e.g. the
+   quiz name is entered) and when another tab writes it.
+   ───────────────────────────────────────────────────────────────────────── */
+
+function useSharedStored<T>(key: string, fallback: T) {
+  const read = useCallback((): T => {
+    try {
+      const raw = localStorage.getItem(key)
+      return raw ? JSON.parse(raw) as T : fallback
+    } catch { return fallback }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+  const [value, setValue] = useState<T>(read)
+
+  useEffect(() => {
+    setValue(read())
+    const onStorage = (e: StorageEvent) => { if (e.key === key) setValue(read()) }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [key, read])
+
+  const set = useCallback((next: T | ((prev: T) => T)) => {
+    setValue(prev => {
+      const v = typeof next === 'function' ? (next as (p: T) => T)(prev) : next
+      try { localStorage.setItem(key, JSON.stringify(v)) } catch {}
+      return v
+    })
+  }, [key])
+
+  return [value, set] as const
 }

@@ -517,8 +517,30 @@ export function subscribeToSlideResponses(
     where('slideId', '==', slideId),
   )
   return onSnapshot(q, snap => {
-    callback(snap.docs.map(d => d.data() as Response))
+    callback(firstAnswerPerPerson(snap.docs.map(d => d.data() as Response)))
   })
+}
+
+/**
+ * Keeps each person's first answer to each question. Phones already stop a
+ * second answer, but a second tab pressed at the same moment could slip one
+ * through — this makes sure it never counts twice in charts, the leaderboard
+ * or saved results. Word cloud and open-ended take several answers per person
+ * by design, so they're left alone, as are answers with no id (older phones).
+ * A presenter "reset votes" deletes the old answers, so re-voting still works.
+ */
+function firstAnswerPerPerson(responses: Response[]): Response[] {
+  const ms = (r: Response) =>
+    (r.submittedAt as unknown as { toMillis?: () => number } | null)?.toMillis?.() ?? Number.MAX_SAFE_INTEGER
+  const seen = new Set<string>()
+  const drop = new Set<Response>()
+  for (const r of [...responses].sort((a, b) => ms(a) - ms(b))) {
+    if (!r.respondentId || r.type === 'wordcloud' || r.type === 'openended') continue
+    const key = `${r.slideId}|${r.respondentId}`
+    if (seen.has(key)) drop.add(r)
+    else seen.add(key)
+  }
+  return drop.size ? responses.filter(r => !drop.has(r)) : responses
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -530,7 +552,7 @@ export function subscribeToSlideResponses(
 
 export async function fetchAllSessionResponses(sessionCode: string): Promise<Response[]> {
   const snap = await getDocs(collection(db, 'sessions', sessionCode.toUpperCase(), 'responses'))
-  return snap.docs.map(d => d.data() as Response)
+  return firstAnswerPerPerson(snap.docs.map(d => d.data() as Response))
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -540,12 +562,25 @@ export async function fetchAllSessionResponses(sessionCode: string): Promise<Res
    ───────────────────────────────────────────────────────────────────────── */
 
 /**
- * One id per phone, used for presence and stamped on every answer so quiz
- * scores add up per person, not per name — two "Ram"s stay two rows. Kept in
- * localStorage so someone whose tab gets closed and who rescans the QR keeps
- * the same id, and their score doesn't split in two.
+ * One person = this browser + the name they typed. Used for presence and
+ * stamped on every answer, so quiz scores add up per person:
+ *  - two "Ram"s on different phones stay two rows (different browsers);
+ *  - colleagues sharing one phone under different names stay apart;
+ *  - someone whose tab closes and who rescans with the same name keeps the
+ *    same id, so their score doesn't split in two (the browser part lives in
+ *    localStorage, not per-tab sessionStorage).
+ * No name (anonymous) = the browser alone.
  */
-export function getViewerId(): string {
+export function getViewerId(name?: string): string {
+  const browser = getBrowserId()
+  const n = (name ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+  if (!n) return browser
+  let h = 0x811c9dc5                       // FNV-1a — short, stable, id-safe
+  for (let i = 0; i < n.length; i++) { h ^= n.charCodeAt(i); h = Math.imul(h, 0x01000193) }
+  return `${browser}-${(h >>> 0).toString(36)}`
+}
+
+function getBrowserId(): string {
   const KEY = 'alaya-viewer-id'
   let id: string | null = null
   try { id = localStorage.getItem(KEY) } catch {}
@@ -558,7 +593,7 @@ export function getViewerId(): string {
 
 export function joinAsViewer(sessionCode: string, name?: string, emoji?: string): () => void {
   // Reuse the same ID across refreshes so we don't double-count
-  const viewerId = getViewerId()
+  const viewerId = getViewerId(name)
 
   // Always resolve to a concrete emoji so the presenter Lobby never shows a fallback.
   // Priority: (1) caller-provided  (2) stored from Join page  (3) simple random
