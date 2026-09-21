@@ -582,13 +582,10 @@ export function joinAsViewer(sessionCode: string, name?: string, emoji?: string)
   })
     .catch(err => console.error('[alaya-pulse] joinAsViewer: failed to register presence', err))
 
-  // Heartbeat every 30 s keeps the presence alive on slow browsers
-  const heartbeat = setInterval(() => {
-    updateDoc(ref, { lastSeen: serverTimestamp() }).catch(() => {})
-  }, 30_000)
-
+  // No periodic heartbeat: nothing reads lastSeen, and at 300 phones one
+  // every 30 s meant ~10 writes a second, each re-rendering the presenter's
+  // lobby. Presence is the doc existing — written on join, deleted on leave.
   const cleanup = () => {
-    clearInterval(heartbeat)
     deleteDoc(ref).catch(() => {})
   }
 
