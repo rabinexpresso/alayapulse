@@ -226,7 +226,8 @@ export default function Join() {
               htmlFor="join-name"
               className="mb-1.5 block text-sm font-medium text-midnight-sky-800"
             >
-              Your name
+              Your full name
+              <span className="ml-1 font-light text-midnight-sky-500">(optional)</span>
             </label>
             <input
               id="join-name"
@@ -235,7 +236,7 @@ export default function Join() {
               value={name}
               onChange={e => setName(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && codeComplete && handleJoin()}
-              placeholder="Leave blank to stay anonymous"
+              placeholder="e.g. Ram Shrestha"
               maxLength={40}
               disabled={status === 'loading'}
               className={cn(

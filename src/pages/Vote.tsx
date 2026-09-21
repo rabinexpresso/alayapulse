@@ -199,7 +199,7 @@ export default function Vote() {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center bg-white px-5">
         <div className="w-full max-w-sm rounded-3xl border border-midnight-sky-100 bg-white p-8 shadow-[0_8px_40px_-8px_rgba(0,0,121,0.15)]">
-          <h2 className="text-xl font-semibold text-midnight-sky-900">Enter your name to join</h2>
+          <h2 className="text-xl font-semibold text-midnight-sky-900">Enter your full name to join</h2>
           <p className="mt-1.5 text-sm font-light text-midnight-sky-500">
             Your name will appear on the leaderboard.
           </p>
@@ -208,7 +208,7 @@ export default function Vote() {
             value={quizNameInput}
             onChange={e => setQuizNameInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && quizNameInput.trim()) setQuizName(quizNameInput.trim()) }}
-            placeholder="Your name"
+            placeholder="e.g. Ram Shrestha"
             className="mt-5 w-full rounded-xl border border-midnight-sky-200 px-4 py-3 text-base text-midnight-sky-900 outline-none transition-all focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/10"
           />
           <button

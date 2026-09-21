@@ -89,6 +89,9 @@ export interface DeckResults {
   trimmed?:       boolean
   /** Human-readable note about how trimming was applied. */
   trimNote?:      string
+  /** Cloud only: individual responses live in the responseParts
+   *  sub-collection rather than inline (see cloudSaveResults). */
+  responsesSplit?: boolean
 }
 
 /**
@@ -361,7 +364,7 @@ export async function cloudDeleteDeck(id: string): Promise<void> {
   // data that still counts toward storage and is no longer reachable in the UI.
   try {
     const resultsSnap = await getDocs(resultsCollection(user.uid, id))
-    await Promise.all(resultsSnap.docs.map(d => deleteDoc(d.ref)))
+    await Promise.all(resultsSnap.docs.map(d => deleteResultsTree(user.uid, id, d.id)))
   } catch (e) {
     console.error('[alaya-pulse] cloudDeleteDeck: failed to clear results subcollection', e)
   }
@@ -455,11 +458,90 @@ function resultsDoc(uid: string, deckId: string, sessionId: string) {
   return doc(db, 'users', uid, 'decks', deckId, 'results', sessionId)
 }
 
+/* Every individual answer is kept, however big the session. The session doc
+   holds the questions and counts; each question's answers go in their own
+   doc(s) under results/{sessionId}/responseParts, so no single doc gets near
+   Firestore's 1 MB cap. A question whose answers alone would pass the budget
+   (hundreds of long open-ended answers) is split over several parts.
+   The sub-collection is deliberately not called "results": the admin export
+   reads collectionGroup('results') and must only see session docs. */
+
+const RESPONSE_PART_BUDGET = 800_000
+
+function responsePartsCollection(uid: string, deckId: string, sessionId: string) {
+  return collection(db, 'users', uid, 'decks', deckId, 'results', sessionId, 'responseParts')
+}
+
+type ResponsePart = { question: number; part: number; responses: ResultResponse[] }
+
+/** Packs each question's answers into parts that each fit the budget. */
+function splitResponses(results: DeckResults): ResponsePart[] {
+  const parts: ResponsePart[] = []
+  results.questions.forEach((q, question) => {
+    let part = 0
+    let chunk: ResultResponse[] = []
+    let size = 0
+    for (const r of q.responses) {
+      const rSize = jsonByteSize(r)
+      if (chunk.length && size + rSize > RESPONSE_PART_BUDGET) {
+        parts.push({ question, part: part++, responses: chunk })
+        chunk = []; size = 0
+      }
+      chunk.push(r); size += rSize
+    }
+    if (chunk.length) parts.push({ question, part, responses: chunk })
+  })
+  return parts
+}
+
+const partId = (question: number, part: number) =>
+  `q${String(question).padStart(3, '0')}-p${String(part).padStart(3, '0')}`
+
+async function deleteResultsTree(uid: string, deckId: string, sessionId: string): Promise<void> {
+  const parts = await getDocs(responsePartsCollection(uid, deckId, sessionId))
+  await Promise.all(parts.docs.map(d => deleteDoc(d.ref)))
+  await deleteDoc(resultsDoc(uid, deckId, sessionId))
+}
+
 export async function cloudSaveResults(deckId: string, results: DeckResults): Promise<void> {
   const user = auth.currentUser
   if (!user) throw new Error('Not signed in')
-  const trimmed = trimResultsForFirestore(results)
+  const parts = splitResponses(results)
+  const partsCol = responsePartsCollection(user.uid, deckId, results.id)
+  // Answers first, session doc last — the session only shows up in the list
+  // once everything it points to is saved. Re-saving the same session
+  // overwrites parts in place; any left over from a bigger earlier save go.
+  const existing = await getDocs(partsCol)
+  const keep = new Set(parts.map(p => partId(p.question, p.part)))
+  await Promise.all(parts.map(p =>
+    setDoc(doc(partsCol, partId(p.question, p.part)), stripUndefined(p))))
+  await Promise.all(existing.docs.filter(d => !keep.has(d.id)).map(d => deleteDoc(d.ref)))
+
+  const summary: DeckResults = {
+    ...results,
+    questions: results.questions.map(q => ({ ...q, responses: [], responseCount: q.responses.length || q.responseCount || 0 })),
+    responsesSplit: true,
+  }
+  // The session doc no longer carries answers, so it's small — the trim is
+  // only a safety net for absurd decks (e.g. huge option text).
+  // Its "responses removed" note wouldn't be true here, so keep only the flag
+  // the session already had (older sessions that were trimmed on save).
+  const trimmed = { ...trimResultsForFirestore(summary), trimmed: results.trimmed, trimNote: results.trimNote }
   await setDoc(resultsDoc(user.uid, deckId, results.id), stripUndefined(trimmed))
+}
+
+/** Puts a split session's answers back onto its questions. */
+async function loadResponseParts(uid: string, deckId: string, results: DeckResults): Promise<DeckResults> {
+  if (!results.responsesSplit) return results
+  const snap = await getDocs(responsePartsCollection(uid, deckId, results.id))
+  const parts = snap.docs.map(d => d.data() as ResponsePart)
+    .sort((a, b) => a.question - b.question || a.part - b.part)
+  const byQuestion = new Map<number, ResultResponse[]>()
+  for (const p of parts) byQuestion.set(p.question, [...(byQuestion.get(p.question) ?? []), ...p.responses])
+  return {
+    ...results,
+    questions: results.questions.map((q, i) => ({ ...q, responses: byQuestion.get(i) ?? [] })),
+  }
 }
 
 /** All saved sessions for a deck, newest first. */
@@ -467,7 +549,7 @@ export async function cloudListResults(deckId: string): Promise<DeckResults[]> {
   const user = auth.currentUser
   if (!user) return []
   const snap = await getDocs(resultsCollection(user.uid, deckId))
-  return snap.docs
+  const sessions = snap.docs
     .map(d => {
       const data = d.data() as DeckResults
       // Older sessions (saved before per-session storage) used a fixed
@@ -475,12 +557,13 @@ export async function cloudListResults(deckId: string): Promise<DeckResults[]> {
       return { ...data, id: data.id ?? d.id }
     })
     .sort((a, b) => b.conductedAt - a.conductedAt)
+  return Promise.all(sessions.map(r => loadResponseParts(user.uid, deckId, r)))
 }
 
 export async function cloudDeleteResults(deckId: string, sessionId: string): Promise<void> {
   const user = auth.currentUser
   if (!user) return
-  try { await deleteDoc(resultsDoc(user.uid, deckId, sessionId)) } catch { /* ignore */ }
+  try { await deleteResultsTree(user.uid, deckId, sessionId) } catch { /* ignore */ }
 }
 
 export async function browserSaveResults(deckId: string, results: DeckResults): Promise<void> {

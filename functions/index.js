@@ -224,8 +224,22 @@ exports.exportAllSessions = onCall(
       if (!deckRef || !userRef) return
       uidSet.add(userRef.id)
       deckRefByPath.set(deckRef.path, deckRef)
-      picked.push({ uid: userRef.id, deckPath: deckRef.path, data })
+      picked.push({ uid: userRef.id, deckPath: deckRef.path, data, ref: d.ref })
     })
+
+    // Sessions saved since answers moved out of the session doc keep them in
+    // results/{id}/responseParts — one or more docs per question. Put them back.
+    await Promise.all(picked.map(async (p) => {
+      if (!p.data.responsesSplit || !Array.isArray(p.data.questions)) return
+      const partsSnap = await p.ref.collection('responseParts').get()
+      const parts = partsSnap.docs.map((s) => s.data())
+        .sort((a, b) => a.question - b.question || a.part - b.part)
+      const byQuestion = new Map()
+      parts.forEach((part) => {
+        byQuestion.set(part.question, (byQuestion.get(part.question) || []).concat(part.responses || []))
+      })
+      p.data.questions = p.data.questions.map((q, i) => ({ ...q, responses: byQuestion.get(i) || [] }))
+    }))
 
     // Resolve deck titles + quiz flag (batched).
     const deckMeta = {}
