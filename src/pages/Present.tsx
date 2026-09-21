@@ -3738,6 +3738,7 @@ function buildResultsSnapshot(
         // matches the live on-screen scores. Conditionally spread — Firestore
         // rejects `undefined`, and non-quiz responses have no points.
         ...(r.quizPoints ? { quizPoints: r.quizPoints } : {}),
+        ...(r.respondentId ? { id: r.respondentId } : {}),
       }))
       .sort((a, b) => a.time - b.time)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -3819,9 +3820,12 @@ function calculateQuizLeaderboard(
   responses: FirestoreResponse[],
   slides: AnySlide[],
   questionMeta: Record<string, { openedAt: number; duration: number | null }>,
-): { name: string; score: number; emoji?: string }[] {
+): { id: string; name: string; score: number; emoji?: string }[] {
+  // Keyed by phone, not name, so two people called "Ram" get separate rows.
+  // Older responses without an id fall back to the name.
   const totals: Record<string, number> = {}
   const emojis: Record<string, string> = {}
+  const names:  Record<string, string> = {}
   for (const slide of slides) {
     if (slide.type !== 'mcq') continue
     const qs = slide as QSlide
@@ -3830,7 +3834,8 @@ function calculateQuizLeaderboard(
     const meta = questionMeta[qs.id]
     const slideResponses = responses.filter(r => r.slideId === qs.id)
     for (const r of slideResponses) {
-      const name = r.respondentName || 'Anonymous'
+      const name = r.respondentId ?? `name:${r.respondentName || 'Anonymous'}`
+      names[name] = r.respondentName || 'Anonymous'
       // Ensure every respondent appears on the leaderboard even if they score 0
       if (!(name in totals)) totals[name] = 0
       if (r.respondentEmoji) emojis[name] = r.respondentEmoji
@@ -3860,7 +3865,7 @@ function calculateQuizLeaderboard(
     }
   }
   return Object.entries(totals)
-    .map(([name, score]) => ({ name, score, emoji: emojis[name] }))
+    .map(([key, score]) => ({ id: key, name: names[key], score, emoji: emojis[key] }))
     .sort((a, b) => b.score - a.score)
 }
 
@@ -3874,7 +3879,7 @@ function LeaderboardSlideView({
   questionMeta: Record<string, { openedAt: number; duration: number | null }>
   slide?:       LeaderboardSlide
 }) {
-  const [leaderboard, setLeaderboard] = useState<{ name: string; score: number; emoji?: string }[]>([])
+  const [leaderboard, setLeaderboard] = useState<{ id?: string; name: string; score: number; emoji?: string }[]>([])
   const [revealCount, setRevealCount] = useState(0)
   // Prevents the "No scores yet" placeholder flashing before data arrives
   const [loaded, setLoaded] = useState(false)
@@ -4013,7 +4018,7 @@ function LeaderboardSlideView({
             const sz = isWinner ? tc.winner : isPodium ? tc.podium : tc.other
             return (
               <motion.div
-                key={entry.name}
+                key={entry.id ?? entry.name}
                 initial={{ opacity: 0, x: -40, scale: 0.96 }}
                 animate={{ opacity: 1, x: 0, scale: 1 }}
                 transition={{ type: 'spring', stiffness: 260, damping: 22 }}

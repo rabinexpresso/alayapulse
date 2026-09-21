@@ -158,6 +158,8 @@ export interface Response {
   value:          string
   respondentName?:  string
   respondentEmoji?: string
+  /** Stable per-phone id — keeps two people with the same name apart. */
+  respondentId?:    string
   submittedAt:    Timestamp
   quizPoints?:    { answer: number; speed: number }
 }
@@ -485,6 +487,7 @@ export interface SubmitPayload {
   value:            string
   respondentName?:  string
   respondentEmoji?: string
+  respondentId?:    string
   quizPoints?:      { answer: number; speed: number }
 }
 
@@ -536,13 +539,26 @@ export async function fetchAllSessionResponses(sessionCode: string): Promise<Res
    Returns an unsubscribe/cleanup function.
    ───────────────────────────────────────────────────────────────────────── */
 
+/**
+ * One id per phone, used for presence and stamped on every answer so quiz
+ * scores add up per person, not per name — two "Ram"s stay two rows. Kept in
+ * localStorage so someone whose tab gets closed and who rescans the QR keeps
+ * the same id, and their score doesn't split in two.
+ */
+export function getViewerId(): string {
+  const KEY = 'alaya-viewer-id'
+  let id: string | null = null
+  try { id = localStorage.getItem(KEY) } catch {}
+  if (!id) { try { id = sessionStorage.getItem(KEY) } catch {} }
+  if (!id) id = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6)
+  try { localStorage.setItem(KEY, id) } catch {}
+  try { sessionStorage.setItem(KEY, id) } catch {}
+  return id
+}
+
 export function joinAsViewer(sessionCode: string, name?: string, emoji?: string): () => void {
   // Reuse the same ID across refreshes so we don't double-count
-  let viewerId = sessionStorage.getItem('alaya-viewer-id')
-  if (!viewerId) {
-    viewerId = Math.random().toString(36).slice(2, 10)
-    sessionStorage.setItem('alaya-viewer-id', viewerId)
-  }
+  const viewerId = getViewerId()
 
   // Always resolve to a concrete emoji so the presenter Lobby never shows a fallback.
   // Priority: (1) caller-provided  (2) stored from Join page  (3) simple random

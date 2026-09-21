@@ -16,6 +16,32 @@ import {
   type StorageBackend,
 } from '@/lib/deckStorage'
 
+/** Who gave this answer: the phone's id, or the name for sessions run before
+ *  ids were saved. Two people who typed the same name get different keys. */
+function respondentKey(r: ResultResponse): string {
+  return r.id ?? `name:${r.name || 'Anonymous'}`
+}
+
+/** A display name per person, in order of first answer. When several people
+ *  typed the same name the later ones become "Ram (2)", "Ram (3)"… so every
+ *  tab of the Excel file refers to the same person the same way. */
+function respondentLabels(questions: ResultQuestion[]): Map<string, string> {
+  const first = new Map<string, { name: string; time: number }>()
+  for (const q of questions) for (const r of q.responses) {
+    const key = respondentKey(r)
+    const seen = first.get(key)
+    if (!seen || r.time < seen.time) first.set(key, { name: r.name || 'Anonymous', time: r.time })
+  }
+  const labels = new Map<string, string>()
+  const used   = new Map<string, number>()
+  for (const [key, { name }] of [...first].sort((a, b) => a[1].time - b[1].time)) {
+    const n = (used.get(name) ?? 0) + 1
+    used.set(name, n)
+    labels.set(key, n === 1 ? name : `${name} (${n})`)
+  }
+  return labels
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    Results page — saved-poll analysis for one deck.
    URL: /results/:deckId
@@ -129,7 +155,7 @@ export default function Results() {
   // responses were trimmed).
   const presentedQuestions = results.questions.filter(q => q.responseCount > 0)
   const uniqueRespondents = new Set<string>()
-  presentedQuestions.forEach(q => q.responses.forEach(resp => uniqueRespondents.add(resp.name)))
+  presentedQuestions.forEach(q => q.responses.forEach(resp => uniqueRespondents.add(respondentKey(resp))))
   const respondentCount = uniqueRespondents.size > 0 ? uniqueRespondents.size : results.audienceCount
   const avgParticipation = presentedQuestions.length > 0
     ? Math.round(
@@ -171,15 +197,17 @@ export default function Results() {
       const XLSX = await import('xlsx')
 
       // ── Scorecard tab: one row per person, one column per question ────
-      const respondentNames = Array.from(new Set(
-        results.questions.flatMap(q => q.responses.map(r => r.name))
-      )).sort((a, b) => a.localeCompare(b))
+      // One row per person (per phone), so two people who typed the same name
+      // get separate rows — labelled "Ram", "Ram (2)" so they're told apart.
+      const personLabels = respondentLabels(results.questions)
+      const respondentKeys = Array.from(personLabels.keys())
+        .sort((a, b) => personLabels.get(a)!.localeCompare(personLabels.get(b)!))
 
-      const scorecardRows = respondentNames.map(name => {
-        const row: Record<string, string | number> = { Name: name }
+      const scorecardRows = respondentKeys.map(key => {
+        const row: Record<string, string | number> = { Name: personLabels.get(key)! }
         results.questions.forEach((q, i) => {
           const label = `Q${i + 1}`
-          const resps = q.responses.filter(r => r.name === name)
+          const resps = q.responses.filter(r => respondentKey(r) === key)
           if (resps.length === 0) { row[label] = ''; return }
           // A respondent can submit multiple values to word cloud / open-ended
           // questions — list every one (joined) instead of only the first.
@@ -225,9 +253,9 @@ export default function Results() {
       const tally: Record<string, { correct: number; correctPts: number; speedPts: number }> = {}
       scoreableQuestions.forEach(q => {
         q.responses.forEach(r => {
-          const name = r.name || 'Anonymous'
-          if (!tally[name]) tally[name] = { correct: 0, correctPts: 0, speedPts: 0 }
-          const t = tally[name]
+          const key = respondentKey(r)
+          if (!tally[key]) tally[key] = { correct: 0, correctPts: 0, speedPts: 0 }
+          const t = tally[key]
           const correct = isResponseCorrect(r, q) === true
           if (correct) t.correct += 1
           // Prefer stored quiz points — these match the live leaderboard exactly.
@@ -243,7 +271,7 @@ export default function Results() {
       })
       const totalScoreable = scoreableQuestions.length
       const leaderboard = Object.entries(tally)
-        .map(([name, t]) => ({ name, ...t, total: t.correctPts + t.speedPts }))
+        .map(([key, t]) => ({ name: personLabels.get(key) ?? key, ...t, total: t.correctPts + t.speedPts }))
         // Highest total first; ties broken alphabetically for a stable order.
         .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
 

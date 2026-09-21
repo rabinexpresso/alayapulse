@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Check, Send, LogOut, Clock } from 'lucide-react'
 import { cn, optionLabel } from '@/lib/utils'
 import {
-  subscribeToSession, submitResponse, joinAsViewer, sendReaction,
+  subscribeToSession, submitResponse, joinAsViewer, sendReaction, getViewerId,
   type Session, type QType, type ReactionType,
 } from '@/lib/session'
 
@@ -304,6 +304,7 @@ export default function Vote() {
         type:             slideData.type as QType,
         value,
         respondentName:   effectiveName,
+        respondentId:     getViewerId(),
         ...(attendeeEmoji ? { respondentEmoji: attendeeEmoji } : {}),
         ...(quizPoints ? { quizPoints } : {}),
       })

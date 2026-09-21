@@ -39,6 +39,9 @@ export interface ResultResponse {
   value: string
   /** Unix ms when this response was submitted */
   time:  number
+  /** Per-phone id — tells apart two people who typed the same name. Absent
+   *  on sessions run before it was captured; fall back to `name` then. */
+  id?:   string
   /** Quiz mode only — points earned on this answer, captured at submission
    *  time on the audience device. `answer` = 100 if correct else 0;
    *  `speed`  = 0..100 bonus based on remaining timer. Absent for non-quiz
