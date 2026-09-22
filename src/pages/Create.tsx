@@ -312,15 +312,12 @@ function uid() { return Math.random().toString(36).slice(2, 10) }
 /** An MCQ with a correct answer marked — the thing that makes a deck a quiz. */
 const isScoredMcq = (s: Slide) => s.type === 'mcq' && ((s as QuestionSlide).correctAnswers?.length ?? 0) > 0
 
-/** Adds a Leaderboard right after the last scored question, if there isn't
- *  one yet — after the quiz, not after a closing "Thank you" slide. */
+/** Adds a Leaderboard at the end of the deck if a quiz doesn't have one.
+ *  The end, not after the last marked question: Quiz mode switches on at the
+ *  first correct answer, when later questions aren't marked yet. */
 function withLeaderboard(list: Slide[]): Slide[] {
-  if (list.some(s => s.type === 'leaderboard')) return list
-  const last = list.map(isScoredMcq).lastIndexOf(true)
-  if (last < 0) return list
-  const next = [...list]
-  next.splice(last + 1, 0, { id: uid(), type: 'leaderboard' } as LeaderboardSlide)
-  return next
+  if (list.some(s => s.type === 'leaderboard') || !list.some(isScoredMcq)) return list
+  return [...list, { id: uid(), type: 'leaderboard' } as LeaderboardSlide]
 }
 
 function makeQuestion(type: QType, isQuizMode = false): QuestionSlide {
@@ -1826,11 +1823,14 @@ export default function Create() {
             {quizOnToast === 'auto' ? (
               <>
                 <span className="text-xs font-medium text-midnight-sky-700">
-                  <span className="font-semibold text-midnight-sky-900">Quiz mode turned on</span> — answers are scored and a leaderboard shows the winners
+                  <span className="font-semibold text-midnight-sky-900">Quiz mode turned on</span> — answers are scored.{' '}
+                  {autoLeaderboardId.current
+                    ? 'A Leaderboard slide was added at the end of your deck — drag it anywhere.'
+                    : 'Your Leaderboard slide will show the winners.'}
                 </span>
                 <button
                   onClick={() => turnQuizOff()}
-                  className="rounded-full border border-midnight-sky-200 px-2.5 py-1 text-[11px] font-semibold text-midnight-sky-700 transition hover:bg-midnight-sky-50"
+                  className="shrink-0 whitespace-nowrap rounded-full border border-midnight-sky-200 px-2.5 py-1 text-[11px] font-semibold text-midnight-sky-700 transition hover:bg-midnight-sky-50"
                 >
                   Turn off
                 </button>
