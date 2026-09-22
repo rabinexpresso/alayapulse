@@ -150,6 +150,9 @@ export interface Session {
   inLobby?:       boolean
   /** Per-slide timing metadata for speed-point calculation. */
   questionMeta?:  Record<string, { openedAt: number; duration: number | null }>
+  /** Quiz results for the phones, published by the presenter the moment a
+   *  leaderboard reveals its winner: person id → [place, points]. */
+  quizRanks?:     QuizRanks
 }
 
 export interface Response {
@@ -655,6 +658,29 @@ export function subscribeToViewers(
       }))
     ),
   )
+}
+
+export interface QuizRanks {
+  slideId: string
+  total:   number
+  ranks:   Record<string, [number, number]>
+  at:      number
+}
+
+/**
+ * Sends every player's place and points to their phone. Called once the big
+ * screen has revealed the winner, so no phone spoils it. One write to the
+ * session doc — ~30 bytes a player, so a few hundred players is tiny.
+ */
+export async function publishQuizRanks(
+  sessionCode: string,
+  slideId: string,
+  board: { id?: string; score: number }[],
+): Promise<void> {
+  const ranks: Record<string, [number, number]> = {}
+  board.forEach((e, i) => { if (e.id && !e.id.startsWith('name:')) ranks[e.id] = [i + 1, e.score] })
+  const quizRanks: QuizRanks = { slideId, total: board.length, ranks, at: Date.now() }
+  await updateDoc(doc(db, 'sessions', sessionCode.toUpperCase()), { quizRanks })
 }
 
 /* ─────────────────────────────────────────────────────────────────────────

@@ -10,9 +10,10 @@ import {
 import { QRCodeSVG } from 'qrcode.react'
 import { cn, optionLabel, MAX_VIZ_OPTIONS } from '@/lib/utils'
 import { aggregateRanking, rankingOrder, type RankingResult } from '@/lib/ranking'
+import { Confetti, Fireworks, CountUp } from '@/components/Celebration'
 import {
   updateSessionState, endSession, subscribeToSlideResponses, subscribeToViewerCount, subscribeToViewers,
-  fetchAllSessionResponses, getSessionByCode, startTimer, clearTimer, resetSlideAndTimer, updateQuestionMeta,
+  fetchAllSessionResponses, getSessionByCode, publishQuizRanks, startTimer, clearTimer, resetSlideAndTimer, updateQuestionMeta,
   subscribeToReactions, deleteReaction,
   type Response as FirestoreResponse, type Reaction, type ReactionType,
 } from '@/lib/session'
@@ -3894,6 +3895,11 @@ function LeaderboardSlideView({
 }) {
   const [leaderboard, setLeaderboard] = useState<{ id?: string; name: string; score: number; emoji?: string }[]>([])
   const [revealCount, setRevealCount] = useState(0)
+  // Which podium place is being teased right now ("In 3rd place…"), if any
+  const [announce, setAnnounce] = useState<number | null>(null)
+  // Everyone's scores, not just the top 10 — sent to the phones at the end
+  const fullBoardRef = useRef<{ id?: string; name: string; score: number }[]>([])
+  const publishedRef = useRef(false)
   // Prevents the "No scores yet" placeholder flashing before data arrives
   const [loaded, setLoaded] = useState(false)
   // Shrink-to-fit for the list (see the measuring copy in the render)
@@ -3935,6 +3941,7 @@ function LeaderboardSlideView({
         // so speed-point timestamps match the Firestore response timestamps exactly.
         const meta = (sessionData?.questionMeta ?? questionMeta) as Record<string, { openedAt: number; duration: number | null }>
         const board = calculateQuizLeaderboard(responses, deck, meta)
+        fullBoardRef.current = board
         setLeaderboard(board.slice(0, 10))
         setLoaded(true)
       })
@@ -3942,13 +3949,21 @@ function LeaderboardSlideView({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionCode])
 
-  // Reveal entries 10th → 1st, one per 700ms
+  // Reveal 10th → 4th briskly, then build suspense for the podium: each of
+  // 3rd, 2nd and 1st is teased with a pause that grows before it appears.
   useEffect(() => {
     if (leaderboard.length === 0) return
     const total = Math.min(leaderboard.length, 10)
     if (revealCount >= total) return
-    const id = setTimeout(() => setRevealCount(c => c + 1), 700)
-    return () => clearTimeout(id)
+    const nextRank = total - revealCount
+    if (nextRank > 3) {
+      const id = setTimeout(() => setRevealCount(c => c + 1), revealCount === 0 ? 900 : 600)
+      return () => clearTimeout(id)
+    }
+    const hold = nextRank === 1 ? 3400 : nextRank === 2 ? 2400 : 1900
+    const lead = setTimeout(() => setAnnounce(nextRank), revealCount === 0 ? 700 : 500)
+    const id = setTimeout(() => { setAnnounce(null); setRevealCount(c => c + 1) }, hold)
+    return () => { clearTimeout(lead); clearTimeout(id) }
   }, [leaderboard, revealCount])
 
   const top10 = leaderboard.slice(0, 10)
@@ -3957,6 +3972,14 @@ function LeaderboardSlideView({
   const revealedEntries = top10.slice(top10.length - revealCount)
   // The winner (#1) is revealed last — fire confetti the moment they appear.
   const winnerRevealed = revealCount >= top10.length && top10.length > 0
+
+  // Once the winner is on the big screen, send every player their result.
+  // Not before — a phone must never spoil who won.
+  useEffect(() => {
+    if (!winnerRevealed || publishedRef.current || sessionCode === 'DEMO' || !slide?.id) return
+    publishedRef.current = true
+    publishQuizRanks(sessionCode, slide.id, fullBoardRef.current).catch(console.error)
+  }, [winnerRevealed, sessionCode, slide?.id])
 
   const lbBg = slide?.bg
   const lbBgStyle: React.CSSProperties = !lbBg
@@ -3974,9 +3997,9 @@ function LeaderboardSlideView({
       outerPb:     'pb-24',
       listGap:     'gap-3',
       titleText:   'text-5xl', titleTrophy: 'size-9', titleMb: 'mb-8',
-      winner: { py: 'py-4',   emoji: 'text-3xl',  name: 'text-2xl',  bar: 'h-3',   pts: 'text-2xl w-28' },
-      podium: { py: 'py-3',   emoji: 'text-2xl',  name: 'text-xl',   bar: 'h-2',   pts: 'text-lg  w-24' },
-      other:  { py: 'py-2',   emoji: 'text-xl',   name: 'text-base', bar: 'h-2',   pts: 'text-lg  w-24' },
+      winner: { py: 'py-4',   emoji: 'text-3xl',  name: 'text-2xl',  bar: 'h-3',   pts: 'text-2xl min-w-28' },
+      podium: { py: 'py-3',   emoji: 'text-2xl',  name: 'text-xl',   bar: 'h-2',   pts: 'text-lg  min-w-24' },
+      other:  { py: 'py-2',   emoji: 'text-xl',   name: 'text-base', bar: 'h-2',   pts: 'text-lg  min-w-24' },
       badge:  { size: 'size-12', rank: 'text-xl',   crown: 'size-6', crownTop: '-top-5' },
       rankW:  'w-12 text-lg',
     },
@@ -3985,9 +4008,9 @@ function LeaderboardSlideView({
       outerPb:     'pb-20',
       listGap:     'gap-2',
       titleText:   'text-4xl', titleTrophy: 'size-7', titleMb: 'mb-5',
-      winner: { py: 'py-3',   emoji: 'text-2xl',  name: 'text-xl',   bar: 'h-2',   pts: 'text-xl  w-24' },
-      podium: { py: 'py-2',   emoji: 'text-xl',   name: 'text-lg',   bar: 'h-2',   pts: 'text-lg  w-20' },
-      other:  { py: 'py-1.5', emoji: 'text-lg',   name: 'text-sm',   bar: 'h-1.5', pts: 'text-base w-20' },
+      winner: { py: 'py-3',   emoji: 'text-2xl',  name: 'text-xl',   bar: 'h-2',   pts: 'text-xl  min-w-24' },
+      podium: { py: 'py-2',   emoji: 'text-xl',   name: 'text-lg',   bar: 'h-2',   pts: 'text-lg  min-w-20' },
+      other:  { py: 'py-1.5', emoji: 'text-lg',   name: 'text-sm',   bar: 'h-1.5', pts: 'text-base min-w-20' },
       badge:  { size: 'size-10', rank: 'text-lg',   crown: 'size-5', crownTop: '-top-4' },
       rankW:  'w-10 text-base',
     },
@@ -3996,9 +4019,9 @@ function LeaderboardSlideView({
       outerPb:     'pb-16',
       listGap:     'gap-1.5',
       titleText:   'text-3xl', titleTrophy: 'size-6', titleMb: 'mb-3',
-      winner: { py: 'py-2',   emoji: 'text-xl',   name: 'text-lg',   bar: 'h-2',   pts: 'text-lg  w-20' },
-      podium: { py: 'py-1.5', emoji: 'text-lg',   name: 'text-base', bar: 'h-1.5', pts: 'text-base w-16' },
-      other:  { py: 'py-1',   emoji: 'text-base', name: 'text-sm',   bar: 'h-1',   pts: 'text-sm  w-16' },
+      winner: { py: 'py-2',   emoji: 'text-xl',   name: 'text-lg',   bar: 'h-2',   pts: 'text-lg  min-w-20' },
+      podium: { py: 'py-1.5', emoji: 'text-lg',   name: 'text-base', bar: 'h-1.5', pts: 'text-base min-w-16' },
+      other:  { py: 'py-1',   emoji: 'text-base', name: 'text-sm',   bar: 'h-1',   pts: 'text-sm  min-w-16' },
       badge:  { size: 'size-9',  rank: 'text-base', crown: 'size-4', crownTop: '-top-4' },
       rankW:  'w-9 text-sm',
     },
@@ -4016,11 +4039,15 @@ function LeaderboardSlideView({
       return (
         <motion.div
           key={`${still ? 'm-' : ''}${entry.id ?? entry.name}`}
-          initial={still ? false : { opacity: 0, x: -40, scale: 0.96 }}
-          animate={{ opacity: 1, x: 0, scale: 1 }}
-          transition={{ type: 'spring', stiffness: 260, damping: 22 }}
+          initial={still ? false : isWinner ? { opacity: 0, y: -30, scale: 1.25 } : { opacity: 0, x: -40, scale: 0.96 }}
+          animate={{
+            opacity: !still && winnerRevealed && !isWinner ? 0.45 : 1,
+            x: 0, y: 0,
+            scale: !still && isWinner ? 1.02 : 1,
+          }}
+          transition={{ type: 'spring', stiffness: isWinner ? 200 : 260, damping: isWinner ? 15 : 22 }}
           className={cn(
-            'flex items-center gap-4 rounded-2xl px-5 transition-colors',
+            'relative flex items-center gap-4 rounded-2xl px-5 transition-colors',
             sz.py,
             isPodium && 'border bg-white/[0.04]',
           )}
@@ -4029,6 +4056,16 @@ function LeaderboardSlideView({
             boxShadow: isWinner ? `0 0 40px -8px ${medalColor}80` : `0 0 24px -10px ${medalColor}66`,
           } : undefined}
         >
+          {/* Winner: a pulsing gold halo around the row */}
+          {isWinner && !still && (
+            <motion.div
+              aria-hidden
+              className="pointer-events-none absolute -inset-[3px] rounded-2xl border-2 border-golden-sun"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: [0.35, 1, 0.35], boxShadow: ['0 0 16px 0 rgba(255,199,9,0.25)', '0 0 34px 3px rgba(255,199,9,0.55)', '0 0 16px 0 rgba(255,199,9,0.25)'] }}
+              transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut', delay: 0.4 }}
+            />
+          )}
           {/* Rank badge — medal circle for top 3, plain number otherwise */}
           {isPodium ? (
             <motion.div
@@ -4091,10 +4128,10 @@ function LeaderboardSlideView({
             initial={still ? false : { opacity: 0, scale: 0.7 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: 0.3, type: 'spring', stiffness: 300, damping: 18 }}
-            className={`shrink-0 text-right font-extrabold tabular-nums ${sz.pts}`}
+            className={`shrink-0 whitespace-nowrap text-right font-extrabold tabular-nums ${sz.pts}`}
             style={{ color: medalColor ?? 'rgba(255,255,255,0.75)' }}
           >
-            {entry.score.toLocaleString()} pts
+            {still ? entry.score.toLocaleString() : <CountUp value={entry.score} />} pts
           </motion.span>
         </motion.div>
       )
@@ -4113,8 +4150,62 @@ function LeaderboardSlideView({
         <div className="absolute bottom-0 right-[8%] h-72 w-72 rounded-full bg-sky-blue/12 blur-[100px]" />
       </div>
 
-      {/* Confetti burst — fires when the winner is revealed */}
-      <AnimatePresence>{winnerRevealed && <Confetti />}</AnimatePresence>
+      {/* Winner moment: the room dims to a spotlight, fireworks, two waves of confetti */}
+      <AnimatePresence>
+        {winnerRevealed && (
+          <motion.div
+            key="spot"
+            aria-hidden
+            className="pointer-events-none absolute inset-0"
+            style={{ background: 'radial-gradient(ellipse 60% 45% at 50% 32%, transparent 35%, rgba(3,3,40,0.6) 100%)' }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.8 }}
+          />
+        )}
+      </AnimatePresence>
+      {winnerRevealed && <Fireworks />}
+      {winnerRevealed && <Confetti pieces={130} waves={2} />}
+
+      {/* Podium suspense: "In 3rd place…", "In 2nd place…", "And the winner is…" */}
+      <AnimatePresence>
+        {announce !== null && (
+          <motion.div
+            key={announce}
+            className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.35 }}
+            style={{ background: 'rgba(3,3,40,0.62)', backdropFilter: 'blur(3px)' }}
+          >
+            <motion.p
+              className="text-center font-extrabold tracking-tight"
+              style={{
+                fontSize: announce === 1 ? 'clamp(40px, 7vw, 110px)' : 'clamp(32px, 5vw, 80px)',
+                color: announce === 1 ? '#ffc709' : announce === 2 ? '#e5e7eb' : '#f0a060',
+                textShadow: `0 0 40px ${announce === 1 ? 'rgba(255,199,9,0.6)' : 'rgba(255,255,255,0.25)'}`,
+              }}
+              initial={{ scale: 0.7, y: 20 }}
+              animate={announce === 1
+                ? { scale: [0.9, 1.06, 1, 1.06, 1], y: 0, rotate: [0, -1.5, 1.5, -1.5, 0] }
+                : { scale: 1, y: 0 }}
+              transition={announce === 1 ? { duration: 2.4, ease: 'easeInOut' } : { type: 'spring', stiffness: 260, damping: 18 }}
+            >
+              {announce === 1 ? 'And the winner is…' : announce === 2 ? 'In 2nd place…' : 'In 3rd place…'}
+              {announce === 1 && (
+                <motion.span
+                  className="mt-4 block text-[0.45em]"
+                  animate={{ opacity: [0.3, 1, 0.3] }}
+                  transition={{ duration: 0.6, repeat: Infinity }}
+                >
+                  🥁 🥁 🥁
+                </motion.span>
+              )}
+            </motion.p>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <motion.div
         initial={{ opacity: 0, y: -16 }}
@@ -4139,62 +4230,17 @@ function LeaderboardSlideView({
               is shrunk to fit under the title, so #1 is never cut off on short
               windows — sized for all 10 rows up front, so it doesn't jump as
               rows are revealed. */}
-          <div ref={lbMeasureRef} aria-hidden className={`pointer-events-none invisible absolute inset-x-0 top-0 flex flex-col ${tc.listGap}`}>
+          <div ref={lbMeasureRef} aria-hidden className={`pointer-events-none invisible absolute inset-x-0 top-0 flex flex-col px-4 py-3 ${tc.listGap}`}>
             {top10.map(e => renderRow(e, true))}
           </div>
           <div
-            className={`flex w-full shrink-0 flex-col ${tc.listGap}`}
+            className={`flex w-full shrink-0 flex-col px-4 py-3 ${tc.listGap}`}
             style={lbScale < 1 ? { transform: `scale(${lbScale})`, transformOrigin: 'center center' } : undefined}
           >
             {revealedEntries.map(e => renderRow(e))}
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-/* ─────────────────────────────────────────────────────────────────────────
-   Confetti — lightweight celebratory burst rendered over the leaderboard.
-   Pure framer-motion (no external lib); pieces fall + spin from the top.
-   ───────────────────────────────────────────────────────────────────────── */
-
-function Confetti() {
-  const COLORS = ['#ffc709', '#ff0065', '#00b8d9', '#36b37e', '#ffffff', '#a855f7']
-  // Generate piece configs once so they don't reshuffle on re-render.
-  const pieces = useMemo(
-    () => Array.from({ length: 90 }, (_, i) => ({
-      id: i,
-      left: Math.random() * 100,
-      delay: Math.random() * 0.6,
-      duration: 2.4 + Math.random() * 1.8,
-      drift: (Math.random() - 0.5) * 220,
-      rotate: Math.random() * 720 - 360,
-      size: 7 + Math.random() * 8,
-      color: COLORS[i % COLORS.length],
-      round: Math.random() > 0.5,
-    })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  )
-  return (
-    <div aria-hidden className="pointer-events-none absolute inset-0 z-40 overflow-hidden">
-      {pieces.map(p => (
-        <motion.div
-          key={p.id}
-          initial={{ y: -40, x: 0, opacity: 1, rotate: 0 }}
-          animate={{ y: '110vh', x: p.drift, opacity: [1, 1, 0.9, 0], rotate: p.rotate }}
-          transition={{ duration: p.duration, delay: p.delay, ease: 'easeIn' }}
-          className="absolute top-0"
-          style={{
-            left: `${p.left}%`,
-            width: p.size,
-            height: p.round ? p.size : p.size * 0.45,
-            backgroundColor: p.color,
-            borderRadius: p.round ? '9999px' : '2px',
-          }}
-        />
-      ))}
     </div>
   )
 }

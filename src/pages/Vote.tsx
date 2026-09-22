@@ -3,9 +3,11 @@ import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Check, Send, LogOut, Clock } from 'lucide-react'
 import { cn, optionLabel } from '@/lib/utils'
+import { Confetti, CountUp } from '@/components/Celebration'
 import {
   subscribeToSession, submitResponse, joinAsViewer, sendReaction, getViewerId,
   type Session, type QType, type ReactionType,
+  type QuizRanks,
 } from '@/lib/session'
 
 /* ── Reaction config ───────────────────────────────────────────────────── */
@@ -465,7 +467,9 @@ export default function Vote() {
             transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
             className="flex flex-1 flex-col"
           >
-            {isWaiting ? (
+            {isWaiting && (slideData as { type?: string } | undefined)?.type === 'leaderboard' && session.isQuiz ? (
+              <LeaderboardPhoneState ranks={session.quizRanks} slideId={slideId} personId={personId} />
+            ) : isWaiting ? (
               <WaitingState sessionCode={sessionCode} />
             ) : alreadySubmitted && session.isQuiz && lastQuizResult && lastQuizResult.slideId === slideId ? (
               <QuizFeedbackState result={lastQuizResult} totalScore={quizScore} />
@@ -1738,4 +1742,100 @@ function useSharedStored<T>(key: string, fallback: T) {
   }, [key])
 
   return [value, set] as const
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   LeaderboardPhoneState — while the big screen reveals the leaderboard the
+   phone says "eyes up"; once the winner is shown, each phone gets its own
+   result: a celebration for the top 3 and "You won!" for first place.
+   ───────────────────────────────────────────────────────────────────────── */
+
+const ordinal = (n: number) => {
+  const t = n % 100
+  if (t >= 11 && t <= 13) return `${n}th`
+  return `${n}${n % 10 === 1 ? 'st' : n % 10 === 2 ? 'nd' : n % 10 === 3 ? 'rd' : 'th'}`
+}
+
+function LeaderboardPhoneState({ ranks, slideId, personId }: { ranks?: QuizRanks; slideId?: string; personId: string }) {
+  const ready = !!ranks && ranks.slideId === slideId
+  const mine  = ready ? ranks!.ranks[personId] : undefined
+
+  if (!ready) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="flex flex-1 flex-col items-center justify-center gap-6 py-10 text-center"
+      >
+        <motion.div
+          className="text-7xl"
+          animate={{ y: [0, -10, 0], rotate: [0, -6, 6, 0] }}
+          transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+        >
+          🏆
+        </motion.div>
+        <div>
+          <h3 className="text-2xl font-semibold text-midnight-sky-900">Eyes on the big screen!</h3>
+          <p className="mt-2 font-light text-midnight-sky-700">The leaderboard is being revealed…</p>
+        </div>
+      </motion.div>
+    )
+  }
+
+  if (!mine) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 py-10 text-center">
+        <div className="text-6xl">🎉</div>
+        <h3 className="text-2xl font-semibold text-midnight-sky-900">Scores are in!</h3>
+        <p className="font-light text-midnight-sky-700">Answer the quiz questions to get on the leaderboard.</p>
+      </div>
+    )
+  }
+
+  const [place, points] = mine
+  const total   = ranks!.total
+  const medal   = place === 1 ? '🏆' : place === 2 ? '🥈' : place === 3 ? '🥉' : place <= 10 ? '⭐' : '🎉'
+  const title   = place === 1 ? 'You won!' : place <= 3 ? `${ordinal(place)} place!` : place <= 10 ? 'Top 10!' : 'Great effort!'
+  const podium  = place <= 3
+  const card    = place === 1
+    ? 'bg-gradient-to-br from-golden-sun via-[#ffd84d] to-[#ffb300] text-midnight-sky-900 shadow-[0_20px_60px_-15px_rgba(255,199,9,0.8)]'
+    : podium
+      ? 'bg-gradient-to-br from-midnight-sky-800 to-midnight-sky-900 text-white shadow-[0_20px_50px_-15px_rgba(0,0,121,0.6)]'
+      : 'bg-midnight-sky-50 text-midnight-sky-900'
+
+  return (
+    <div className="relative flex flex-1 flex-col items-center justify-center py-8 text-center">
+      {podium && (
+        <div aria-hidden className="pointer-events-none fixed inset-0 z-40">
+          <Confetti pieces={place === 1 ? 90 : 50} waves={place === 1 ? 3 : 1} />
+        </div>
+      )}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.6, y: 30 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 220, damping: 16 }}
+        className={cn('relative w-full max-w-sm rounded-3xl px-6 py-9', card)}
+      >
+        <motion.div
+          className="text-7xl"
+          initial={{ scale: 0, rotate: -40 }}
+          animate={place === 1
+            ? { scale: [0, 1.3, 1], rotate: [-40, 10, 0], y: [0, 0, -6, 0] }
+            : { scale: 1, rotate: 0 }}
+          transition={place === 1
+            ? { duration: 1.2, times: [0, 0.6, 1], ease: 'easeOut' }
+            : { type: 'spring', stiffness: 300, damping: 14, delay: 0.15 }}
+        >
+          {medal}
+        </motion.div>
+        <h3 className={cn('mt-4 font-extrabold tracking-tight', place === 1 ? 'text-4xl' : 'text-3xl')}>{title}</h3>
+        <p className={cn('mt-3 text-lg', podium ? 'opacity-90' : 'text-midnight-sky-700')}>
+          You placed <span className="font-bold">{ordinal(place)}</span> of {total.toLocaleString()}
+        </p>
+        <p className="mt-5 text-4xl font-extrabold tabular-nums">
+          <CountUp value={points} duration={1400} delay={400} /> <span className="text-xl font-bold">pts</span>
+        </p>
+      </motion.div>
+    </div>
+  )
 }
