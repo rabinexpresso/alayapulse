@@ -210,8 +210,12 @@ function aggregateCloud(responses: FirestoreResponse[]): { text: string; count: 
 }
 
 function aggregateOpen(responses: FirestoreResponse[]): { name: string; text: string }[] {
+  // Newest first. Firestore hands docs back in id order, which is random, so
+  // sort by the server timestamp; one still pending sorts as newest.
+  const ms = (r: FirestoreResponse) =>
+    (r.submittedAt as unknown as { toMillis?: () => number } | null)?.toMillis?.() ?? Number.MAX_SAFE_INTEGER
   return [...responses]
-    .reverse()
+    .sort((a, b) => ms(b) - ms(a))
     .map(r => ({ name: r.respondentName || 'Anonymous', text: r.value }))
 }
 
@@ -2530,12 +2534,15 @@ function ResultsSlideView({
     && slide.type !== 'openended'
 
   const vizWrap = needsDarkPanel
-    ? 'mt-6 flex-1 overflow-y-auto rounded-2xl bg-midnight-sky-900/95 px-8 py-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+    ? 'mt-6 flex-1 min-h-0 overflow-y-auto rounded-2xl bg-midnight-sky-900/95 px-8 py-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
     : slide.type === 'wordcloud'
       ? 'mt-2 flex-1 min-h-0 overflow-hidden'
       : slide.type === 'rating'
         ? 'mt-6 flex-1 min-h-0 flex flex-col overflow-hidden'
-        : 'mt-6 flex-1 overflow-hidden'
+        : slide.type === 'openended'
+          // Scrolls, so the host can read every answer — not just the first screenful
+          ? 'mt-6 flex-1 min-h-0 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.25)_transparent]'
+          : 'mt-6 flex-1 overflow-hidden'
 
   return (
     <div
@@ -3375,10 +3382,17 @@ function OpenEndedResults({
   // Newest-first key — first 60 chars of text is unique enough per response
   const pinKey = (ans: { text: string }) => ans.text.slice(0, 60)
 
-  // Ref on the first card — auto-scroll to it whenever a new answer arrives
-  const topRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    topRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  // Newest answers arrive at the top. A host at the top sees each one appear;
+  // a host who has scrolled down to read stays on the same cards — the scroll
+  // position moves by however much was added above them.
+  const gridRef    = useRef<HTMLDivElement>(null)
+  const prevHeight = useRef(0)
+  useLayoutEffect(() => {
+    const box = gridRef.current?.parentElement
+    if (!box) return
+    const grew = box.scrollHeight - prevHeight.current
+    if (prevHeight.current && grew > 0 && box.scrollTop > 8) box.scrollTop += grew
+    prevHeight.current = box.scrollHeight
   }, [answers.length])
 
   if (answers.length === 0) {
@@ -3396,14 +3410,13 @@ function OpenEndedResults({
   ]
 
   return (
-    <div className="grid auto-rows-min gap-2 md:grid-cols-2 lg:grid-cols-3">
+    <div ref={gridRef} className="grid auto-rows-min gap-2 [overflow-anchor:none] md:grid-cols-2 lg:grid-cols-3">
       <AnimatePresence>
-        {sorted.map((ans, i) => {
+        {sorted.map(ans => {
           const key      = pinKey(ans)
           const isPinned = pinnedKeys.has(key)
           return (
             <motion.div
-              ref={i === 0 ? topRef : undefined}
               key={`${ans.name}-${ans.text.slice(0, 20)}`}
               initial={{ opacity: 0, y: 12, scale: 0.97 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -3883,6 +3896,23 @@ function LeaderboardSlideView({
   const [revealCount, setRevealCount] = useState(0)
   // Prevents the "No scores yet" placeholder flashing before data arrives
   const [loaded, setLoaded] = useState(false)
+  // Shrink-to-fit for the list (see the measuring copy in the render)
+  const lbBoxRef     = useRef<HTMLDivElement>(null)
+  const lbMeasureRef = useRef<HTMLDivElement>(null)
+  const [lbScale, setLbScale] = useState(1)
+  useEffect(() => {
+    const box = lbBoxRef.current, list = lbMeasureRef.current
+    if (!box || !list) return
+    const fit = () => {
+      const need = list.offsetHeight
+      // a little headroom for the winner's crown, which sits above the row
+      setLbScale(need > 0 ? Math.min(1, (box.clientHeight - 12) / need) : 1)
+    }
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(box); ro.observe(list)
+    return () => ro.disconnect()
+  }, [loaded, leaderboard.length])
 
   useEffect(() => {
     if (sessionCode === 'DEMO') {
@@ -3974,6 +4004,102 @@ function LeaderboardSlideView({
     },
   ] as const)[lbTier]
 
+  // One leaderboard row. `still` renders it without entrance animations —
+  // used for the invisible copy that measures how tall the full list is.
+  const renderRow = (entry: { id?: string; name: string; score: number; emoji?: string }, still = false) => {
+      const rank = top10.indexOf(entry) + 1
+      const barPct = maxScore > 0 ? (entry.score / maxScore) * 100 : 0
+      const medalColor = rank <= 3 ? MEDAL_COLORS[rank - 1] : null
+      const isWinner = rank === 1
+      const isPodium = rank <= 3
+      const sz = isWinner ? tc.winner : isPodium ? tc.podium : tc.other
+      return (
+        <motion.div
+          key={`${still ? 'm-' : ''}${entry.id ?? entry.name}`}
+          initial={still ? false : { opacity: 0, x: -40, scale: 0.96 }}
+          animate={{ opacity: 1, x: 0, scale: 1 }}
+          transition={{ type: 'spring', stiffness: 260, damping: 22 }}
+          className={cn(
+            'flex items-center gap-4 rounded-2xl px-5 transition-colors',
+            sz.py,
+            isPodium && 'border bg-white/[0.04]',
+          )}
+          style={isPodium ? {
+            borderColor: `${medalColor}55`,
+            boxShadow: isWinner ? `0 0 40px -8px ${medalColor}80` : `0 0 24px -10px ${medalColor}66`,
+          } : undefined}
+        >
+          {/* Rank badge — medal circle for top 3, plain number otherwise */}
+          {isPodium ? (
+            <motion.div
+              initial={still ? false : { scale: 0, rotate: -30 }}
+              animate={{ scale: 1, rotate: 0 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 16, delay: 0.1 }}
+              className={`relative flex ${tc.badge.size} shrink-0 items-center justify-center rounded-full ${tc.badge.rank} font-extrabold tabular-nums`}
+              style={{ backgroundColor: `${medalColor}26`, color: medalColor ?? undefined, border: `2px solid ${medalColor}` }}
+            >
+              {isWinner && (
+                <motion.div
+                  initial={still ? false : { y: 6, opacity: 0, scale: 0.5 }}
+                  animate={{ y: 0, opacity: 1, scale: 1 }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 14, delay: 0.25 }}
+                  className={`absolute ${tc.badge.crownTop} left-1/2 -translate-x-1/2`}
+                >
+                  <Crown className={`${tc.badge.crown} fill-golden-sun text-golden-sun drop-shadow-[0_0_10px_rgba(255,199,9,0.8)]`} />
+                </motion.div>
+              )}
+              {rank}
+            </motion.div>
+          ) : (
+            <span className={`${tc.rankW} shrink-0 text-center font-bold tabular-nums text-white/40`}>
+              {rank}
+            </span>
+          )}
+
+          {/* Emoji avatar */}
+          <motion.span
+            initial={still ? false : { scale: 0, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: 'spring', stiffness: 380, damping: 16, delay: 0.08 }}
+            className={`shrink-0 leading-none ${sz.emoji}`}
+          >
+            {entry.emoji ?? '👤'}
+          </motion.span>
+
+          <div className="flex flex-1 flex-col gap-1.5">
+            <span
+              className={`font-bold ${sz.name}`}
+              style={{ color: medalColor ?? 'rgba(255,255,255,0.9)' }}
+            >
+              {entry.name}
+            </span>
+            <div className={`relative overflow-hidden rounded-full bg-white/10 ${sz.bar}`}>
+              <motion.div
+                className="absolute inset-y-0 left-0 rounded-full"
+                style={{
+                  backgroundColor: medalColor ?? '#ff0065',
+                  boxShadow: isPodium ? `0 0 12px ${medalColor}aa` : undefined,
+                }}
+                initial={still ? false : { width: '0%' }}
+                animate={{ width: `${barPct}%` }}
+                transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1], delay: 0.15 }}
+              />
+            </div>
+          </div>
+
+          <motion.span
+            initial={still ? false : { opacity: 0, scale: 0.7 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.3, type: 'spring', stiffness: 300, damping: 18 }}
+            className={`shrink-0 text-right font-extrabold tabular-nums ${sz.pts}`}
+            style={{ color: medalColor ?? 'rgba(255,255,255,0.75)' }}
+          >
+            {entry.score.toLocaleString()} pts
+          </motion.span>
+        </motion.div>
+      )
+  }
+
   return (
     <div
       className={`absolute inset-0 flex flex-col overflow-hidden px-14 pt-12 ${tc.outerPb}${!lbBg ? ' bg-gradient-to-b from-midnight-sky-900 via-midnight-sky-900 to-[#1a0a3a]' : ''}`}
@@ -4008,100 +4134,20 @@ function LeaderboardSlideView({
           <p className="text-white/30">No scores yet — no quiz questions have been answered.</p>
         </div>
       ) : (
-        <div className={`relative flex flex-1 flex-col justify-center ${tc.listGap} overflow-hidden`}>
-          {revealedEntries.map(entry => {
-            const rank = top10.indexOf(entry) + 1
-            const barPct = maxScore > 0 ? (entry.score / maxScore) * 100 : 0
-            const medalColor = rank <= 3 ? MEDAL_COLORS[rank - 1] : null
-            const isWinner = rank === 1
-            const isPodium = rank <= 3
-            const sz = isWinner ? tc.winner : isPodium ? tc.podium : tc.other
-            return (
-              <motion.div
-                key={entry.id ?? entry.name}
-                initial={{ opacity: 0, x: -40, scale: 0.96 }}
-                animate={{ opacity: 1, x: 0, scale: 1 }}
-                transition={{ type: 'spring', stiffness: 260, damping: 22 }}
-                className={cn(
-                  'flex items-center gap-4 rounded-2xl px-5 transition-colors',
-                  sz.py,
-                  isPodium && 'border bg-white/[0.04]',
-                )}
-                style={isPodium ? {
-                  borderColor: `${medalColor}55`,
-                  boxShadow: isWinner ? `0 0 40px -8px ${medalColor}80` : `0 0 24px -10px ${medalColor}66`,
-                } : undefined}
-              >
-                {/* Rank badge — medal circle for top 3, plain number otherwise */}
-                {isPodium ? (
-                  <motion.div
-                    initial={{ scale: 0, rotate: -30 }}
-                    animate={{ scale: 1, rotate: 0 }}
-                    transition={{ type: 'spring', stiffness: 380, damping: 16, delay: 0.1 }}
-                    className={`relative flex ${tc.badge.size} shrink-0 items-center justify-center rounded-full ${tc.badge.rank} font-extrabold tabular-nums`}
-                    style={{ backgroundColor: `${medalColor}26`, color: medalColor ?? undefined, border: `2px solid ${medalColor}` }}
-                  >
-                    {isWinner && (
-                      <motion.div
-                        initial={{ y: 6, opacity: 0, scale: 0.5 }}
-                        animate={{ y: 0, opacity: 1, scale: 1 }}
-                        transition={{ type: 'spring', stiffness: 400, damping: 14, delay: 0.25 }}
-                        className={`absolute ${tc.badge.crownTop} left-1/2 -translate-x-1/2`}
-                      >
-                        <Crown className={`${tc.badge.crown} fill-golden-sun text-golden-sun drop-shadow-[0_0_10px_rgba(255,199,9,0.8)]`} />
-                      </motion.div>
-                    )}
-                    {rank}
-                  </motion.div>
-                ) : (
-                  <span className={`${tc.rankW} shrink-0 text-center font-bold tabular-nums text-white/40`}>
-                    {rank}
-                  </span>
-                )}
-
-                {/* Emoji avatar */}
-                <motion.span
-                  initial={{ scale: 0, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  transition={{ type: 'spring', stiffness: 380, damping: 16, delay: 0.08 }}
-                  className={`shrink-0 leading-none ${sz.emoji}`}
-                >
-                  {entry.emoji ?? '👤'}
-                </motion.span>
-
-                <div className="flex flex-1 flex-col gap-1.5">
-                  <span
-                    className={`font-bold ${sz.name}`}
-                    style={{ color: medalColor ?? 'rgba(255,255,255,0.9)' }}
-                  >
-                    {entry.name}
-                  </span>
-                  <div className={`relative overflow-hidden rounded-full bg-white/10 ${sz.bar}`}>
-                    <motion.div
-                      className="absolute inset-y-0 left-0 rounded-full"
-                      style={{
-                        backgroundColor: medalColor ?? '#ff0065',
-                        boxShadow: isPodium ? `0 0 12px ${medalColor}aa` : undefined,
-                      }}
-                      initial={{ width: '0%' }}
-                      animate={{ width: `${barPct}%` }}
-                      transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1], delay: 0.15 }}
-                    />
-                  </div>
-                </div>
-
-                <motion.span
-                  initial={{ opacity: 0, scale: 0.7 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: 0.3, type: 'spring', stiffness: 300, damping: 18 }}
-                  className={`shrink-0 text-right font-extrabold tabular-nums ${sz.pts}`}
-                  style={{ color: medalColor ?? 'rgba(255,255,255,0.75)' }}
-                >
-                  {entry.score.toLocaleString()} pts
-                </motion.span>
-              </motion.div>
-            )
-          })}
+        <div ref={lbBoxRef} className="relative flex min-h-0 flex-1 flex-col justify-center overflow-hidden">
+          {/* Invisible full top-10, only to measure its height. The visible list
+              is shrunk to fit under the title, so #1 is never cut off on short
+              windows — sized for all 10 rows up front, so it doesn't jump as
+              rows are revealed. */}
+          <div ref={lbMeasureRef} aria-hidden className={`pointer-events-none invisible absolute inset-x-0 top-0 flex flex-col ${tc.listGap}`}>
+            {top10.map(e => renderRow(e, true))}
+          </div>
+          <div
+            className={`flex w-full shrink-0 flex-col ${tc.listGap}`}
+            style={lbScale < 1 ? { transform: `scale(${lbScale})`, transformOrigin: 'center center' } : undefined}
+          >
+            {revealedEntries.map(e => renderRow(e))}
+          </div>
         </div>
       )}
     </div>
