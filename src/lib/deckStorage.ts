@@ -22,6 +22,9 @@ export interface Deck {
   createdAt: number      // unix ms
   updatedAt: number      // unix ms
   isQuiz?:   boolean
+  /** The host switched Quiz mode off on purpose — don't switch it back on
+   *  automatically when correct answers are marked. */
+  quizAutoOff?: boolean
 }
 
 /* ─────────────────────────────────────────────────────────────────────────

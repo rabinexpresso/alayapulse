@@ -309,6 +309,20 @@ const MAX_RATING_ITEMS = 5
 
 function uid() { return Math.random().toString(36).slice(2, 10) }
 
+/** An MCQ with a correct answer marked — the thing that makes a deck a quiz. */
+const isScoredMcq = (s: Slide) => s.type === 'mcq' && ((s as QuestionSlide).correctAnswers?.length ?? 0) > 0
+
+/** Adds a Leaderboard right after the last scored question, if there isn't
+ *  one yet — after the quiz, not after a closing "Thank you" slide. */
+function withLeaderboard(list: Slide[]): Slide[] {
+  if (list.some(s => s.type === 'leaderboard')) return list
+  const last = list.map(isScoredMcq).lastIndexOf(true)
+  if (last < 0) return list
+  const next = [...list]
+  next.splice(last + 1, 0, { id: uid(), type: 'leaderboard' } as LeaderboardSlide)
+  return next
+}
+
 function makeQuestion(type: QType, isQuizMode = false): QuestionSlide {
   return {
     id: uid(),
@@ -678,6 +692,11 @@ export default function Create() {
   const [isQuiz, setIsQuiz] = useState<boolean>(
     deckFromState?.isQuiz ?? (returnState.isQuiz as boolean | undefined) ?? false,
   )
+  // True once the host switches Quiz mode off by hand — then marking correct
+  // answers no longer switches it back on for this deck.
+  const [quizAutoOff, setQuizAutoOff] = useState<boolean>(
+    deckFromState?.quizAutoOff ?? (returnState.quizAutoOff as boolean | undefined) ?? false,
+  )
   // Last live-poll results, either passed back from Present.tsx on session
   // end OR pre-loaded from My Decks via the navigate state. Saved alongside
   // the deck so the Results page can show them later.
@@ -717,7 +736,10 @@ export default function Create() {
   // Quiz-on toast — shown when the user enables quiz mode
   // 'add'    → no leaderboard slide yet; offer to insert one
   // 'exists' → leaderboard already present; just confirm quiz is on
-  const [quizOnToast, setQuizOnToast] = useState<'add' | 'exists' | null>(null)
+  // 'auto'   → switched on automatically because a correct answer was marked
+  const [quizOnToast, setQuizOnToast] = useState<'add' | 'exists' | 'auto' | null>(null)
+  // The Leaderboard slide auto-added with it, so "Turn off" can take it away again
+  const autoLeaderboardId = useRef<string | null>(null)
   const [csvImportToast, setCsvImportToast] = useState<{ count: number } | null>(null)
 
   /* ── Undo / Redo history ─────────────────────────────────────────────── */
@@ -863,6 +885,7 @@ export default function Create() {
         createdAt: Date.now(),
         updatedAt: Date.now(),
         ...(isQuiz ? { isQuiz: true } : {}),
+        ...(quizAutoOff ? { quizAutoOff: true } : {}),
       }
       if (b === 'browser') {
         await browserSaveDeck(deck)
@@ -1210,6 +1233,41 @@ export default function Create() {
     setAddMenu(undefined)
   }, [])
 
+  /* ── Quiz mode on / off ─────────────────────────────────────────────── */
+
+  // `auto` = switched on because a correct answer was marked, not by hand.
+  const turnQuizOn = (auto: boolean) => {
+    setSlides(prev => {
+      // 30 s default on every MCQ without a timer — speed points need one
+      const timed = prev.map(s => s.type === 'mcq' && !(s as QuestionSlide).timer ? { ...s, timer: 30 } : s)
+      const next  = withLeaderboard(timed)
+      const added = next.find(s => s.type === 'leaderboard' && !timed.some(t => t.id === s.id))
+      autoLeaderboardId.current = added?.id ?? null
+      return next
+    })
+    setIsQuiz(true)
+    setQuizAutoOff(false)
+    setQuizOnToast(auto ? 'auto' : slides.some(isScoredMcq) || slides.some(s => s.type === 'leaderboard') ? 'exists' : 'add')
+  }
+
+  const turnQuizOff = () => {
+    // Take away the leaderboard we added ourselves, but never one the host made
+    const lbId = autoLeaderboardId.current
+    if (lbId) setSlides(prev => prev.filter(s => s.id !== lbId))
+    autoLeaderboardId.current = null
+    setIsQuiz(false)
+    setQuizAutoOff(true)
+    setQuizOnToast(null)
+  }
+
+  // Marking a correct answer makes the deck a quiz — switch Quiz mode on so
+  // nobody forgets it, unless the host has turned it off for this deck.
+  useEffect(() => {
+    if (isQuiz || quizAutoOff || !slides.some(isScoredMcq)) return
+    turnQuizOn(true)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slides, isQuiz, quizAutoOff])
+
   // Undo an auto-split that happened during import — collapse the N
   // split slides back into a single unsplit HTML slide. Used when the
   // detection was wrong (file isn't actually a slideshow).
@@ -1385,10 +1443,11 @@ export default function Create() {
       // https:// URLs — never raw base64 — or large images silently break.
       const userSlug = auth.currentUser?.email?.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-')
                     ?? auth.currentUser?.uid
-      const cloudSlides = await toCloudinarySlides(slides, userSlug)
+      // A quiz always gets its leaderboard, even if it was removed or never added
+      const cloudSlides = await toCloudinarySlides(isQuiz ? withLeaderboard(slides) : slides, userSlug)
       setSlides(cloudSlides) // lock cloud URLs into the editor so we don't re-upload
       const code = await createSession(deckTitle, cloudSlides, isQuiz)
-      navigate(`/present/${code}`, { state: { slides: cloudSlides, deckTitle, sessionCode: code, startSlide, deckId: currentDeckId, isQuiz } })
+      navigate(`/present/${code}`, { state: { slides: cloudSlides, deckTitle, sessionCode: code, startSlide, deckId: currentDeckId, isQuiz, quizAutoOff } })
     } catch (err) {
       console.error('Failed to start session:', err)
       const msg = err instanceof Error ? err.message : 'Unknown error'
@@ -1410,12 +1469,12 @@ export default function Create() {
       // Upload base64 images to Cloudinary first (1 MB Firestore doc limit).
       const userSlug = auth.currentUser?.email?.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-')
                     ?? auth.currentUser?.uid
-      const cloudSlides = await toCloudinarySlides(slides, userSlug)
+      const cloudSlides = await toCloudinarySlides(isQuiz ? withLeaderboard(slides) : slides, userSlug)
       setSlides(cloudSlides)
       // Resync slides first so audience index matches presenter's deck
       await updateSessionSlides(resumeCode, cloudSlides, isQuiz)
       await updateSessionState(resumeCode, startSlide, 'question')
-      navigate(`/present/${resumeCode}`, { state: { slides: cloudSlides, deckTitle, sessionCode: resumeCode, startSlide, deckId: currentDeckId, isQuiz } })
+      navigate(`/present/${resumeCode}`, { state: { slides: cloudSlides, deckTitle, sessionCode: resumeCode, startSlide, deckId: currentDeckId, isQuiz, quizAutoOff } })
     } catch (err) {
       console.error('Failed to resume session:', err)
       const msg = err instanceof Error ? err.message : 'Unknown error'
@@ -1498,22 +1557,7 @@ export default function Create() {
           <span className="h-4 w-px bg-white/15" />
           {/* Quiz mode toggle — styled as a prominent button (matches Save / Export) */}
           <motion.button
-            onClick={() => {
-              if (!isQuiz) {
-                // Apply 30s default to any MCQ slide without a timer
-                setSlides(prev => prev.map(s =>
-                  s.type === 'mcq' && !(s as QuestionSlide).timer
-                    ? { ...s, timer: 30 }
-                    : s
-                ))
-                // Show leaderboard nudge toast
-                const hasLeaderboard = slides.some(s => (s as { type: string }).type === 'leaderboard')
-                setQuizOnToast(hasLeaderboard ? 'exists' : 'add')
-              } else {
-                setQuizOnToast(null)
-              }
-              setIsQuiz(v => !v)
-            }}
+            onClick={() => (isQuiz ? turnQuizOff() : turnQuizOn(false))}
             whileTap={{ scale: 0.96 }}
             title={isQuiz ? 'Quiz mode on — click to disable' : 'Enable quiz mode — score answers & show a leaderboard'}
             className={cn(
@@ -1779,7 +1823,19 @@ export default function Create() {
             className="absolute left-1/2 top-16 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border border-golden-sun/30 bg-white px-4 py-2 shadow-[0_8px_24px_-8px_rgba(0,0,121,0.18)]"
           >
             <Trophy className="size-3.5 shrink-0 text-golden-sun" />
-            {quizOnToast === 'add' ? (
+            {quizOnToast === 'auto' ? (
+              <>
+                <span className="text-xs font-medium text-midnight-sky-700">
+                  <span className="font-semibold text-midnight-sky-900">Quiz mode turned on</span> — answers are scored and a leaderboard shows the winners
+                </span>
+                <button
+                  onClick={() => turnQuizOff()}
+                  className="rounded-full border border-midnight-sky-200 px-2.5 py-1 text-[11px] font-semibold text-midnight-sky-700 transition hover:bg-midnight-sky-50"
+                >
+                  Turn off
+                </button>
+              </>
+            ) : quizOnToast === 'add' ? (
               <>
                 <span className="text-xs font-medium text-midnight-sky-700">
                   Add a Leaderboard slide to show the top 10 players

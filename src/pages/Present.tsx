@@ -1104,6 +1104,7 @@ export default function Present() {
                       lastResults,
                       selectedSlideId: deck[current]?.id,
                       isQuiz,
+                      quizAutoOff: locationState.quizAutoOff,
                     } })
                   }}
                   className="flex-1 rounded-xl bg-hot-pink py-3 text-sm font-medium text-white shadow-[0_0_20px_-4px] shadow-hot-pink/50 transition hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/70"
