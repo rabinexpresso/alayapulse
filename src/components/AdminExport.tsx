@@ -4,7 +4,7 @@ import { Globe, Table2, Trash2, Users } from 'lucide-react'
 import { doc, getDoc, setDoc } from 'firebase/firestore'
 import { getFunctions, httpsCallable } from 'firebase/functions'
 import { app, db } from '@/lib/firebase'
-import { optionLabel } from '@/lib/utils'
+import { optionLabel, fitColumns } from '@/lib/utils'
 import { aggregateRanking, parseRanking, rankingOrder } from '@/lib/ranking'
 import { formatDuration } from '@/lib/selfPacedTest'
 import {
@@ -235,7 +235,7 @@ async function buildAllSessionsWorkbook(sessions: ExportSession[], startDate: st
   })
 
   const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sessionRows), 'All Sessions')
+  XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(sessionRows), sessionRows), 'All Sessions')
   XLSX.utils.book_append_sheet(
     wb,
     XLSX.utils.json_to_sheet(
@@ -254,7 +254,7 @@ async function buildAllSessionsWorkbook(sessions: ExportSession[], startDate: st
     ),
     'All Questions',
   )
-  if (testRows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(testRows), 'Self-paced Tests')
+  if (testRows.length) XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(testRows), testRows), 'Self-paced Tests')
 
   const stamp = (startDate || endDate)
     ? `${startDate || 'start'} to ${endDate || 'now'}`

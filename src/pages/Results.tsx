@@ -7,7 +7,7 @@ import {
   Trash2, History, CheckCircle2, Table2, Check,
 } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
-import { cn, optionLabel } from '@/lib/utils'
+import { cn, optionLabel, fitColumns } from '@/lib/utils'
 import { aggregateRanking, parseRanking, rankingOrder } from '@/lib/ranking'
 import { KindTag, KIND_INFO, TestResultSection, liveKind, testSheets, addTestPdf, type QuestionKind } from '@/components/TestResults'
 import {
@@ -307,12 +307,12 @@ export default function Results() {
       ;(results.tests ?? []).forEach((t, ti) => {
         const suffix = (results.tests?.length ?? 0) > 1 ? ` ${ti + 1}` : ''
         const sheets = testSheets(t)
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheets.results), `Test results${suffix}`)
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheets.answers), `Test answers${suffix}`)
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheets.questions), `Test questions${suffix}`)
+        XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(sheets.results), sheets.results), `Test results${suffix}`)
+        XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(sheets.answers), sheets.answers), `Test answers${suffix}`)
+        XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(sheets.questions), sheets.questions), `Test questions${suffix}`)
       })
-      if (scorecardRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(scorecardRows), 'Scorecard')
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Question summary')
+      if (scorecardRows.length > 0) XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(scorecardRows), scorecardRows), 'Scorecard')
+      XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(summaryRows), summaryRows), 'Question summary')
 
       // Only add the Leaderboard if this deck is a quiz with at least one
       // scoreable question — otherwise the tab is omitted entirely (no clutter).
@@ -327,7 +327,7 @@ export default function Results() {
           'Speed Points':    row.speedPts,
           'Total Points':    row.total,
         }))
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(leaderboardRows), 'Live quiz leaderboard')
+        XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(leaderboardRows), leaderboardRows), 'Live quiz leaderboard')
       }
 
       const safeTitle = deck.title.replace(/[^a-z0-9\-_ ]/gi, '').trim() || 'results'

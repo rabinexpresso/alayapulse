@@ -75,9 +75,10 @@ export function TestBlockView({
   const round = state?.round ?? 0
   const sheets = useMemo(() => docs.filter(d => d.round === round), [docs, round])
   const submitted = sheets.filter(d => d.finished).length
-  const answering = sheets.length - submitted
+  // Answering = has picked at least one answer; an opened-but-untouched test is "not started"
+  const answering = sheets.filter(d => !d.finished && Object.values(d.answers ?? {}).some(a => a?.length)).length
   const participants = Math.max(viewerCount, sheets.length)
-  const notStarted = Math.max(0, participants - sheets.length)
+  const notStarted = Math.max(0, participants - submitted - answering)
   const remaining = remainingOf(state, now)
 
   /* ── Host actions ──────────────────────────────────────────────────── */

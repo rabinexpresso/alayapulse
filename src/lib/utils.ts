@@ -34,3 +34,15 @@ export const MAX_VIZ_OPTIONS = 12
 export function optionLabel(i: number, total: number): string {
   return total > 26 ? String(i + 1) : String.fromCharCode(65 + i)
 }
+
+/** Sizes each Excel column to fit its header and longest value (capped so long text stays readable). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function fitColumns<T extends Record<string, any>>(ws: any, rows: T[]): any {
+  const keys: string[] = []
+  rows.forEach(r => Object.keys(r).forEach(k => { if (!keys.includes(k)) keys.push(k) }))
+  ws['!cols'] = keys.map(k => {
+    const longest = rows.reduce((m, r) => Math.max(m, ...String(r[k] ?? '').split('\n').map(l => l.length)), k.length)
+    return { wch: Math.min(60, Math.max(6, longest + 2)) }
+  })
+  return ws
+}
