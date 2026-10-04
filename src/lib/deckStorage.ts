@@ -75,6 +75,33 @@ export interface ResultQuestion {
   responseCount: number
 }
 
+/** One self-paced test block's results. */
+export interface TestResultQuestion {
+  id:             string
+  question:       string
+  options:        string[]
+  correctAnswers: number[]
+  explanation?:   string
+}
+export interface TestResultParticipant {
+  id:      string
+  name:    string
+  correct: number
+  total:   number
+  /** Start → submit (or → end for those who ran out of time), pauses excluded. */
+  timeMs:  number
+  status:  'submitted' | 'timeout'
+  place:   number
+  /** question id → option indexes picked */
+  answers: Record<string, number[]>
+}
+export interface TestResult {
+  blockId:      string
+  timeLimit:    number
+  questions:    TestResultQuestion[]
+  participants: TestResultParticipant[]
+}
+
 export interface DeckResults {
   /** Unique id for this session's results — used for history lists and deletion. */
   id:             string
@@ -95,6 +122,8 @@ export interface DeckResults {
   /** Cloud only: individual responses live in the responseParts
    *  sub-collection rather than inline (see cloudSaveResults). */
   responsesSplit?: boolean
+  /** Self-paced test blocks run in this session. */
+  tests?:         TestResult[]
 }
 
 /**
@@ -476,6 +505,29 @@ function responsePartsCollection(uid: string, deckId: string, sessionId: string)
 }
 
 type ResponsePart = { question: number; part: number; responses: ResultResponse[] }
+/** A slice of one test's participants (with every answer they gave). */
+type TestPart = { kind: 'test'; test: number; part: number; participants: TestResultParticipant[] }
+
+/** Packs each test's participants into parts that each fit the budget. */
+function splitTests(results: DeckResults): TestPart[] {
+  const parts: TestPart[] = []
+  ;(results.tests ?? []).forEach((t, test) => {
+    let part = 0, size = 0
+    let chunk: TestResultParticipant[] = []
+    for (const p of t.participants) {
+      const pSize = jsonByteSize(p)
+      if (chunk.length && size + pSize > RESPONSE_PART_BUDGET) {
+        parts.push({ kind: 'test', test, part: part++, participants: chunk })
+        chunk = []; size = 0
+      }
+      chunk.push(p); size += pSize
+    }
+    if (chunk.length) parts.push({ kind: 'test', test, part, participants: chunk })
+  })
+  return parts
+}
+const testPartId = (test: number, part: number) =>
+  `t${String(test).padStart(3, '0')}-p${String(part).padStart(3, '0')}`
 
 /** Packs each question's answers into parts that each fit the budget. */
 function splitResponses(results: DeckResults): ResponsePart[] {
@@ -510,19 +562,23 @@ export async function cloudSaveResults(deckId: string, results: DeckResults): Pr
   const user = auth.currentUser
   if (!user) throw new Error('Not signed in')
   const parts = splitResponses(results)
+  const tparts = splitTests(results)
   const partsCol = responsePartsCollection(user.uid, deckId, results.id)
   // Answers first, session doc last — the session only shows up in the list
   // once everything it points to is saved. Re-saving the same session
   // overwrites parts in place; any left over from a bigger earlier save go.
   const existing = await getDocs(partsCol)
-  const keep = new Set(parts.map(p => partId(p.question, p.part)))
-  await Promise.all(parts.map(p =>
-    setDoc(doc(partsCol, partId(p.question, p.part)), stripUndefined(p))))
+  const keep = new Set([...parts.map(p => partId(p.question, p.part)), ...tparts.map(p => testPartId(p.test, p.part))])
+  await Promise.all([
+    ...parts.map(p => setDoc(doc(partsCol, partId(p.question, p.part)), stripUndefined(p))),
+    ...tparts.map(p => setDoc(doc(partsCol, testPartId(p.test, p.part)), stripUndefined(p))),
+  ])
   await Promise.all(existing.docs.filter(d => !keep.has(d.id)).map(d => deleteDoc(d.ref)))
 
   const summary: DeckResults = {
     ...results,
     questions: results.questions.map(q => ({ ...q, responses: [], responseCount: q.responses.length || q.responseCount || 0 })),
+    ...(results.tests ? { tests: results.tests.map(t => ({ ...t, participants: [] })) } : {}),
     responsesSplit: true,
   }
   // The session doc no longer carries answers, so it's small — the trim is
@@ -537,13 +593,18 @@ export async function cloudSaveResults(deckId: string, results: DeckResults): Pr
 async function loadResponseParts(uid: string, deckId: string, results: DeckResults): Promise<DeckResults> {
   if (!results.responsesSplit) return results
   const snap = await getDocs(responsePartsCollection(uid, deckId, results.id))
-  const parts = snap.docs.map(d => d.data() as ResponsePart)
-    .sort((a, b) => a.question - b.question || a.part - b.part)
+  const all = snap.docs.map(d => d.data())
+  const parts = all.filter(p => p.kind !== 'test') as ResponsePart[]
+  parts.sort((a, b) => a.question - b.question || a.part - b.part)
   const byQuestion = new Map<number, ResultResponse[]>()
   for (const p of parts) byQuestion.set(p.question, [...(byQuestion.get(p.question) ?? []), ...p.responses])
+  const tparts = (all.filter(p => p.kind === 'test') as TestPart[]).sort((a, b) => a.test - b.test || a.part - b.part)
+  const byTest = new Map<number, TestResultParticipant[]>()
+  for (const p of tparts) byTest.set(p.test, [...(byTest.get(p.test) ?? []), ...p.participants])
   return {
     ...results,
     questions: results.questions.map((q, i) => ({ ...q, responses: byQuestion.get(i) ?? [] })),
+    ...(results.tests ? { tests: results.tests.map((t, i) => ({ ...t, participants: byTest.get(i) ?? [] })) } : {}),
   }
 }
 

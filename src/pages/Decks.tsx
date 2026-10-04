@@ -1098,6 +1098,7 @@ function StorageChoiceScreen({
 
 const TYPE_LABELS: Record<string, string> = {
   mcq: 'MCQ', wordcloud: 'Word Cloud', openended: 'Open-ended', rating: 'Rating', ranking: 'Ranking',
+  testblock: 'Self-paced test',
 }
 const TYPE_COLORS: Record<string, string> = {
   mcq: 'bg-sky-blue/10 text-sky-blue',
@@ -1105,6 +1106,7 @@ const TYPE_COLORS: Record<string, string> = {
   openended: 'bg-golden-sun/10 text-golden-sun',
   rating: 'bg-hot-pink/10 text-hot-pink',
   ranking: 'bg-sky-blue/10 text-sky-blue',
+  testblock: 'bg-golden-sun/15 text-[#a07800]',
 }
 
 /* ── Slide theme palette (mirrors Create.tsx CONTENT_COLORS / QSLIDE_COLORS) */
@@ -1282,7 +1284,7 @@ function DeckCard({ deck, onOpen, onDelete, onExport, onShare, onDuplicate, isSe
   inSelectionMode: boolean
 }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const slides     = deck.slides as any[]
+  const slides     = (deck.slides as any[]).filter(s => s?.type !== 'testend')
   const qSlides    = slides.filter(s => s.type !== 'pdf')
   const qTypes     = [...new Set(qSlides.map(s => s.type as string))]
   const slideCount = slides.length

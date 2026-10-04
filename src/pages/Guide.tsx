@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   Hammer, Presentation, BarChart2, Upload, Scissors, LayoutGrid,
-  FileSpreadsheet, ListPlus, Bookmark, Play, Compass, Trophy,
+  FileSpreadsheet, ListPlus, Bookmark, Play, Compass, Trophy, ClipboardCheck,
   Download, Share2, Lightbulb, AlertTriangle,
 } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
@@ -171,15 +171,29 @@ const GUIDE: Stage[] = [
       {
         id: 'quiz-mode',
         icon: <Trophy className="size-4" />,
-        title: 'Quiz mode — points, timer resets, re-votes',
-        intro: 'Quiz mode turns your MCQ questions into a scored competition: right answers earn points, faster answers earn more, and a Leaderboard slide shows the champions.',
+        title: 'Live quiz — points, timer resets, re-votes',
+        intro: 'Live quiz turns the MCQ questions you show one at a time into a scored competition: right answers earn points, faster answers earn more, and a Leaderboard slide shows the champions. (Self-paced tests don’t need it — they’re always scored.)',
         steps: [
-          { text: <><strong>It switches on by itself:</strong> as soon as you mark a correct answer on an MCQ, the toggle in the top bar turns to <Btn color="gold">Quiz On</Btn> and a Leaderboard slide is added at the end of your deck (drag it anywhere you like). Every MCQ without a timer gets a 30-second one. Don’t want a competition? Click <Btn>Turn off</Btn> in the message that pops up (or the toggle) and it stays off for that deck.</>, image: 'quiz-toggle.png', imageAlt: 'Quiz mode toggle in the editor toolbar' },
-          { text: <><strong>Check it during the show:</strong> a gold <em>“Quiz mode”</em> badge sits in the bottom bar of the slideshow. No badge = quiz is off.</> },
+          { text: <><strong>It switches on by itself:</strong> as soon as you mark a correct answer on an MCQ, the toggle in the top bar turns to <Btn color="gold">Live quiz On</Btn> and a Leaderboard slide is added at the end of your deck (drag it anywhere you like). Every MCQ without a timer gets a 30-second one. Don’t want a competition? Click <Btn>Turn off</Btn> in the message that pops up (or the toggle) and it stays off for that deck.</>, image: 'quiz-toggle.png', imageAlt: 'Quiz mode toggle in the editor toolbar' },
+          { text: <><strong>Check it during the show:</strong> a gold <em>“Live quiz”</em> badge sits in the bottom bar of the slideshow. No badge = Live quiz is off.</> },
           { text: <><strong>Reset a question / timer:</strong> on a question slide, click the circular-arrow <Btn>Reset votes</Btn> control in the bottom bar and confirm. All answers for that question are cleared, the timer restarts, and everyone can answer once more.</>, image: 'reset-votes.png', imageAlt: 'Reset votes control during a live question' },
           { text: <>Want the scores between rounds too? Add another <Btn>Leaderboard</Btn> slide wherever you like. At each one the top 10 are revealed with a drumroll, and every player’s phone shows their own place.</> },
         ],
         tip: <>Set each question’s timer length in the editor — the timer also drives speed points, so shorter timers make speed matter more.</>,
+      },
+      {
+        id: 'self-paced-test',
+        icon: <ClipboardCheck className="size-4" />,
+        title: 'Self-paced test — everyone at their own pace',
+        intro: 'A self-paced test gives everyone the whole set of questions on their phone at once. They go at their own pace within one time limit, see the answers only at the end, and the winner has the most correct answers — a tie goes to the faster finish.',
+        steps: [
+          { text: <><strong>Add the block:</strong> in <strong>Add slide</strong>, click <Btn color="gold">Self-paced test</Btn>. A gold block appears in the sidebar. Questions <em>inside</em> the gold frame are the test; anything outside is a normal live question.</> },
+          { text: <><strong>Add questions:</strong> click <Btn>Add question</Btn> or <Btn color="gold">Import CSV</Btn> inside the block (same template and steps as other CSV imports). Only multiple-choice questions go in a test, and each needs its correct answer(s) ticked — several correct answers make it a “choose 2 / choose 3” question.</> },
+          { text: <><strong>Settings:</strong> click the gold header card to set the time limit, whether people see their score as soon as they submit or only at the end, and what follows the test: leaderboard then answer review, review then leaderboard, or leaderboard only. The arrow on the card folds the whole test into one card.</> },
+          { text: <><strong>During the show:</strong> the block shows the rules while people get ready — press <Btn color="gold">Start test</Btn>. A live dashboard shows the time left and how many have completed. Add or remove minutes, set an exact time, <Btn>Pause</Btn> (questions hide on every phone), <Btn>Restart</Btn> (just the timer, or the whole test), or <Btn color="pink">End test</Btn>.</> },
+          { text: <><strong>After the test:</strong> press → for the leaderboard (top 10 with the drumroll — every phone then shows its own place) and the answer review, one question per press, with how the room answered and the explanation.</> },
+        ],
+        tip: <>Correct answers never reach the phones until the test ends, and answers save as people go — if someone’s page closes, they rescan the QR and carry on.</>,
       },
     ],
   },
@@ -196,6 +210,8 @@ const GUIDE: Stage[] = [
         steps: [
           { text: <>After a show, open the deck and click <Btn>Results</Btn> — this opens the results page with every question’s answers.</> },
           { text: <>Use the download buttons to export everything as an <strong>Excel file</strong> (per-question tabs, participants, and — for quizzes — the leaderboard) or as a <strong>PDF summary</strong>.</>, image: 'results-page.png', imageAlt: 'Results page with Excel and PDF download buttons' },
+          { text: <>Every question is tagged as one of three kinds. <strong>Self-paced test:</strong> questions inside a Self-paced test block — everyone answers on their own phone at their own pace within one time limit, sees the answers at the end, and is ranked by correct answers, then finish time. <strong>Live quiz:</strong> multiple-choice questions with a correct answer, shown one at a time on the big screen while Live quiz is on — points for each right answer, plus extra points for answering fast. <strong>Poll:</strong> questions that aren’t scored, such as word clouds, open-ended, rating, ranking, and multiple choice with no correct answer — they show what the room thinks.</> },
+          { text: <>For a self-paced test, the results page lists every participant with their score, time taken and status — click a name to see each answer they gave. The Excel adds <strong>Test results</strong>, <strong>Test answers</strong> and <strong>Test questions</strong> tabs.</> },
           { text: <>Results are saved with the deck, so you can come back and download them later too.</> },
         ],
       },

@@ -9,6 +9,7 @@ import {
 import { AlayaMark } from '@/components/AlayaMark'
 import { cn, optionLabel } from '@/lib/utils'
 import { aggregateRanking, parseRanking, rankingOrder } from '@/lib/ranking'
+import { KindTag, KIND_INFO, TestResultSection, liveKind, testSheets, addTestPdf, type QuestionKind } from '@/components/TestResults'
 import {
   listResults, deleteResults, isResponseCorrect, getStorageBackend, onAuthStateChanged, auth,
   browserListDecks, cloudListDecks,
@@ -123,7 +124,7 @@ export default function Results() {
   const results = sessionsList?.find(s => s.id === selectedId) ?? sessionsList?.[0] ?? null
 
   /* ── Empty state ─────────────────────────────────────────────────── */
-  if (!sessionsList || sessionsList.length === 0 || !results || results.questions.length === 0) {
+  if (!sessionsList || sessionsList.length === 0 || !results || (results.questions.length === 0 && !results.tests?.length)) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center bg-white px-6 text-center">
         <AlayaMark className="mb-8" />
@@ -148,7 +149,10 @@ export default function Results() {
 
   /* ── Real results ────────────────────────────────────────────────── */
   const deckTitle    = deck?.title ?? 'Untitled session'
-  const totalResponses = results.questions.reduce((s, q) => s + q.responseCount, 0)
+  // Self-paced test answers count as responses too
+  const testAnswers = (results.tests ?? []).reduce((n, t) =>
+    n + t.participants.reduce((m, p) => m + Object.values(p.answers).filter(x => x.length > 0).length, 0), 0)
+  const totalResponses = results.questions.reduce((s, q) => s + q.responseCount, 0) + testAnswers
   // Overall participation: average per-question participation, but only across
   // questions that were actually shown (responseCount > 0), against the number
   // of unique people who answered (falling back to peak audience if individual
@@ -156,13 +160,14 @@ export default function Results() {
   const presentedQuestions = results.questions.filter(q => q.responseCount > 0)
   const uniqueRespondents = new Set<string>()
   presentedQuestions.forEach(q => q.responses.forEach(resp => uniqueRespondents.add(respondentKey(resp))))
+  ;(results.tests ?? []).forEach(t => t.participants.forEach(p => uniqueRespondents.add(p.id)))
   const respondentCount = uniqueRespondents.size > 0 ? uniqueRespondents.size : results.audienceCount
-  const avgParticipation = presentedQuestions.length > 0
-    ? Math.round(
-        presentedQuestions.reduce(
-          (s, q) => s + Math.min(100, (q.responseCount / Math.max(1, respondentCount)) * 100), 0
-        ) / presentedQuestions.length
-      )
+  // Each test question counts like a question: answered ÷ people taking part
+  const testShares = (results.tests ?? []).flatMap(t => t.questions.map(q =>
+    t.participants.filter(p => (p.answers[q.id]?.length ?? 0) > 0).length))
+  const shares = [...presentedQuestions.map(q => q.responseCount), ...testShares.filter(x => x > 0)]
+  const avgParticipation = shares.length > 0
+    ? Math.round(shares.reduce((s, n) => s + Math.min(100, (n / Math.max(1, respondentCount)) * 100), 0) / shares.length)
     : 0
 
   async function handleDownload() {
@@ -177,7 +182,7 @@ export default function Results() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const autoTable: any = (autoTableMod as any).default ?? (autoTableMod as any).autoTable ?? autoTableMod
       const doc = new jsPDF({ unit: 'pt', format: 'a4' })
-      buildResultsPdf(doc, autoTable, deck.title, results, totalResponses, avgParticipation)
+      buildResultsPdf(doc, autoTable, deck.title, results, totalResponses, avgParticipation, !!deck.isQuiz)
       const safeTitle = deck.title.replace(/[^a-z0-9\-_ ]/gi, '').trim() || 'results'
       const date = new Date(results.conductedAt).toISOString().slice(0, 10)
       doc.save(`${safeTitle} - ${date} results.pdf`)
@@ -222,7 +227,7 @@ export default function Results() {
       })
 
       // ── Question summary tab ───────────────────────────────────────────
-      const summaryRows = results.questions.map((q, i) => {
+      const summaryRows: Record<string, string | number>[] = results.questions.map((q, i) => {
         const hasCorrectAnswer = q.type === 'mcq' && (q.correctAnswers?.length ?? 0) > 0
         const correctCount = hasCorrectAnswer
           ? q.responses.filter(r => isResponseCorrect(r, q) === true).length
@@ -235,7 +240,8 @@ export default function Results() {
         return {
           'Q#':             i + 1,
           'Question':       q.question || '(Untitled question)',
-          'Type':           TYPE_LABELS[q.type] ?? q.type,
+          'Type':           KIND_INFO[liveKind(q, !!deck.isQuiz)].label,
+          'Format':         TYPE_LABELS[q.type] ?? q.type,
           'Correct Answer': correctAnswerText,
           'Responses':      q.responseCount,
           '% Correct':      hasCorrectAnswer ? `${Math.round((correctCount / Math.max(1, q.responseCount)) * 100)}%` : '',
@@ -275,8 +281,37 @@ export default function Results() {
         // Highest total first; ties broken alphabetically for a stable order.
         .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
 
+      // Self-paced test questions also appear in the question summary
+      ;(results.tests ?? []).forEach((t, ti) => {
+        t.questions.forEach((q, i) => {
+          const answered = t.participants.filter(p => (p.answers[q.id]?.length ?? 0) > 0)
+          const right = answered.filter(p => {
+            const a = p.answers[q.id]
+            return a.length === q.correctAnswers.length && a.every(x => q.correctAnswers.includes(x))
+          }).length
+          summaryRows.push({
+            'Q#':             `${(results.tests?.length ?? 0) > 1 ? `Test ${ti + 1} ` : 'Test '}Q${i + 1}`,
+            'Question':       q.question,
+            'Type':           KIND_INFO.test.label,
+            'Format':         TYPE_LABELS.mcq,
+            'Correct Answer': q.correctAnswers.slice().sort((a, b) => a - b).map(k => `${optionLabel(k, q.options.length)} — ${q.options[k] ?? ''}`).join('; '),
+            'Responses':      answered.length,
+            '% Correct':      answered.length ? `${Math.round((right / answered.length) * 100)}%` : '',
+            'Overall Ranking': '',
+          })
+        })
+      })
+
       const wb = XLSX.utils.book_new()
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(scorecardRows), 'Scorecard')
+      // Self-paced tests first: overview, every answer in full, per question
+      ;(results.tests ?? []).forEach((t, ti) => {
+        const suffix = (results.tests?.length ?? 0) > 1 ? ` ${ti + 1}` : ''
+        const sheets = testSheets(t)
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheets.results), `Test results${suffix}`)
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheets.answers), `Test answers${suffix}`)
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheets.questions), `Test questions${suffix}`)
+      })
+      if (scorecardRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(scorecardRows), 'Scorecard')
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Question summary')
 
       // Only add the Leaderboard if this deck is a quiz with at least one
@@ -292,7 +327,7 @@ export default function Results() {
           'Speed Points':    row.speedPts,
           'Total Points':    row.total,
         }))
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(leaderboardRows), 'Leaderboard')
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(leaderboardRows), 'Live quiz leaderboard')
       }
 
       const safeTitle = deck.title.replace(/[^a-z0-9\-_ ]/gi, '').trim() || 'results'
@@ -510,8 +545,19 @@ export default function Results() {
         )}
       </section>
 
+      {/* Self-paced tests */}
+      {(results.tests?.length ?? 0) > 0 && (
+        <section className="mx-auto max-w-6xl space-y-4 px-6 pb-8">
+          {results.tests!.map((t, i) => <TestResultSection key={t.blockId} test={t} index={i} />)}
+        </section>
+      )}
+
       {/* Per-question results */}
+      {results.questions.length > 0 && (
       <section className="mx-auto max-w-6xl px-6 pb-20">
+        {(results.tests?.length ?? 0) > 0 && (
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-midnight-sky-500">Live questions and polls</h2>
+        )}
         <div className="space-y-4">
           {results.questions.map((q, idx) => (
             <QuestionResult
@@ -519,10 +565,12 @@ export default function Results() {
               index={idx}
               question={q}
               audienceCount={results.audienceCount}
+              kind={liveKind(q, !!deck?.isQuiz)}
             />
           ))}
         </div>
       </section>
+      )}
 
       {/* Delete session confirmation (single or bulk) */}
       <AnimatePresence>
@@ -638,10 +686,11 @@ const TYPE_COLORS: Record<string, { bg: string; text: string }> = {
   ranking:   { bg: 'bg-sky-blue/10',    text: 'text-sky-blue'    },
 }
 
-function QuestionResult({ index, question, audienceCount }: {
+function QuestionResult({ index, question, audienceCount, kind }: {
   index: number
   question: ResultQuestion
   audienceCount: number
+  kind: QuestionKind
 }) {
   const [expanded, setExpanded] = useState(false)
   const meta = TYPE_COLORS[question.type] ?? TYPE_COLORS.mcq
@@ -667,6 +716,7 @@ function QuestionResult({ index, question, audienceCount }: {
           <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider', meta.bg, meta.text)}>
             {TYPE_LABELS[question.type] ?? question.type}
           </span>
+          <KindTag kind={kind} />
         </div>
         <h3 className="text-xl font-semibold text-midnight-sky-900">{question.question || '(Untitled question)'}</h3>
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-midnight-sky-500">
@@ -1158,7 +1208,7 @@ function formatTime(ts: number): string {
    ───────────────────────────────────────────────────────────────────────── */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckResults, totalResponses: number, avgParticipation: number) {
+function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckResults, totalResponses: number, avgParticipation: number, deckIsQuiz = false) {
   const pageW = doc.internal.pageSize.getWidth()
   const margin = 40
 
@@ -1212,8 +1262,14 @@ function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckRes
     doc.text('Note: ' + r.trimNote, margin, y, { maxWidth: pageW - margin * 2 })
   }
 
-  // Per-question sections
-  r.questions.forEach((q, idx) => {
+  // Self-paced tests first
+  ;(r.tests ?? []).forEach((t, i) => addTestPdf(doc, autoTable, t, (r.tests?.length ?? 0) > 1 ? `Self-paced test ${i + 1}` : 'Self-paced test'))
+
+  // Then live quiz questions, then polls (deck order within each)
+  const ordered = r.questions
+    .map((q, idx) => ({ q, idx, kind: liveKind(q, deckIsQuiz) }))
+    .sort((a, b) => (a.kind === b.kind ? a.idx - b.idx : a.kind === 'live' ? -1 : 1))
+  ordered.forEach(({ q, idx, kind }) => {
     doc.addPage()
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(13)
@@ -1242,7 +1298,7 @@ function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckRes
     doc.setFontSize(10)
     doc.setTextColor(120)
     doc.text(
-      `${TYPE_LABELS[q.type] ?? q.type}   ·   ${q.responseCount} responses`,
+      `${KIND_INFO[kind].label}   ·   ${TYPE_LABELS[q.type] ?? q.type}   ·   ${q.responseCount} responses`,
       margin, subtitleY,
     )
     let cursorY = subtitleY + 22

@@ -4,6 +4,10 @@ import {
   type Timestamp,
 } from 'firebase/firestore'
 import { db, auth } from './firebase'
+import {
+  toStoredTestBlock, testAnswerDocId,
+  type StoredTestBlockSlide, type TestBlockShowSlide, type TestState, type TestAnswerDoc,
+} from './selfPacedTest'
 
 /* ─────────────────────────────────────────────────────────────────────────
    Shared types
@@ -126,7 +130,7 @@ export interface StoredLeaderboardSlide {
   type: 'leaderboard'
 }
 
-export type StoredSlide = StoredPdfSlide | StoredMediaSlide | StoredHtmlSlide | StoredContentSlide | QuestionSlide | StoredCanvasSlide | StoredLeaderboardSlide
+export type StoredSlide = StoredPdfSlide | StoredMediaSlide | StoredHtmlSlide | StoredContentSlide | QuestionSlide | StoredCanvasSlide | StoredLeaderboardSlide | StoredTestBlockSlide
 
 export interface Session {
   code:          string
@@ -153,6 +157,8 @@ export interface Session {
   /** Quiz results for the phones, published by the presenter the moment a
    *  leaderboard reveals its winner: person id → [place, points]. */
   quizRanks?:     QuizRanks
+  /** Self-paced test blocks' live state, keyed by block id. */
+  tests?:         Record<string, TestState>
 }
 
 export interface Response {
@@ -232,8 +238,10 @@ function makeCode(): string {
    ───────────────────────────────────────────────────────────────────────── */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function createSession(title: string, rawSlides: any[], isQuiz?: boolean): Promise<string> {
-  const slides: StoredSlide[] = rawSlides.map(s => {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function toStoredSlide(s: any): StoredSlide {
+    // Self-paced test: phones get the questions without answers or explanations
+    if (s.type === 'testblock') return toStoredTestBlock(s as TestBlockShowSlide)
     if (s.type === 'pdf') {
       return { id: s.id, type: 'pdf' as const, pageNum: s.pageNum ?? 1 }
     }
@@ -303,7 +311,10 @@ export async function createSession(title: string, rawSlides: any[], isQuiz?: bo
       // Open Ended: preserve max submissions per person
       ...(typeof s.oeMaxSubmissions === 'number' ? { oeMaxSubmissions: s.oeMaxSubmissions } : {}),
     }
-  })
+}
+
+export async function createSession(title: string, rawSlides: any[], isQuiz?: boolean): Promise<string> {
+  const slides: StoredSlide[] = rawSlides.map(toStoredSlide)
 
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = makeCode()
@@ -383,69 +394,7 @@ export async function updateSessionState(
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function updateSessionSlides(code: string, rawSlides: any[], isQuiz?: boolean): Promise<void> {
-  const slides: StoredSlide[] = rawSlides.map(s => {
-    if (s.type === 'pdf')
-      return { id: s.id, type: 'pdf' as const, pageNum: s.pageNum ?? 1 }
-    if (s.type === 'image' || s.type === 'video')
-      return { id: s.id, type: s.type as 'image' | 'video', fileName: s.fileName ?? '' }
-    if (s.type === 'html')
-      // html payload omitted — audience doesn't render it; presenter has it locally.
-      return {
-        id:       s.id,
-        type:     'html' as const,
-        fileName: s.fileName ?? '',
-        ...(typeof s.slideIndex === 'number' ? { slideIndex: s.slideIndex } : {}),
-        ...(typeof s.slideTotal === 'number' ? { slideTotal: s.slideTotal } : {}),
-      }
-    if (s.type === 'content')
-      return {
-        id: s.id, type: 'content' as const,
-        template:    s.template    ?? 'heading',
-        title:       s.title       ?? '',
-        body:        s.body        ?? '',
-        attribution: s.attribution ?? '',
-        theme:       s.theme       ?? 'navy',
-        // Include image so the audience phone shows the same slide picture.
-        ...(s.imgUrl    ? { imgUrl:    String(s.imgUrl)    } : {}),
-        ...(s.imgLayout ? { imgLayout: String(s.imgLayout) } : {}),
-      }
-    if (s.type === 'canvas') {
-      return {
-        id:       s.id,
-        type:     'canvas' as const,
-        bg:       s.bg ?? { type: 'color', value: '#000079' },
-        elements: flattenCanvasElements(s.elements ?? []),
-      }
-    }
-    if (s.type === 'leaderboard') {
-      return { id: s.id, type: 'leaderboard' as const }
-    }
-    return {
-      id:       s.id,
-      type:     s.type as QType,
-      question: s.question ?? '',
-      options:  s.options ?? [],
-      ...(s.vizType ? { vizType: s.vizType as 'bar' | 'pie' | 'donut' } : {}),
-      ...(s.ratingMax === 10 ? { ratingMax: 10 as const } : {}),
-      ...(Array.isArray(s.leftLabels)  && s.leftLabels.length  > 0 ? { leftLabels:  (s.leftLabels  as unknown[]).map(v => String(v ?? '')) } : {}),
-      ...(Array.isArray(s.rightLabels) && s.rightLabels.length > 0 ? { rightLabels: (s.rightLabels as unknown[]).map(v => String(v ?? '')) } : {}),
-      ...(s.leftLabel  ? { leftLabel:  String(s.leftLabel)  } : {}),
-      ...(s.rightLabel ? { rightLabel: String(s.rightLabel) } : {}),
-      ...(s.theme      ? { theme:      String(s.theme)      } : {}),
-      ...(s.imgUrl     ? { imgUrl:     String(s.imgUrl)     } : {}),
-      ...(s.imgLayout  ? { imgLayout:  String(s.imgLayout)  } : {}),
-      // Word Cloud: preserve presenter-configured submission limit
-      ...(typeof s.wcMaxSubmissions === 'number' ? { wcMaxSubmissions: s.wcMaxSubmissions } : {}),
-      // MCQ: preserve correct answer indices for presenter reveal
-      ...(Array.isArray(s.correctAnswers) && s.correctAnswers.length > 0 ? { correctAnswers: s.correctAnswers as number[] } : {}),
-      // MCQ: preserve timer so auto-start works on session resume
-      ...(typeof s.timer === 'number' ? { timer: s.timer } : {}),
-      // MCQ: preserve explanation text for post-reveal teaching moment
-      ...(typeof s.explanation === 'string' && s.explanation.trim() ? { explanation: s.explanation.trim() } : {}),
-      // Open Ended: preserve max submissions per person
-      ...(typeof s.oeMaxSubmissions === 'number' ? { oeMaxSubmissions: s.oeMaxSubmissions } : {}),
-    }
-  })
+  const slides: StoredSlide[] = rawSlides.map(toStoredSlide)
   await updateDoc(doc(db, 'sessions', code.toUpperCase()), {
     slides,
     ...(isQuiz ? { isQuiz: true } : { isQuiz: deleteField() }),
@@ -681,6 +630,57 @@ export async function publishQuizRanks(
   board.forEach((e, i) => { if (e.id && !e.id.startsWith('name:')) ranks[e.id] = [i + 1, e.score] })
   const quizRanks: QuizRanks = { slideId, total: board.length, ranks, at: Date.now() }
   await updateDoc(doc(db, 'sessions', sessionCode.toUpperCase()), { quizRanks })
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Self-paced test — live state lives on the session doc at tests.<blockId>;
+   each person's answer sheet is one doc in responses (id blockId__personId),
+   so the existing open rules and per-slide listeners cover it.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/** Write some fields of a block's live state. Values may include serverTimestamp(). */
+export async function updateTestState(
+  code: string, blockId: string, patch: Partial<Record<keyof TestState, unknown>>,
+): Promise<void> {
+  const fields: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(patch)) fields[`tests.${blockId}.${k}`] = v === undefined ? deleteField() : v
+  await updateDoc(doc(db, 'sessions', code.toUpperCase()), fields)
+}
+
+/** Replace a block's whole live state (start of a show or a full restart). */
+export async function setTestState(code: string, blockId: string, state: TestState): Promise<void> {
+  await updateDoc(doc(db, 'sessions', code.toUpperCase()), { [`tests.${blockId}`]: state })
+}
+
+export const serverNow = () => serverTimestamp()
+
+/** A phone saves its answer sheet. `replace` starts a fresh sheet (new round). */
+export async function saveTestAnswers(
+  code: string, blockId: string, personId: string, data: Partial<TestAnswerDoc>, replace = false,
+): Promise<void> {
+  const ref = doc(db, 'sessions', code.toUpperCase(), 'responses', testAnswerDocId(blockId, personId))
+  await setDoc(ref, { ...data, slideId: blockId, type: 'testblock', value: '', submittedAt: serverTimestamp() }, { merge: !replace })
+}
+
+/** A phone marks its sheet as submitted (server time = its finish time). */
+export async function submitTestAnswers(code: string, blockId: string, personId: string, round: number, pausedAtFinish: number): Promise<void> {
+  const ref = doc(db, 'sessions', code.toUpperCase(), 'responses', testAnswerDocId(blockId, personId))
+  await setDoc(ref, { finished: true, finishedServer: serverTimestamp(), round, pausedAtFinish }, { merge: true })
+}
+
+/** A phone follows its own sheet (to restore answers and receive its score). */
+export function subscribeToTestAnswers(
+  code: string, blockId: string, personId: string, cb: (d: TestAnswerDoc | null) => void,
+): () => void {
+  return onSnapshot(
+    doc(db, 'sessions', code.toUpperCase(), 'responses', testAnswerDocId(blockId, personId)),
+    snap => cb(snap.exists() ? (snap.data() as TestAnswerDoc) : null),
+  )
+}
+
+/** Presenter writes a score onto someone's sheet (when scores show on submit). */
+export async function setTestScore(code: string, blockId: string, personId: string, score: number): Promise<void> {
+  await updateDoc(doc(db, 'sessions', code.toUpperCase(), 'responses', testAnswerDocId(blockId, personId)), { score })
 }
 
 /* ─────────────────────────────────────────────────────────────────────────

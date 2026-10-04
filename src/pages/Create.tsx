@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef, createContext, useContext, type ReactNode } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { createSession, updateSessionState, updateSessionSlides, subscribeToViewerCount } from '@/lib/session'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -18,12 +18,17 @@ import {
   Video, Type, List, Quote, Users, BarChart2, PieChart,
   X, Table2, Check, Undo2, Redo2, Trophy, ImageIcon,
   ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, Clock,
-  Share2, Link2, ListOrdered,
+  Share2, Link2, ListOrdered, ClipboardCheck, ListChecks, ChevronRight,
 } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
 import { PersistentHtmlIframe } from '@/components/PersistentHtmlIframe'
 import { cn, optionLabel, MAX_MCQ_OPTIONS, MAX_VIZ_OPTIONS } from '@/lib/utils'
 import { injectSlideNavigation } from '@/lib/importFile'
+import {
+  DEFAULT_TEST_SETTINGS, AFTER_ORDER_LABEL,
+  normalizeTestBlocks, collapseTestBlocks, expandTestBlocks, testRanges, testMembership, testProblems,
+  type TestHeaderSlide, type TestEndSlide, type TestAfterOrder, type TestScoreTiming,
+} from '@/lib/selfPacedTest'
 import {
   getStorageBackend, setStorageBackend,
   browserSaveDeck, cloudSaveDeck, getUniqueDeckTitle,
@@ -286,7 +291,7 @@ interface CanvasSlide { id: string; type: 'canvas'; bg: CanvasBg; elements: Canv
 interface LeaderboardSlide { id: string; type: 'leaderboard'; bg?: CanvasBg }
 type CanvasLayout = 'blank' | 'title-only' | 'title-body' | 'two-columns'
 
-type Slide = PdfSlide | ImageSlide | VideoSlide | HtmlSlide | QuestionSlide | ContentSlide | CanvasSlide | LeaderboardSlide
+type Slide = PdfSlide | ImageSlide | VideoSlide | HtmlSlide | QuestionSlide | ContentSlide | CanvasSlide | LeaderboardSlide | TestHeaderSlide | TestEndSlide
 
 /* ─────────────────────────────────────────────────────────────────────────
    Constants
@@ -312,12 +317,35 @@ function uid() { return Math.random().toString(36).slice(2, 10) }
 /** An MCQ with a correct answer marked — the thing that makes a deck a quiz. */
 const isScoredMcq = (s: Slide) => s.type === 'mcq' && ((s as QuestionSlide).correctAnswers?.length ?? 0) > 0
 
+/** Scored MCQs outside self-paced test blocks — the ones Live quiz is about.
+ *  A test block scores its own questions, so they never switch Live quiz on. */
+function liveScoredMcqs(list: Slide[]): Slide[] {
+  const inTest = testMembership(list)
+  return list.filter(s => isScoredMcq(s) && !inTest.has(s.id))
+}
+
 /** Adds a Leaderboard at the end of the deck if a quiz doesn't have one.
  *  The end, not after the last marked question: Quiz mode switches on at the
  *  first correct answer, when later questions aren't marked yet. */
 function withLeaderboard(list: Slide[]): Slide[] {
-  if (list.some(s => s.type === 'leaderboard') || !list.some(isScoredMcq)) return list
+  if (list.some(s => s.type === 'leaderboard') || liveScoredMcqs(list).length === 0) return list
   return [...list, { id: uid(), type: 'leaderboard' } as LeaderboardSlide]
+}
+
+/** Lets the question editor know it's editing a test question. */
+const TestQuestionCtx = createContext<{ index: number; count: number } | null>(null)
+
+/** Where `afterId` really points when inserting: a collapsed block's header
+ *  means "after the whole block", an end marker means "after the block". */
+function insertAfterIndex(list: Slide[], afterId: string | undefined): number {
+  if (afterId === undefined) return list.length - 1
+  const idx = list.findIndex(s => s.id === afterId)
+  const s = list[idx]
+  if (s?.type === 'testblock' && (s as TestHeaderSlide).collapsed) {
+    const end = list.findIndex(x => x.type === 'testend' && (x as TestEndSlide).blockId === s.id)
+    return end >= 0 ? end : idx
+  }
+  return idx
 }
 
 function makeQuestion(type: QType, isQuizMode = false): QuestionSlide {
@@ -671,7 +699,7 @@ export default function Create() {
   const deckFromState = returnState.deck as Deck | undefined   // loaded from My Decks
 
   const [slides, setSlides]         = useState<Slide[]>(
-    migrateSlides(deckFromState?.slides as Slide[] ?? returnState.slides ?? []),
+    migrateSlides(expandTestBlocks(deckFromState?.slides as Slide[] ?? returnState.slides ?? []) as Slide[]),
   )
   const [selectedId, setSelectedId] = useState<string | null>(
     (returnState.selectedSlideId as string | undefined)
@@ -737,7 +765,11 @@ export default function Create() {
   const [quizOnToast, setQuizOnToast] = useState<'add' | 'exists' | 'auto' | null>(null)
   // The Leaderboard slide auto-added with it, so "Turn off" can take it away again
   const autoLeaderboardId = useRef<string | null>(null)
-  const [csvImportToast, setCsvImportToast] = useState<{ count: number } | null>(null)
+  const [csvImportToast, setCsvImportToast] = useState<{ count: number; message?: string } | null>(null)
+  // Self-paced test notes: "block added", "moved out of the block", …
+  const [testToast, setTestToast] = useState<string | null>(null)
+  // CSV import window: where the questions go
+  const [csvModal, setCsvModal] = useState<{ dest: 'live' | 'test' | 'ask'; headerId?: string } | null>(null)
 
   /* ── Undo / Redo history ─────────────────────────────────────────────── */
   type HistorySnap = { slides: Slide[]; selectedId: string | null }
@@ -1113,11 +1145,29 @@ export default function Create() {
 
   /* ── CSV import ──────────────────────────────────────────────────────── */
 
-  const importCsvSlides = useCallback((newSlides: QuestionSlide[]) => {
+  const importCsvSlides = useCallback((newSlides: QuestionSlide[], dest: 'live' | 'test' = 'live', headerId?: string) => {
     pushHistory()
-    setSlides(prev => [...prev, ...newSlides])
-    setSelectedId(prev => prev ?? newSlides[0]?.id ?? null)
-    setCsvImportToast({ count: newSlides.length })
+    if (dest === 'live') {
+      setSlides(prev => [...prev, ...newSlides])
+      setSelectedId(prev => prev ?? newSlides[0]?.id ?? null)
+      setCsvImportToast({ count: newSlides.length })
+      return
+    }
+    // Into a test: MCQs go inside the block, anything else right after it
+    const intoTest = newSlides.filter(q => q.type === 'mcq')
+    const outside  = newSlides.filter(q => q.type !== 'mcq')
+    setSlides(prev => {
+      const block = testRanges(prev).find(r => r.headerId === headerId) ?? testRanges(prev)[0]
+      if (!block) return [...prev, ...newSlides]
+      return [...prev.slice(0, block.end), ...intoTest, prev[block.end], ...outside, ...prev.slice(block.end + 1)]
+    })
+    if (intoTest[0]) setSelectedId(intoTest[0].id)
+    setCsvImportToast({
+      count: intoTest.length,
+      message: `${intoTest.length} question${intoTest.length !== 1 ? 's' : ''} added to the self-paced test`
+        + (outside.length ? ` · ${outside.length} that aren't multiple choice added after the block as live questions` : '')
+        + (intoTest.some(q => q.timer) ? ' · timers ignored (the test has one time limit)' : ''),
+    })
   }, [pushHistory])
 
   /* ── Slide mutation ─────────────────────────────────────────────────── */
@@ -1127,7 +1177,7 @@ export default function Create() {
     const slide = makeQuestion(type, isQuiz)
     setSlides(prev => {
       if (afterId === undefined) return [...prev, slide]
-      const idx  = prev.findIndex(s => s.id === afterId)
+      const idx  = insertAfterIndex(prev, afterId)
       const next = [...prev]
       next.splice(idx + 1, 0, slide)
       return next
@@ -1137,7 +1187,17 @@ export default function Create() {
   }, [pushHistory, isQuiz])
 
   const deleteSlide = useCallback((id: string) => {
+    const target = slidesRef.current.find(s => s.id === id)
+    if (target?.type === 'testend') return
     pushHistory()
+    if (target?.type === 'testblock') {
+      // Removing a block keeps its questions — they become live questions
+      const r = testRanges(slidesRef.current).find(x => x.headerId === id)
+      setSlides(prev => prev.filter(s => s.id !== id && !(s.type === 'testend' && (s as TestEndSlide).blockId === id)))
+      setSelectedId(r?.memberIds[0] ?? null)
+      if (r?.memberIds.length) setTestToast(`Test block removed — its ${r.memberIds.length} question${r.memberIds.length !== 1 ? 's are' : ' is'} now live questions`)
+      return
+    }
     setSlides(prev => {
       const next = prev.filter(s => s.id !== id)
       if (selectedId === id) {
@@ -1149,8 +1209,23 @@ export default function Create() {
   }, [selectedId, pushHistory])
 
   const duplicateSlide = useCallback((id: string) => {
+    const target = slidesRef.current.find(s => s.id === id)
+    if (target?.type === 'testend') return
     pushHistory()
     const newId = uid()
+    if (target?.type === 'testblock') {
+      // Copy the whole block — header, questions and end — after the original
+      setSlides(prev => {
+        const r = testRanges(prev).find(x => x.headerId === id)
+        if (!r) return prev
+        const copy = JSON.parse(JSON.stringify(prev.slice(r.start, r.end + 1))) as Slide[]
+        copy.forEach((s, i) => { s.id = i === 0 ? newId : uid() })
+        ;(copy[copy.length - 1] as TestEndSlide).blockId = newId
+        return [...prev.slice(0, r.end + 1), ...copy, ...prev.slice(r.end + 1)]
+      })
+      setSelectedId(newId)
+      return
+    }
     setSlides(prev => {
       const idx = prev.findIndex(s => s.id === id)
       if (idx === -1) return prev
@@ -1173,22 +1248,121 @@ export default function Create() {
 
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     const { active, over } = event
-    if (over && active.id !== over.id) {
-      pushHistory()
-      setSlides(prev => {
-        const from = prev.findIndex(s => s.id === active.id)
-        const to   = prev.findIndex(s => s.id === over.id)
-        return arrayMove(prev, from, to)
-      })
-    }
+    if (!over || active.id === over.id) return
+    const list = slidesRef.current
+    const moving = list.find(s => s.id === active.id)
+    if (!moving || moving.type === 'testend') return
+    pushHistory()
+    setSlides(prev => {
+      const from = prev.findIndex(s => s.id === active.id)
+      const to   = prev.findIndex(s => s.id === over.id)
+      const ranges = testRanges(prev)
+      // The unit being moved: a whole block, or one slide
+      const own = moving.type === 'testblock' ? ranges.find(r => r.headerId === moving.id) : undefined
+      const unitStart = own ? own.start : from
+      const unitEnd   = own ? own.end   : from
+      // Dropping onto a block (or a collapsed block's header) lands before or after
+      // the whole block — never inside it — when moving a block or passing a folded one
+      const overRange = ranges.find(r => to >= r.start && to <= r.end && r.headerId !== own?.headerId)
+      const overHeader = prev[to] as TestHeaderSlide
+      const jumpWholeBlock = overRange && (own || (overHeader.type === 'testblock' && overHeader.collapsed))
+      const unit = prev.slice(unitStart, unitEnd + 1)
+      const rest = [...prev.slice(0, unitStart), ...prev.slice(unitEnd + 1)]
+      let at: number
+      if (jumpWholeBlock && overRange) {
+        const anchor = to > from ? overRange.end : overRange.start
+        const anchorId = prev[anchor].id
+        const ai = rest.findIndex(s => s.id === anchorId)
+        at = to > from ? ai + 1 : ai
+      } else {
+        const overId = prev[to].id
+        const oi = rest.findIndex(s => s.id === overId)
+        at = to > from ? oi + 1 : oi
+      }
+      if (own && !jumpWholeBlock) {
+        // A block dropped on a plain slide: keep it as one piece around that slide
+        return [...rest.slice(0, at), ...unit, ...rest.slice(at)]
+      }
+      if (!own && !jumpWholeBlock) return arrayMove(prev, from, to)
+      return [...rest.slice(0, at), ...unit, ...rest.slice(at)]
+    })
   }, [pushHistory])
+
+  // Keep test blocks valid after any change (drag, undo, import, paste…):
+  // only MCQs can sit inside a block; anything else moves to just after it.
+  useEffect(() => {
+    const { slides: fixed, movedOut } = normalizeTestBlocks(slides)
+    if (fixed === slides) return
+    setSlides(fixed as Slide[])
+    if (movedOut.length) {
+      setTestToast(movedOut.length === 1
+        ? 'Only multiple-choice questions can go in a self-paced test — that slide was placed just after the block'
+        : `Only multiple-choice questions can go in a self-paced test — ${movedOut.length} slides were placed just after the block`)
+    }
+  }, [slides])
+
+  // Auto-dismiss test notes
+  useEffect(() => {
+    if (!testToast) return
+    const id = window.setTimeout(() => setTestToast(null), 9000)
+    return () => window.clearTimeout(id)
+  }, [testToast])
+
+  /* ── Self-paced test blocks ─────────────────────────────────────────── */
+
+  const addTestBlock = useCallback((afterId?: string) => {
+    pushHistory()
+    const header: TestHeaderSlide = { id: uid(), type: 'testblock', ...DEFAULT_TEST_SETTINGS }
+    const end: TestEndSlide = { id: uid(), type: 'testend', blockId: header.id }
+    setSlides(prev => {
+      // Never inside another block — after it instead
+      let idx = afterId === undefined ? prev.length - 1 : prev.findIndex(s => s.id === afterId)
+      const inBlock = testRanges(prev).find(r => idx >= r.start && idx < r.end)
+      if (inBlock) idx = inBlock.end
+      const next = [...prev]
+      next.splice(idx + 1, 0, header, end)
+      return next
+    })
+    setSelectedId(header.id)
+    setAddMenu(undefined)
+    setTestToast('Self-paced test block added. It scores itself: no need to turn on Live quiz.')
+  }, [pushHistory])
+
+  const addTestQuestion = useCallback((headerId: string) => {
+    pushHistory()
+    const q = makeQuestion('mcq', false)
+    setSlides(prev => {
+      const r = testRanges(prev).find(x => x.headerId === headerId)
+      if (!r) return prev
+      const next = prev.map(s => s.id === headerId ? { ...s, collapsed: false } as Slide : s)
+      next.splice(r.end, 0, q)
+      return next
+    })
+    setSelectedId(q.id)
+  }, [pushHistory])
+
+  const moveIntoTest = useCallback((headerId: string, ids: string[]) => {
+    if (!ids.length) return
+    pushHistory()
+    setSlides(prev => {
+      const picked = prev.filter(s => ids.includes(s.id))
+      const rest = prev.filter(s => !ids.includes(s.id))
+      const endAt = rest.findIndex(s => s.type === 'testend' && (s as TestEndSlide).blockId === headerId)
+      if (endAt < 0) return prev
+      return [...rest.slice(0, endAt), ...picked, ...rest.slice(endAt)]
+    })
+  }, [pushHistory])
+
+  const toggleTestCollapsed = useCallback((headerId: string) => {
+    setSlides(prev => prev.map(s => s.id === headerId ? { ...s, collapsed: !(s as TestHeaderSlide).collapsed } as Slide : s))
+  }, [])
 
   const addContent = useCallback((template: ContentTemplate, afterId?: string) => {
     pushHistory()
     const slide = makeContent(template)
     setSlides(prev => {
       if (afterId === undefined) return [...prev, slide]
-      const idx  = prev.findIndex(s => s.id === afterId)
+      const idx  = insertAfterIndex(prev, afterId)
       const next = [...prev]
       next.splice(idx + 1, 0, slide)
       return next
@@ -1208,7 +1382,7 @@ export default function Create() {
     const slide = makeCanvasWithLayout(layout)
     setSlides(prev => {
       if (afterId === undefined) return [...prev, slide]
-      const idx  = prev.findIndex(s => s.id === afterId)
+      const idx  = insertAfterIndex(prev, afterId)
       const next = [...prev]
       next.splice(idx + 1, 0, slide)
       return next
@@ -1221,7 +1395,7 @@ export default function Create() {
     const slide: LeaderboardSlide = { id: uid(), type: 'leaderboard' }
     setSlides(prev => {
       if (afterId === undefined) return [...prev, slide]
-      const idx  = prev.findIndex(s => s.id === afterId)
+      const idx  = insertAfterIndex(prev, afterId)
       const next = [...prev]
       next.splice(idx + 1, 0, slide)
       return next
@@ -1235,8 +1409,9 @@ export default function Create() {
   // `auto` = switched on because a correct answer was marked, not by hand.
   const turnQuizOn = (auto: boolean) => {
     setSlides(prev => {
-      // 30 s default on every MCQ without a timer — speed points need one
-      const timed = prev.map(s => s.type === 'mcq' && !(s as QuestionSlide).timer ? { ...s, timer: 30 } : s)
+      // 30 s default on every live MCQ without a timer — speed points need one
+      const inTest = testMembership(prev)
+      const timed = prev.map(s => s.type === 'mcq' && !inTest.has(s.id) && !(s as QuestionSlide).timer ? { ...s, timer: 30 } : s)
       const next  = withLeaderboard(timed)
       const added = next.find(s => s.type === 'leaderboard' && !timed.some(t => t.id === s.id))
       autoLeaderboardId.current = added?.id ?? null
@@ -1244,7 +1419,7 @@ export default function Create() {
     })
     setIsQuiz(true)
     setQuizAutoOff(false)
-    setQuizOnToast(auto ? 'auto' : slides.some(isScoredMcq) || slides.some(s => s.type === 'leaderboard') ? 'exists' : 'add')
+    setQuizOnToast(auto ? 'auto' : liveScoredMcqs(slides).length > 0 || slides.some(s => s.type === 'leaderboard') ? 'exists' : 'add')
   }
 
   const turnQuizOff = () => {
@@ -1260,7 +1435,7 @@ export default function Create() {
   // Marking a correct answer makes the deck a quiz — switch Quiz mode on so
   // nobody forgets it, unless the host has turned it off for this deck.
   useEffect(() => {
-    if (isQuiz || quizAutoOff || !slides.some(isScoredMcq)) return
+    if (isQuiz || quizAutoOff || liveScoredMcqs(slides).length === 0) return
     turnQuizOn(true)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slides, isQuiz, quizAutoOff])
@@ -1428,12 +1603,30 @@ export default function Create() {
     el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }, [selectedId])
 
+  /** Show slides (test blocks collapsed) and where the selected slide lands in them. */
+  const toShow = (list: Slide[]) => {
+    const show = collapseTestBlocks(list)
+    const inTest = testMembership(list)
+    const sel = list.find(s => s.id === selectedId)
+    const key = sel?.type === 'testend' ? (sel as TestEndSlide).blockId : inTest.get(selectedId ?? '') ?? selectedId
+    return { show, startSlide: Math.max(0, show.findIndex(s => s.id === key)) }
+  }
+
+  /** Stops the show starting while a test block can't run, and says why. */
+  const blockedByTest = () => {
+    const problem = testProblems(slides)[0]
+    if (!problem) return false
+    setSelectedId(problem.slideId)
+    setSessionError(problem.message)
+    setTimeout(() => setSessionError(null), 8000)
+    return true
+  }
+
   const startSession = async () => {
     if (slides.length === 0 || isStarting) return
+    if (blockedByTest()) return
     setStarting(true)
     setSessionError(null)
-    // Start from whichever slide is currently selected in the panel
-    const startSlide = Math.max(0, slides.findIndex(s => s.id === selectedId))
     try {
       // Upload any base64 images (PDF/question/content/canvas) to Cloudinary FIRST.
       // The session doc has a hard 1 MB Firestore limit, so we must store short
@@ -1443,8 +1636,10 @@ export default function Create() {
       // A quiz always gets its leaderboard, even if it was removed or never added
       const cloudSlides = await toCloudinarySlides(isQuiz ? withLeaderboard(slides) : slides, userSlug)
       setSlides(cloudSlides) // lock cloud URLs into the editor so we don't re-upload
-      const code = await createSession(deckTitle, cloudSlides, isQuiz)
-      navigate(`/present/${code}`, { state: { slides: cloudSlides, deckTitle, sessionCode: code, startSlide, deckId: currentDeckId, isQuiz, quizAutoOff } })
+      // Start from whichever slide is currently selected in the panel
+      const { show, startSlide } = toShow(cloudSlides)
+      const code = await createSession(deckTitle, show, isQuiz)
+      navigate(`/present/${code}`, { state: { slides: show, deckTitle, sessionCode: code, startSlide, deckId: currentDeckId, isQuiz, quizAutoOff } })
     } catch (err) {
       console.error('Failed to start session:', err)
       const msg = err instanceof Error ? err.message : 'Unknown error'
@@ -1459,19 +1654,20 @@ export default function Create() {
   // correct slide even if the deck was edited since the last session start.
   const resumeSession = async () => {
     if (!resumeCode || isStarting) return
+    if (blockedByTest()) return
     setStarting(true)
     setSessionError(null)
-    const startSlide = Math.max(0, slides.findIndex(s => s.id === selectedId))
     try {
       // Upload base64 images to Cloudinary first (1 MB Firestore doc limit).
       const userSlug = auth.currentUser?.email?.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-')
                     ?? auth.currentUser?.uid
       const cloudSlides = await toCloudinarySlides(isQuiz ? withLeaderboard(slides) : slides, userSlug)
       setSlides(cloudSlides)
+      const { show, startSlide } = toShow(cloudSlides)
       // Resync slides first so audience index matches presenter's deck
-      await updateSessionSlides(resumeCode, cloudSlides, isQuiz)
+      await updateSessionSlides(resumeCode, show, isQuiz)
       await updateSessionState(resumeCode, startSlide, 'question')
-      navigate(`/present/${resumeCode}`, { state: { slides: cloudSlides, deckTitle, sessionCode: resumeCode, startSlide, deckId: currentDeckId, isQuiz, quizAutoOff } })
+      navigate(`/present/${resumeCode}`, { state: { slides: show, deckTitle, sessionCode: resumeCode, startSlide, deckId: currentDeckId, isQuiz, quizAutoOff } })
     } catch (err) {
       console.error('Failed to resume session:', err)
       const msg = err instanceof Error ? err.message : 'Unknown error'
@@ -1556,7 +1752,7 @@ export default function Create() {
           <motion.button
             onClick={() => (isQuiz ? turnQuizOff() : turnQuizOn(false))}
             whileTap={{ scale: 0.96 }}
-            title={isQuiz ? 'Quiz mode on — click to disable' : 'Enable quiz mode — score answers & show a leaderboard'}
+            title="Live quiz gives points for questions you show one at a time on the big screen. Self-paced tests don't need it — they're always scored."
             className={cn(
               'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-medium transition-all duration-200',
               isQuiz
@@ -1565,7 +1761,7 @@ export default function Create() {
             )}
           >
             <Trophy className="size-3.5" />
-            Quiz {isQuiz ? 'On' : 'Off'}
+            Live quiz {isQuiz ? 'On' : 'Off'}
           </motion.button>
         </div>
 
@@ -1823,7 +2019,7 @@ export default function Create() {
             {quizOnToast === 'auto' ? (
               <>
                 <span className="text-xs font-medium text-midnight-sky-700">
-                  <span className="font-semibold text-midnight-sky-900">Quiz mode turned on</span> — answers are scored.{' '}
+                  <span className="font-semibold text-midnight-sky-900">Live quiz turned on</span> — answers are scored.{' '}
                   {autoLeaderboardId.current
                     ? 'A Leaderboard slide was added at the end of your deck — drag it anywhere.'
                     : 'Your Leaderboard slide will show the winners.'}
@@ -1866,6 +2062,40 @@ export default function Create() {
         )}
       </AnimatePresence>
 
+      {/* ── CSV import window ───────────────────────────────────────── */}
+      <AnimatePresence>
+        {csvModal && (
+          <CsvImportModal
+            destination={csvModal.dest}
+            onClose={() => setCsvModal(null)}
+            onImport={(list, dest) => { importCsvSlides(list, dest, csvModal.headerId); setCsvModal(null) }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── Self-paced test notes ───────────────────────────────────── */}
+      <AnimatePresence>
+        {testToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+            className="absolute left-1/2 top-16 z-40 flex max-w-[min(92vw,560px)] -translate-x-1/2 items-center gap-3 rounded-full border border-golden-sun/40 bg-white px-4 py-2 shadow-[0_8px_24px_-8px_rgba(0,0,121,0.18)]"
+          >
+            <ClipboardCheck className="size-3.5 shrink-0 text-golden-sun" />
+            <span className="text-xs font-medium text-midnight-sky-700">{testToast}</span>
+            <button
+              onClick={() => setTestToast(null)}
+              className="rounded-full p-0.5 text-midnight-sky-400 transition hover:bg-midnight-sky-100 hover:text-midnight-sky-700"
+              aria-label="Dismiss"
+            >
+              <X className="size-3.5" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ── CSV import success toast ────────────────────────────────── */}
       <AnimatePresence>
         {csvImportToast && (
@@ -1878,7 +2108,7 @@ export default function Create() {
           >
             <span className="flex size-2 shrink-0 rounded-full bg-fresh-green" />
             <span className="text-xs font-medium text-midnight-sky-700">
-              {csvImportToast.count} question{csvImportToast.count !== 1 ? 's' : ''} added to the end of your deck
+              {csvImportToast.message ?? `${csvImportToast.count} question${csvImportToast.count !== 1 ? 's' : ''} added to the end of your deck`}
             </span>
             <button
               onClick={() => { setShowSorter(true); setCsvImportToast(null) }}
@@ -1963,19 +2193,48 @@ export default function Create() {
           onDuplicate={duplicateSlide}
           onDragEnd={handleDragEnd}
           onImport={importFile}
-          onImportCsv={importCsvSlides}
+          onOpenCsv={() => setCsvModal({ dest: slides.some(s => s.type === 'testblock') ? 'ask' : 'live' })}
           onOpenSorter={() => setShowSorter(true)}
           onSetAddMenu={setAddMenu}
           onAddQuestion={addQuestion}
           onAddContent={addContent}
           onAddCanvas={requestCanvas}
           onAddLeaderboard={addLeaderboard}
+          onAddTest={addTestBlock}
+          onAddTestQuestion={addTestQuestion}
+          onImportCsvToTest={headerId => setCsvModal({ dest: 'test', headerId })}
+          onToggleTestCollapsed={toggleTestCollapsed}
         />
 
         {/* Right: editor */}
         <div className="scrollbar-panel flex flex-1 flex-col overflow-auto" style={{ background: '#f8f7f5' }}>
-          {selectedSlide ? (
-            <SlideEditor slide={selectedSlide} onUpdate={updateSlide} onSplitHtml={splitHtmlSlide} onPushHistory={pushHistory} />
+          {selectedSlide && (selectedSlide.type === 'testblock' || selectedSlide.type === 'testend') ? (
+            <TestBlockEditor
+              header={(selectedSlide.type === 'testend'
+                ? slides.find(s => s.id === (selectedSlide as TestEndSlide).blockId)
+                : selectedSlide) as TestHeaderSlide}
+              slides={slides}
+              focusAfter={selectedSlide.type === 'testend'}
+              onUpdate={patch => {
+                pushHistory()
+                const hid = selectedSlide.type === 'testend' ? (selectedSlide as TestEndSlide).blockId : selectedSlide.id
+                updateSlide(hid, patch)
+              }}
+              onSelect={setSelectedId}
+              onAddQuestion={addTestQuestion}
+              onImportCsv={headerId => setCsvModal({ dest: 'test', headerId })}
+              onMoveIn={moveIntoTest}
+              onDelete={deleteSlide}
+            />
+          ) : selectedSlide ? (
+            (() => {
+              const r = testRanges(slides).find(x => x.memberIds.includes(selectedSlide.id))
+              return (
+                <TestQuestionCtx.Provider value={r ? { index: r.memberIds.indexOf(selectedSlide.id), count: r.memberIds.length } : null}>
+                  <SlideEditor slide={selectedSlide} onUpdate={updateSlide} onSplitHtml={splitHtmlSlide} onPushHistory={pushHistory} />
+                </TestQuestionCtx.Provider>
+              )
+            })()
           ) : (
             <EmptyEditorState onImport={importFile} isImporting={isImporting} />
           )}
@@ -1989,11 +2248,14 @@ export default function Create() {
    CSV Import Modal
    ───────────────────────────────────────────────────────────────────────── */
 
-function CsvImportModal({ onClose, onImport }: {
+function CsvImportModal({ onClose, onImport, destination = 'live' }: {
   onClose: () => void
-  onImport: (slides: QuestionSlide[]) => void
+  onImport: (slides: QuestionSlide[], dest: 'live' | 'test') => void
+  /** 'ask' — the deck has a test block, so let the host choose */
+  destination?: 'live' | 'test' | 'ask'
 }) {
   const [parseResult, setParseResult] = useState<CsvParseResult | null>(null)
+  const [dest, setDest] = useState<'live' | 'test'>(destination === 'test' ? 'test' : 'live')
   const [dragOver, setDragOver]       = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -2023,7 +2285,9 @@ function CsvImportModal({ onClose, onImport }: {
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-midnight-sky-100 px-5 py-4">
-          <h2 className="text-sm font-semibold text-midnight-sky-800">Import questions in CSV</h2>
+          <h2 className="text-sm font-semibold text-midnight-sky-800">
+            {destination === 'test' ? 'Import questions into your self-paced test' : 'Import questions in CSV'}
+          </h2>
           <button onClick={onClose} className="rounded-lg p-1 text-midnight-sky-400 transition hover:bg-midnight-sky-100 hover:text-midnight-sky-700">
             <X className="size-4" />
           </button>
@@ -2115,6 +2379,47 @@ function CsvImportModal({ onClose, onImport }: {
                 </div>
               )}
 
+              {/* Where these go */}
+              {parseResult.slides.length > 0 && destination === 'ask' && (
+                <div className="rounded-xl border border-midnight-sky-100 p-3">
+                  <p className="mb-2 text-xs font-semibold text-midnight-sky-800">Where should these questions go?</p>
+                  {([
+                    ['test', 'Into the self-paced test block', 'Everyone answers at their own pace'],
+                    ['live', 'As live questions', 'You show them one at a time'],
+                  ] as const).map(([v, title, sub]) => (
+                    <button
+                      key={v}
+                      onClick={() => setDest(v)}
+                      className={cn(
+                        'mb-1.5 flex w-full items-start gap-2.5 rounded-lg border px-3 py-2 text-left transition last:mb-0',
+                        dest === v ? 'border-sky-blue bg-sky-blue/8' : 'border-midnight-sky-150 hover:border-midnight-sky-300',
+                      )}
+                    >
+                      <span className={cn('mt-0.5 flex size-3.5 shrink-0 items-center justify-center rounded-full border', dest === v ? 'border-sky-blue' : 'border-midnight-sky-300')}>
+                        {dest === v && <span className="size-1.5 rounded-full bg-sky-blue" />}
+                      </span>
+                      <span>
+                        <span className="block text-xs font-medium text-midnight-sky-800">{title}</span>
+                        <span className="block text-[11px] text-midnight-sky-500">{sub}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {parseResult.slides.length > 0 && dest === 'test' && (() => {
+                const mcqs = parseResult.slides.filter(q => q.type === 'mcq')
+                const others = parseResult.slides.length - mcqs.length
+                const noAnswer = mcqs.filter(q => !(q.correctAnswers?.length)).length
+                return (
+                  <div className="flex flex-col gap-1.5 rounded-xl border border-golden-sun/30 bg-golden-sun/5 px-3.5 py-3 text-[11px] leading-snug">
+                    <p className="text-fresh-green"><Check className="mr-1 inline size-3" />{mcqs.length} multiple-choice question{mcqs.length !== 1 ? 's' : ''} go into the test</p>
+                    {others > 0 && <p className="text-amber-700">{others} {others !== 1 ? "aren't" : "isn't"} multiple choice — added after the block as live questions</p>}
+                    {noAnswer > 0 && <p className="text-amber-700">{noAnswer} {noAnswer !== 1 ? 'have' : 'has'} no correct answer — tick one before the show</p>}
+                    {mcqs.some(q => q.timer) && <p className="text-midnight-sky-500">Timers in the file are ignored — the test has one time limit</p>}
+                  </div>
+                )
+              })()}
+
               <button
                 onClick={() => setParseResult(null)}
                 className="text-center text-[11px] text-midnight-sky-400 transition hover:text-midnight-sky-700"
@@ -2134,13 +2439,15 @@ function CsvImportModal({ onClose, onImport }: {
             Cancel
           </button>
           <button
-            onClick={() => { if (parseResult?.slides.length) { onImport(parseResult.slides); onClose() } }}
+            onClick={() => { if (parseResult?.slides.length) { onImport(parseResult.slides, dest); onClose() } }}
             disabled={!parseResult || parseResult.slides.length === 0}
             className="rounded-xl bg-sky-blue px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
           >
-            {parseResult?.slides.length
-              ? `Add ${parseResult.slides.length} slide${parseResult.slides.length !== 1 ? 's' : ''}`
-              : 'Add slides'}
+            {!parseResult?.slides.length
+              ? 'Add slides'
+              : dest === 'test'
+                ? `Add ${parseResult.slides.filter(q => q.type === 'mcq').length} to test`
+                : `Add ${parseResult.slides.length} slide${parseResult.slides.length !== 1 ? 's' : ''}`}
           </button>
         </div>
       </motion.div>
@@ -2159,7 +2466,8 @@ function CsvImportModal({ onClose, onImport }: {
 
 function SlidePanel({
   slides, selectedId, isImporting, addMenuAfter,
-  onSelect, onDelete, onDuplicate, onDragEnd, onImport, onOpenSorter, onSetAddMenu, onAddQuestion, onAddContent, onAddCanvas, onAddLeaderboard, onImportCsv,
+  onSelect, onDelete, onDuplicate, onDragEnd, onImport, onOpenSorter, onSetAddMenu, onAddQuestion, onAddContent, onAddCanvas, onAddLeaderboard, onOpenCsv,
+  onAddTest, onAddTestQuestion, onImportCsvToTest, onToggleTestCollapsed,
 }: {
   slides: Slide[]
   selectedId: string | null
@@ -2176,7 +2484,11 @@ function SlidePanel({
   onAddContent: (template: ContentTemplate, afterId?: string) => void
   onAddCanvas: (afterId?: string) => void
   onAddLeaderboard: (afterId?: string) => void
-  onImportCsv: (slides: QuestionSlide[]) => void
+  onOpenCsv: () => void
+  onAddTest: (afterId?: string) => void
+  onAddTestQuestion: (headerId: string) => void
+  onImportCsvToTest: (headerId: string) => void
+  onToggleTestCollapsed: (headerId: string) => void
 }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -2186,7 +2498,6 @@ function SlidePanel({
   const mergeRef = useRef<HTMLInputElement>(null)
   const importMenuRef = useRef<HTMLDivElement>(null)
   const [importMenuOpen, setImportMenuOpen] = useState(false)
-  const [showCsvModal,   setShowCsvModal]   = useState(false)
   const [addMenuOpen, setAddMenuOpen] = useState<boolean>(() => {
     try { return localStorage.getItem('alaya-add-menu-open') !== 'false' } catch { return true }
   })
@@ -2240,7 +2551,7 @@ function SlidePanel({
                     Import slides
                   </button>
                   <button
-                    onClick={() => { setShowCsvModal(true); setImportMenuOpen(false) }}
+                    onClick={() => { onOpenCsv(); setImportMenuOpen(false) }}
                     className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-xs text-white/80 transition hover:bg-white/8 hover:text-white"
                   >
                     <FileText className="size-3.5 shrink-0 text-white/50" />
@@ -2283,16 +2594,6 @@ function SlidePanel({
           onChange={e => { const f = e.target.files?.[0]; if (f) onImport(f); e.target.value = '' }}
         />
       </div>
-
-      {/* CSV import modal */}
-      <AnimatePresence>
-        {showCsvModal && (
-          <CsvImportModal
-            onClose={() => setShowCsvModal(false)}
-            onImport={slides => { onImportCsv(slides); setShowCsvModal(false) }}
-          />
-        )}
-      </AnimatePresence>
 
       {/* Slide list or empty state */}
       <div className="scrollbar-sidebar flex flex-1 flex-col overflow-y-auto py-2">
@@ -2355,37 +2656,111 @@ function SlidePanel({
                   Leaderboard
                 </button>
               </div>
+              <button
+                onClick={() => onAddTest()}
+                className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-xl border border-golden-sun/40 bg-golden-sun/10 px-2 py-2.5 text-[9px] font-semibold text-golden-sun transition-all hover:bg-golden-sun/20"
+              >
+                <ClipboardCheck className="size-3" />
+                Self-paced test
+              </button>
             </div>
           </div>
         ) : (
           /* Drag-and-drop slide list */
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-            <SortableContext items={slides.map(s => s.id)} strategy={verticalListSortingStrategy}>
-              <div className="flex flex-col px-1 pb-1">
-                {slides.map((slide, idx) => (
-                  <div key={slide.id} data-slide-id={slide.id}>
-                    <SlideThumbnail
-                      slide={slide}
-                      index={idx}
-                      isSelected={slide.id === selectedId}
-                      onSelect={() => onSelect(slide.id)}
-                      onDelete={() => onDelete(slide.id)}
-                      onDuplicate={() => onDuplicate(slide.id)}
-                    />
-                    {/* "+ Add question" between each slide */}
-                    <AddBetweenButton
-                      isOpen={addMenuAfter === slide.id}
-                      onToggle={() => onSetAddMenu(addMenuAfter === slide.id ? undefined : slide.id)}
-                      onAdd={(type) => onAddQuestion(type, slide.id)}
-                      onAddContent={(template) => onAddContent(template, slide.id)}
-                      onAddCanvas={() => onAddCanvas(slide.id)}
-                      onAddLeaderboard={() => onAddLeaderboard(slide.id)}
-                    />
+          (() => {
+            // Self-paced test blocks: a gold frame from header to end marker,
+            // with the block's questions numbered Q1, Q2… inside it
+            const ranges   = testRanges(slides)
+            const memberOf = testMembership(slides)
+            const headers  = new Map(slides.filter(x => x.type === 'testblock').map(x => [x.id, x as TestHeaderSlide]))
+            const qNo      = new Map<string, number>()
+            ranges.forEach(r => r.memberIds.forEach((id, i) => qNo.set(id, i + 1)))
+            const folded = (s: Slide) => {
+              const h = s.type === 'testend' ? (s as TestEndSlide).blockId : memberOf.get(s.id)
+              return !!h && !!headers.get(h)?.collapsed
+            }
+            const visible = slides.filter(s => !folded(s))
+            let n = 0
+            const addBetween = (afterId: string, testMode = false) => (
+              <AddBetweenButton
+                isOpen={addMenuAfter === afterId}
+                testMode={testMode}
+                onToggle={() => onSetAddMenu(addMenuAfter === afterId ? undefined : afterId)}
+                onAdd={(type) => onAddQuestion(type, afterId)}
+                onAddContent={(template) => onAddContent(template, afterId)}
+                onAddCanvas={() => onAddCanvas(afterId)}
+                onAddLeaderboard={() => onAddLeaderboard(afterId)}
+                onAddTest={() => onAddTest(afterId)}
+              />
+            )
+            const FRAME = 'mx-0.5 border-golden-sun/70 bg-golden-sun/[0.06]'
+            return (
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+                <SortableContext items={visible.filter(s => s.type !== 'testend').map(s => s.id)} strategy={verticalListSortingStrategy}>
+                  <div className="flex flex-col px-1 pb-1">
+                    {visible.map(slide => {
+                      if (slide.type === 'testblock') {
+                        const h = slide as TestHeaderSlide
+                        const r = ranges.find(x => x.headerId === h.id)
+                        n++
+                        return (
+                          <div key={h.id} data-slide-id={h.id}>
+                            <div className={cn(FRAME, 'mt-1 border-2 px-1 pt-1', h.collapsed ? 'mb-0.5 rounded-xl pb-1' : 'rounded-t-xl border-b-0')}>
+                              <TestHeaderCard
+                                header={h}
+                                number={n}
+                                questionCount={r?.memberIds.length ?? 0}
+                                isSelected={selectedId === h.id}
+                                onSelect={() => onSelect(h.id)}
+                                onToggle={() => onToggleTestCollapsed(h.id)}
+                                onDelete={() => onDelete(h.id)}
+                                onDuplicate={() => onDuplicate(h.id)}
+                              />
+                              {!h.collapsed && addBetween(h.id, true)}
+                            </div>
+                            {h.collapsed && addBetween(h.id)}
+                          </div>
+                        )
+                      }
+                      if (slide.type === 'testend') {
+                        const e = slide as TestEndSlide
+                        const h = headers.get(e.blockId)
+                        return (
+                          <div key={e.id} data-slide-id={e.id}>
+                            <div className={cn(FRAME, 'mb-0.5 rounded-b-xl border-2 border-t-0 px-1.5 pb-1.5')}>
+                              <TestEndRows
+                                order={h?.afterOrder ?? 'lb-review'}
+                                isSelected={selectedId === e.id}
+                                onSelect={() => onSelect(e.id)}
+                                onAddQuestion={() => onAddTestQuestion(e.blockId)}
+                                onImportCsv={() => onImportCsvToTest(e.blockId)}
+                              />
+                            </div>
+                            {addBetween(e.id)}
+                          </div>
+                        )
+                      }
+                      const inTest = memberOf.has(slide.id)
+                      if (!inTest) n++
+                      return (
+                        <div key={slide.id} data-slide-id={slide.id} className={inTest ? cn(FRAME, 'border-x-2 px-0.5') : undefined}>
+                          <SlideThumbnail
+                            slide={slide}
+                            label={inTest ? `Q${qNo.get(slide.id)}` : String(n)}
+                            isSelected={slide.id === selectedId}
+                            onSelect={() => onSelect(slide.id)}
+                            onDelete={() => onDelete(slide.id)}
+                            onDuplicate={() => onDuplicate(slide.id)}
+                          />
+                          {addBetween(slide.id, inTest)}
+                        </div>
+                      )
+                    })}
                   </div>
-                ))}
-              </div>
-            </SortableContext>
-          </DndContext>
+                </SortableContext>
+              </DndContext>
+            )
+          })()
         )}
       </div>
 
@@ -2461,6 +2836,13 @@ function SlidePanel({
                       Leaderboard
                     </button>
                   </div>
+                  <button
+                    onClick={() => onAddTest(selectedId ?? undefined)}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-golden-sun/30 bg-golden-sun/10 px-2 py-1 text-[10px] font-semibold text-golden-sun transition-all hover:bg-golden-sun/20"
+                  >
+                    <ClipboardCheck className="size-3" />
+                    Self-paced test
+                  </button>
                 </div>
               </motion.div>
             )}
@@ -2686,7 +3068,22 @@ function renderThumbContent(slide: Slide): ReactNode {
     return (
       <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-midnight-sky-900">
         <Trophy className="size-4 text-hot-pink/60" />
-        <span className="text-[8px] font-medium text-white/35">Leaderboard</span>
+        <span className="text-[8px] font-medium text-white/35">Live quiz leaderboard</span>
+      </div>
+    )
+  }
+  if (slide.type === 'testblock') {
+    return (
+      <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-golden-sun">
+        <ClipboardCheck className="size-4 text-midnight-sky-900/70" />
+        <span className="text-[8px] font-semibold text-midnight-sky-900">Self-paced test block</span>
+      </div>
+    )
+  }
+  if (slide.type === 'testend') {
+    return (
+      <div className="flex h-full w-full flex-col items-center justify-center gap-1 border border-dashed border-golden-sun/50 bg-midnight-sky-900">
+        <span className="text-[8px] font-medium text-golden-sun/80">End of test · leaderboard and review</span>
       </div>
     )
   }
@@ -2707,10 +3104,11 @@ function renderThumbContent(slide: Slide): ReactNode {
 }
 
 function SlideThumbnail({
-  slide, index, isSelected, onSelect, onDelete, onDuplicate,
+  slide, label, isSelected, onSelect, onDelete, onDuplicate,
 }: {
   slide: Slide
-  index: number
+  /** Number shown beside the card — "3", or "Q2" inside a test block */
+  label: string
   isSelected: boolean
   onSelect: () => void
   onDelete: () => void
@@ -2741,8 +3139,8 @@ function SlideThumbnail({
         )}
       >
         {/* Slide number */}
-        <span className="mt-1 w-4 shrink-0 text-[10px] font-medium text-white/60">
-          {index + 1}
+        <span className={cn('mt-1 w-4 shrink-0 text-[10px] font-medium', label.startsWith('Q') ? 'text-golden-sun' : 'text-white/60')}>
+          {label}
         </span>
 
         {/* Thumbnail */}
@@ -2951,7 +3349,7 @@ function SlideSorter({
 }
 
 function AddBetweenButton({
-  isOpen, onToggle, onAdd, onAddContent, onAddCanvas, onAddLeaderboard,
+  isOpen, onToggle, onAdd, onAddContent, onAddCanvas, onAddLeaderboard, onAddTest, testMode = false,
 }: {
   isOpen: boolean
   onToggle: () => void
@@ -2959,6 +3357,9 @@ function AddBetweenButton({
   onAddContent: (template: ContentTemplate) => void
   onAddCanvas: () => void
   onAddLeaderboard: () => void
+  onAddTest: () => void
+  /** Inside a test block: only multiple-choice questions can go here */
+  testMode?: boolean
 }) {
   return (
     <div className="px-2">
@@ -2986,6 +3387,18 @@ function AddBetweenButton({
             transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
             className="mb-1 mt-0.5 rounded-xl border border-white/15 bg-midnight-sky-800 p-1.5 shadow-xl"
           >
+            {testMode ? (
+              <>
+                <button
+                  onClick={() => onAdd('mcq')}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-golden-sun/15 px-1 py-1.5 text-[9px] font-semibold text-golden-sun transition-all hover:bg-golden-sun/25"
+                >
+                  <Plus className="size-2.5" />
+                  Add question to test
+                </button>
+                <p className="mt-1 px-1 text-center text-[8px] leading-snug text-white/35">Only multiple-choice questions go in a self-paced test</p>
+              </>
+            ) : (<>
             <p className="mb-1 px-1 text-[8px] font-semibold uppercase tracking-wider text-white/25">Question</p>
             <div className="mb-1.5 grid grid-cols-2 gap-1">
               {QTYPES.map(q => (
@@ -3025,7 +3438,15 @@ function AddBetweenButton({
                   Leaderboard
                 </button>
               </div>
+              <button
+                onClick={onAddTest}
+                className="mt-1 flex w-full items-center justify-center gap-1 rounded-lg bg-golden-sun/10 px-1 py-1.5 text-[9px] font-semibold text-golden-sun transition-all hover:bg-golden-sun/20"
+              >
+                <ClipboardCheck className="size-2.5" />
+                Self-paced test
+              </button>
             </div>
+            </>)}
           </motion.div>
         )}
       </AnimatePresence>
@@ -3546,6 +3967,7 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
               {qInfo.icon}
               {qInfo.label}
             </div>
+            <TestQuestionChip />
 
             {/* Question text */}
             <div className="mb-3">
@@ -3718,6 +4140,7 @@ function MCQEditor({ slide, onUpdate, onPushHistory }: {
   onUpdate: (patch: Partial<QuestionSlide>) => void
   onPushHistory?: () => void
 }) {
+  const inTest = useContext(TestQuestionCtx) !== null
   const [mode,      setMode]      = useState<'single' | 'paste'>('single')
   const [pasteText, setPasteText] = useState('')
 
@@ -3889,7 +4312,7 @@ function MCQEditor({ slide, onUpdate, onPushHistory }: {
       })}
       {mode === 'single' && (slide.correctAnswers ?? []).length > 0 && (
         <p className="mt-1 text-[11px] font-medium text-fresh-green">
-          {[...slide.correctAnswers!].sort((a, b) => a - b).map(i => optionLabel(i, total)).join(', ')} marked correct — press Reveal Answer on the results screen.
+          {[...slide.correctAnswers!].sort((a, b) => a - b).map(i => optionLabel(i, total)).join(', ')} marked correct — {inTest ? 'revealed to everyone when the test ends.' : 'press Reveal Answer on the results screen.'}
         </p>
       )}
       {mode === 'single' && total < MAX_MCQ_OPTIONS && (
@@ -3902,8 +4325,9 @@ function MCQEditor({ slide, onUpdate, onPushHistory }: {
         </button>
       )}
 
-      {/* Results display type — bar, pie, or donut */}
-      <div className="mt-5 border-t border-midnight-sky-100 pt-5">
+      {/* Results display type — bar, pie, or donut (not for test questions:
+          their answer review always uses bars) */}
+      <div className={cn('mt-5 border-t border-midnight-sky-100 pt-5', inTest && 'hidden')}>
         <label className="mb-2.5 block text-sm font-medium text-midnight-sky-700">
           Results display
           <span className="ml-1.5 font-light text-midnight-sky-500">how results appear on the big screen</span>
@@ -3945,8 +4369,9 @@ function MCQEditor({ slide, onUpdate, onPushHistory }: {
         )}
       </div>
 
-      {/* Timer — per-question time limit (also used for speed points in quiz mode) */}
-      <div className="mt-5 border-t border-midnight-sky-100 pt-5">
+      {/* Timer — per-question time limit (also used for speed points in quiz mode).
+          Not for test questions: a self-paced test has one time limit. */}
+      {!inTest && <div className="mt-5 border-t border-midnight-sky-100 pt-5">
         <label className="mb-2.5 flex items-center gap-1.5 text-sm font-medium text-midnight-sky-700">
           <Clock className="size-3.5" />
           Timer
@@ -3968,13 +4393,15 @@ function MCQEditor({ slide, onUpdate, onPushHistory }: {
             </button>
           ))}
         </div>
-      </div>
+      </div>}
 
       {/* Explanation — optional teaching text shown on big screen after reveal */}
       <div className="mt-5 border-t border-midnight-sky-100 pt-5">
         <label className="mb-2 block text-sm font-medium text-midnight-sky-700">
           Explanation
-          <span className="ml-1.5 font-light text-midnight-sky-500">shown on big screen when answer is revealed</span>
+          <span className="ml-1.5 font-light text-midnight-sky-500">
+            {inTest ? 'shown in the answer review after the test, and on each phone' : 'shown on big screen when answer is revealed'}
+          </span>
         </label>
         <textarea
           value={slide.explanation ?? ''}
@@ -6065,5 +6492,346 @@ function LoadingDots({ color = 'white' }: { color?: 'white' | 'pink' }) {
         />
       ))}
     </span>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Self-paced test block — sidebar pieces and settings panel
+   ───────────────────────────────────────────────────────────────────────── */
+
+const TIME_PRESETS = [5, 10, 15, 20, 30, 45, 60]
+
+/** Small gold chip on a question's editor when it belongs to a test. */
+function TestQuestionChip() {
+  const ctx = useContext(TestQuestionCtx)
+  if (!ctx) return null
+  return (
+    <div className="mb-3 ml-2 inline-flex items-center gap-1.5 rounded-full bg-golden-sun/15 px-3 py-1.5 text-xs font-semibold text-[#a07800]">
+      <ClipboardCheck className="size-3.5" />
+      Self-paced test · question {ctx.index + 1} of {ctx.count}
+    </div>
+  )
+}
+
+/** The gold card at the top of a block — drag it to move the whole test. */
+function TestHeaderCard({
+  header, number, questionCount, isSelected, onSelect, onToggle, onDelete, onDuplicate,
+}: {
+  header: TestHeaderSlide
+  number: number
+  questionCount: number
+  isSelected: boolean
+  onSelect: () => void
+  onToggle: () => void
+  onDelete: () => void
+  onDuplicate: () => void
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: header.id })
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined, transition, opacity: isDragging ? 0.4 : 1 }}
+      {...attributes}
+      className="group relative"
+    >
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onSelect}
+        onKeyDown={e => { if (e.key === 'Enter') onSelect() }}
+        {...listeners}
+        className={cn(
+          'flex w-full cursor-grab items-start gap-1.5 rounded-lg bg-golden-sun px-2 py-2 text-left text-[#1a1640] transition active:cursor-grabbing',
+          isSelected ? 'ring-2 ring-hot-pink ring-offset-1 ring-offset-[#14142b]' : 'hover:brightness-105',
+        )}
+      >
+        <button
+          onPointerDown={e => e.stopPropagation()}
+          onClick={e => { e.stopPropagation(); onToggle() }}
+          title={header.collapsed ? 'Show the test questions' : 'Fold the test into one card'}
+          className="mt-px shrink-0 rounded p-0.5 transition hover:bg-black/10"
+        >
+          {header.collapsed ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
+        </button>
+        <div className="min-w-0 flex-1">
+          <p className="flex items-center gap-1 text-[10px] font-bold leading-tight">
+            <span className="text-[#1a1640]/55">{number}</span>
+            <ClipboardCheck className="size-3 shrink-0" />
+            <span className="truncate">Self-paced test block</span>
+          </p>
+          <p className="mt-0.5 text-[9px] font-medium leading-tight">
+            {questionCount} question{questionCount !== 1 ? 's' : ''} · {header.timeLimit} min
+          </p>
+          {header.collapsed && (
+            <p className="mt-0.5 text-[9px] leading-tight text-[#1a1640]/70">Then {AFTER_ORDER_LABEL[header.afterOrder ?? 'lb-review'].toLowerCase()}</p>
+          )}
+        </div>
+      </div>
+      <button
+        onClick={e => { e.stopPropagation(); onDuplicate() }}
+        title="Duplicate the whole test"
+        className="absolute bottom-1 right-6 rounded-md p-0.5 text-[#1a1640]/40 opacity-0 transition group-hover:opacity-100 hover:!text-[#1a1640]"
+      >
+        <Copy className="size-3" />
+      </button>
+      <button
+        onClick={e => { e.stopPropagation(); onDelete() }}
+        title="Remove the test block (its questions stay as live questions)"
+        className="absolute bottom-1 right-1 rounded-md p-0.5 text-[#1a1640]/40 opacity-0 transition group-hover:opacity-100 hover:!text-red-700"
+      >
+        <Trash2 className="size-3" />
+      </button>
+    </div>
+  )
+}
+
+/** Bottom of a block: add/import buttons and the after-test stages. */
+function TestEndRows({ order, isSelected, onSelect, onAddQuestion, onImportCsv }: {
+  order: TestAfterOrder
+  isSelected: boolean
+  onSelect: () => void
+  onAddQuestion: () => void
+  onImportCsv: () => void
+}) {
+  const stages: { key: string; icon: ReactNode; label: string }[] =
+    order === 'review-lb' ? [{ key: 'r', icon: <ListChecks className="size-3" />, label: 'Answer review' }, { key: 'l', icon: <Trophy className="size-3" />, label: 'Leaderboard' }]
+    : order === 'lb-only'  ? [{ key: 'l', icon: <Trophy className="size-3" />, label: 'Leaderboard' }]
+    : [{ key: 'l', icon: <Trophy className="size-3" />, label: 'Leaderboard' }, { key: 'r', icon: <ListChecks className="size-3" />, label: 'Answer review' }]
+  return (
+    <div className="flex flex-col gap-1 pt-0.5">
+      <div className="flex gap-1">
+        <button
+          onClick={onAddQuestion}
+          className="flex flex-1 items-center justify-center gap-1 rounded-md border border-dashed border-golden-sun/50 py-1 text-[9px] font-medium text-golden-sun transition hover:bg-golden-sun/10"
+        >
+          <Plus className="size-2.5" /> Add question
+        </button>
+        <button
+          onClick={onImportCsv}
+          className="flex flex-1 items-center justify-center gap-1 rounded-md bg-golden-sun py-1 text-[9px] font-semibold text-[#1a1640] transition hover:brightness-105"
+        >
+          <Upload className="size-2.5" /> Import CSV
+        </button>
+      </div>
+      {stages.map((st, i) => (
+        <button
+          key={st.key}
+          onClick={onSelect}
+          title="After the test — change the order in the test settings"
+          className={cn(
+            'flex items-center gap-1.5 rounded-md border border-dashed px-2 py-1 text-left text-[9px] text-golden-sun/85 transition hover:bg-golden-sun/10',
+            isSelected ? 'border-hot-pink/70' : 'border-golden-sun/40',
+          )}
+        >
+          {st.icon}
+          {st.label}
+          {i < stages.length - 1 && <span className="ml-auto text-golden-sun/50">then</span>}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** The test's settings page — opens when the gold header (or end) is clicked. */
+function TestBlockEditor({
+  header, slides, focusAfter, onUpdate, onSelect, onAddQuestion, onImportCsv, onMoveIn, onDelete,
+}: {
+  header: TestHeaderSlide | undefined
+  slides: Slide[]
+  focusAfter: boolean
+  onUpdate: (patch: Partial<TestHeaderSlide>) => void
+  onSelect: (id: string) => void
+  onAddQuestion: (headerId: string) => void
+  onImportCsv: (headerId: string) => void
+  onMoveIn: (headerId: string, ids: string[]) => void
+  onDelete: (id: string) => void
+}) {
+  const [picking, setPicking] = useState(false)
+  const [picked, setPicked] = useState<string[]>([])
+  const afterRef = useRef<HTMLDivElement>(null)
+  useEffect(() => { if (focusAfter) afterRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }, [focusAfter])
+  if (!header) return null
+
+  const range = testRanges(slides).find(r => r.headerId === header.id)
+  const questions = (range ? slides.slice(range.start + 1, range.end) : []) as QuestionSlide[]
+  const inAnyTest = testMembership(slides)
+  const outsideMcqs = slides.filter(x => x.type === 'mcq' && !inAnyTest.has(x.id)) as QuestionSlide[]
+  const problems = testProblems(slides).filter(pb => pb.slideId === header.id || questions.some(q => q.id === pb.slideId))
+  const customTime = !TIME_PRESETS.includes(header.timeLimit)
+
+  const card = 'rounded-2xl bg-white p-5 shadow-[0_2px_16px_-2px_rgba(0,0,121,0.09)]'
+  const choice = (on: boolean) => cn(
+    'rounded-xl border px-3 py-2 text-sm transition-all',
+    on ? 'border-golden-sun bg-golden-sun/10 font-medium text-[#a07800]' : 'border-midnight-sky-200 text-midnight-sky-500 hover:border-midnight-sky-400 hover:text-midnight-sky-700',
+  )
+
+  return (
+    <div className="max-w-3xl px-5 py-4">
+      <motion.div key={header.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }} className="flex flex-col gap-4">
+
+        {/* Title */}
+        <div className="overflow-hidden rounded-2xl bg-white shadow-[0_2px_16px_-2px_rgba(0,0,121,0.09)]">
+          <div className="h-[3px] w-full bg-golden-sun" />
+          <div className="p-5">
+            <div className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-golden-sun/15 px-3 py-1.5 text-xs font-bold text-[#a07800]">
+              <ClipboardCheck className="size-3.5" />
+              Self-paced test block
+            </div>
+            <p className="text-sm leading-relaxed text-midnight-sky-600">
+              Everyone answers these questions on their own phone, at their own pace, within one time limit.
+              Answers are revealed when the test ends. Most correct answers wins — if two people tie, the faster finish ranks higher.
+            </p>
+            <p className="mt-2 text-xs text-midnight-sky-500">It scores itself: no need to turn on Live quiz.</p>
+          </div>
+        </div>
+
+        {/* Problems that would stop the show */}
+        {problems.length > 0 && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-3">
+            {problems.map((pb, i) => (
+              <button key={i} onClick={() => pb.slideId !== header.id && onSelect(pb.slideId)} className="block text-left text-sm text-amber-800 hover:underline">
+                {pb.message}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Questions */}
+        <div className={card}>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <p className="text-sm font-semibold text-midnight-sky-800">Questions ({questions.length})</p>
+            <div className="flex-1" />
+            <button onClick={() => onAddQuestion(header.id)} className="flex items-center gap-1.5 rounded-xl border border-midnight-sky-200 px-3 py-1.5 text-xs font-medium text-midnight-sky-700 transition hover:border-midnight-sky-400">
+              <Plus className="size-3.5" /> Add question
+            </button>
+            <button onClick={() => onImportCsv(header.id)} className="flex items-center gap-1.5 rounded-xl bg-golden-sun px-3 py-1.5 text-xs font-semibold text-[#1a1640] transition hover:brightness-105">
+              <Upload className="size-3.5" /> Import CSV
+            </button>
+            {outsideMcqs.length > 0 && (
+              <button onClick={() => { setPicking(v => !v); setPicked([]) }} className="flex items-center gap-1.5 rounded-xl border border-midnight-sky-200 px-3 py-1.5 text-xs font-medium text-midnight-sky-700 transition hover:border-midnight-sky-400">
+                <ListChecks className="size-3.5" /> Add existing questions
+              </button>
+            )}
+          </div>
+
+          {picking && (
+            <div className="mb-3 rounded-xl border border-midnight-sky-150 bg-midnight-sky-50 p-3">
+              <p className="mb-2 text-xs font-medium text-midnight-sky-700">Tick the multiple-choice questions to move into this test</p>
+              <div className="flex max-h-56 flex-col gap-1 overflow-y-auto">
+                {outsideMcqs.map(q => (
+                  <label key={q.id} className="flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-xs text-midnight-sky-700 hover:bg-white">
+                    <input
+                      type="checkbox"
+                      checked={picked.includes(q.id)}
+                      onChange={e => setPicked(prev => e.target.checked ? [...prev, q.id] : prev.filter(x => x !== q.id))}
+                      className="mt-0.5"
+                    />
+                    <span className="line-clamp-2">{q.question || 'Untitled question'}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="mt-2 flex justify-end gap-2">
+                <button onClick={() => setPicking(false)} className="rounded-lg px-3 py-1.5 text-xs text-midnight-sky-500 hover:bg-white">Cancel</button>
+                <button
+                  onClick={() => { onMoveIn(header.id, picked); setPicking(false); setPicked([]) }}
+                  disabled={picked.length === 0}
+                  className="rounded-lg bg-sky-blue px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+                >
+                  Move {picked.length || ''} into the test
+                </button>
+              </div>
+            </div>
+          )}
+
+          {questions.length === 0 ? (
+            <p className="rounded-xl bg-midnight-sky-50 px-4 py-6 text-center text-sm text-midnight-sky-500">
+              No questions yet — add them one by one, or import a CSV of questions.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {questions.map((q, i) => {
+                const marked = q.correctAnswers ?? []
+                return (
+                  <button key={q.id} onClick={() => onSelect(q.id)} className="flex items-start gap-3 rounded-lg px-2 py-1.5 text-left transition hover:bg-midnight-sky-50">
+                    <span className="w-7 shrink-0 pt-px text-xs font-semibold text-[#a07800]">Q{i + 1}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm text-midnight-sky-800">{q.question || <span className="italic text-midnight-sky-400">Untitled question</span>}</span>
+                    {marked.length > 0
+                      ? <span className="shrink-0 text-xs font-medium text-fresh-green">{[...marked].sort((a, b) => a - b).map(k => optionLabel(k, q.options.length)).join(' ')}</span>
+                      : <span className="shrink-0 text-xs text-amber-600">No correct answer</span>}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Settings */}
+        <div className={card}>
+          <p className="mb-3 text-sm font-semibold text-midnight-sky-800">Settings</p>
+
+          <label className="mb-2 flex items-center gap-1.5 text-sm font-medium text-midnight-sky-700">
+            <Clock className="size-3.5" /> Time limit for the whole test
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            {TIME_PRESETS.map(m => (
+              <button key={m} onClick={() => onUpdate({ timeLimit: m })} className={choice(header.timeLimit === m)}>{m} min</button>
+            ))}
+            <span className={cn('flex items-center gap-1.5 rounded-xl border px-2 py-1', customTime ? 'border-golden-sun bg-golden-sun/10' : 'border-midnight-sky-200')}>
+              <input
+                type="number" min={1} max={180}
+                value={header.timeLimit}
+                onChange={e => { const v = Math.round(Number(e.target.value)); if (v >= 1 && v <= 180) onUpdate({ timeLimit: v }) }}
+                className="w-14 bg-transparent text-center text-sm text-midnight-sky-800 outline-none"
+              />
+              <span className="text-xs text-midnight-sky-500">min</span>
+            </span>
+          </div>
+
+          <p className="mb-2 mt-5 text-sm font-medium text-midnight-sky-700">Scores on phones</p>
+          <div className="flex flex-wrap gap-2">
+            {([['submit', 'Right after submitting'], ['end', 'When the test ends']] as [TestScoreTiming, string][]).map(([v, l]) => (
+              <button key={v} onClick={() => onUpdate({ scoreTiming: v })} className={choice((header.scoreTiming ?? 'end') === v)}>{l}</button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-xs text-midnight-sky-500">Which answers were right is only shown once the test ends for everyone.</p>
+
+          <div ref={afterRef}>
+            <p className="mb-2 mt-5 text-sm font-medium text-midnight-sky-700">After the test</p>
+            <div className="flex flex-wrap gap-2">
+              {(Object.keys(AFTER_ORDER_LABEL) as TestAfterOrder[]).map(v => (
+                <button key={v} onClick={() => onUpdate({ afterOrder: v })} className={choice((header.afterOrder ?? 'lb-review') === v)}>{AFTER_ORDER_LABEL[v]}</button>
+              ))}
+            </div>
+          </div>
+
+          <p className="mb-2 mt-5 text-sm font-medium text-midnight-sky-700">
+            Extra rule <span className="font-light text-midnight-sky-500">optional — shown with the rules before the test</span>
+          </p>
+          <input
+            value={header.rules ?? ''}
+            onChange={e => onUpdate({ rules: e.target.value || undefined })}
+            maxLength={140}
+            placeholder="No searching online — trust your gut"
+            className="w-full rounded-xl border border-midnight-sky-200 bg-white px-3.5 py-2.5 text-sm text-midnight-sky-800 placeholder:text-midnight-sky-400 focus:border-golden-sun focus:outline-none focus:ring-2 focus:ring-golden-sun/20"
+          />
+        </div>
+
+        {/* Rules preview */}
+        <div className={card}>
+          <p className="mb-2 text-sm font-semibold text-midnight-sky-800">What everyone sees before the test</p>
+          <ul className="space-y-1 text-sm text-midnight-sky-600">
+            <li>{questions.length} question{questions.length !== 1 ? 's' : ''} · {header.timeLimit} minutes · go at your own pace</li>
+            <li>Change any answer until you submit</li>
+            <li>Most correct answers wins</li>
+            <li>Tie? The faster finish ranks higher</li>
+            {header.rules && <li>{header.rules}</li>}
+          </ul>
+        </div>
+
+        <button onClick={() => onDelete(header.id)} className="self-start rounded-xl px-3 py-2 text-xs font-medium text-red-500 transition hover:bg-red-50">
+          Remove test block (its questions stay as live questions)
+        </button>
+      </motion.div>
+    </div>
   )
 }

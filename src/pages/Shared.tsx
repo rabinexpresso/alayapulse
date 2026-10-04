@@ -27,6 +27,7 @@ const SLIDE_CONFIG: Record<string, {
   content:     { Icon: FileText,     label: 'Content',      color: 'text-midnight-sky-400' },
   leaderboard: { Icon: Trophy,       label: 'Leaderboard',  color: 'text-golden-sun'   },
   html:        { Icon: FileText,     label: 'HTML',         color: 'text-midnight-sky-400' },
+  testblock:   { Icon: Trophy,       label: 'Self-paced test', color: 'text-golden-sun' },
 }
 
 const CHIP_COLORS: Record<string, string> = {
@@ -38,6 +39,7 @@ const CHIP_COLORS: Record<string, string> = {
   content:     'bg-midnight-sky-100 text-midnight-sky-500',
   leaderboard: 'bg-golden-sun/10 text-golden-sun',
   html:        'bg-midnight-sky-100 text-midnight-sky-600',
+  testblock:   'bg-golden-sun/15 text-[#a07800]',
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -156,10 +158,11 @@ export default function Shared() {
 
   /* ── Slide list helpers ───────────────────────────────────────────────── */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const slides = shared.slides as any[]
+  // The end marker of a self-paced test block isn't a slide anyone sees
+  const slides = (shared.slides as any[]).filter(s => s?.type !== 'testend')
 
   // Unique interactive types for the chips row
-  const INTERACTIVE = new Set(['mcq', 'wordcloud', 'openended', 'rating', 'ranking', 'html'])
+  const INTERACTIVE = new Set(['mcq', 'wordcloud', 'openended', 'rating', 'ranking', 'html', 'testblock'])
   const typeSet = [...new Set(slides.map((s: any) => s.type as string).filter(t => INTERACTIVE.has(t)))]
 
   /* ── Preview page ─────────────────────────────────────────────────────── */

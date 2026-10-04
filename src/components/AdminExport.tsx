@@ -6,9 +6,11 @@ import { getFunctions, httpsCallable } from 'firebase/functions'
 import { app, db } from '@/lib/firebase'
 import { optionLabel } from '@/lib/utils'
 import { aggregateRanking, parseRanking, rankingOrder } from '@/lib/ranking'
+import { formatDuration } from '@/lib/selfPacedTest'
 import {
   isResponseCorrect, onAuthStateChanged, auth,
   type ResultQuestion, type ResultResponse,
+  type TestResult,
 } from '@/lib/deckStorage'
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -44,6 +46,7 @@ interface ExportSession {
   audienceCount: number
   trimmed: boolean
   questions: ResultQuestion[]
+  tests?: TestResult[]
 }
 
 /** One response rendered as readable text (mirrors the per-session export). */
@@ -209,6 +212,28 @@ async function buildAllSessionsWorkbook(sessions: ExportSession[], startDate: st
     })
   })
 
+  // ── Tab 4: Self-paced tests (one row per person per test) ───────────
+  const testRows: Record<string, string | number>[] = []
+  sessions.forEach(s => {
+    const date = new Date(s.conductedAt).toISOString().slice(0, 10)
+    ;(s.tests ?? []).forEach((t, ti) => {
+      t.participants.forEach(p => {
+        testRows.push({
+          'Date':       date,
+          'Owner':      s.ownerEmail,
+          'Deck':       s.deckTitle,
+          'Session':    s.sessionCode,
+          'Test':       ti + 1,
+          'Place':      p.place,
+          'Name':       p.name,
+          'Score':      `${p.correct}/${p.total}`,
+          'Time taken': formatDuration(p.timeMs),
+          'Status':     p.status === 'submitted' ? 'Submitted' : 'Ran out of time',
+        })
+      })
+    })
+  })
+
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sessionRows), 'All Sessions')
   XLSX.utils.book_append_sheet(
@@ -229,6 +254,7 @@ async function buildAllSessionsWorkbook(sessions: ExportSession[], startDate: st
     ),
     'All Questions',
   )
+  if (testRows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(testRows), 'Self-paced Tests')
 
   const stamp = (startDate || endDate)
     ? `${startDate || 'start'} to ${endDate || 'now'}`

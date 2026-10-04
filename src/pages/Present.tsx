@@ -11,6 +11,8 @@ import { QRCodeSVG } from 'qrcode.react'
 import { cn, optionLabel, MAX_VIZ_OPTIONS } from '@/lib/utils'
 import { aggregateRanking, rankingOrder, type RankingResult } from '@/lib/ranking'
 import { Confetti, Fireworks, CountUp } from '@/components/Celebration'
+import { TestBlockView, type TestNav, type LeaderboardEntry } from '@/components/TestBlockShow'
+import { rankTest, type TestBlockShowSlide, type TestState, type TestAnswerDoc } from '@/lib/selfPacedTest'
 import {
   updateSessionState, endSession, subscribeToSlideResponses, subscribeToViewerCount, subscribeToViewers,
   fetchAllSessionResponses, getSessionByCode, publishQuizRanks, startTimer, clearTimer, resetSlideAndTimer, updateQuestionMeta,
@@ -138,7 +140,7 @@ type CanvasEl = CanvasTextEl | CanvasTableEl | CanvasImageEl
 interface CanvasSlide  { id: string; type: 'canvas'; bg: CanvasBg; elements: CanvasEl[] }
 interface LeaderboardSlide { id: string; type: 'leaderboard'; bg?: { type: 'color' | 'gradient' | 'image'; value: string } }
 
-type AnySlide = PdfSlide | ContentSlide | ImageSlide | VideoSlide | HtmlSlide | QSlide | CanvasSlide | LeaderboardSlide
+type AnySlide = PdfSlide | ContentSlide | ImageSlide | VideoSlide | HtmlSlide | QSlide | CanvasSlide | LeaderboardSlide | TestBlockShowSlide
 
 // ── Demo deck — used when navigating directly to /present ─────────────────
 
@@ -331,7 +333,10 @@ export default function Present() {
   const showingWaitingRoomRef  = useRef(isRealSession && startSlide === 0)  // synced below
 
   const slide      = deck[current] as AnySlide
-  const isQuestion = slide.type !== 'pdf' && slide.type !== 'image' && slide.type !== 'video' && slide.type !== 'content' && slide.type !== 'canvas' && slide.type !== 'html' && slide.type !== 'leaderboard'
+  const isQuestion = slide.type !== 'pdf' && slide.type !== 'image' && slide.type !== 'video' && slide.type !== 'content' && slide.type !== 'canvas' && slide.type !== 'html' && slide.type !== 'leaderboard' && slide.type !== 'testblock'
+  const hasTest    = deck.some(s => s.type === 'testblock')
+  // A self-paced test block handles → / ← itself while it has stages to show
+  const testNavRef = useRef<TestNav | null>(null)
   const code       = (sessionId ?? 'DEMO').slice(0, 6).toUpperCase()
   const joinUrl    = `${window.location.origin}/join?code=${code}`
 
@@ -513,6 +518,7 @@ export default function Present() {
 
   // ── Navigation ────────────────────────────────────────────────────────
   const goNext = useCallback(() => {
+    if (slide.type === 'testblock' && testNavRef.current?.next()) return
     if (isQuestion && phase === 'question') {
       // Reveal results — keep timer running so it stays visible on results page
       setTransType('phase'); setDirection(1); setPhase('results')
@@ -523,9 +529,10 @@ export default function Present() {
     if (current >= deck.length - 1) return
     setTransType('slide'); setDirection(1); setPhase('question')
     setCurrent(prev => prev + 1)
-  }, [isQuestion, phase, current, deck.length, stopTimer])
+  }, [isQuestion, phase, current, deck.length, stopTimer, slide.type])
 
   const goPrev = useCallback(() => {
+    if (slide.type === 'testblock' && testNavRef.current?.prev()) return
     if (isQuestion && phase === 'results') {
       // Go back to collection — stop timer (will be reset if needed)
       stopTimer()
@@ -541,10 +548,12 @@ export default function Present() {
     }
     setTransType('slide'); setDirection(-1); setPhase('question')
     setCurrent(prev => prev - 1)
-  }, [isQuestion, phase, current, stopTimer, isRealSession])
+  }, [isQuestion, phase, current, stopTimer, isRealSession, slide.type])
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
       if (showingWaitingRoomRef.current) {
         // In the lobby: → / Space advances to slide 1; Escape shows exit confirm
         if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') {
@@ -656,6 +665,22 @@ export default function Present() {
             transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
             className="h-full w-full"
           >
+            {slide.type === 'testblock' ? (
+              <TestBlockView
+                slide={slide as TestBlockShowSlide}
+                code={code}
+                viewerCount={viewerCount}
+                navRef={testNavRef}
+                renderLeaderboard={(entries, onWin) => (
+                  <LeaderboardSlideView
+                    sessionCode={code}
+                    deck={deck}
+                    questionMeta={questionMetaRef.current}
+                    preset={{ entries, onWinnerRevealed: onWin, emptyText: 'Nobody answered the test.' }}
+                  />
+                )}
+              />
+            ) : (
             <SlideContent
               slide={slide}
               phase={phase}
@@ -672,6 +697,7 @@ export default function Present() {
               questionMeta={questionMetaRef.current}
               timerActive={!!(timerEndsAt && timerDuration && isQuestion)}
             />
+            )}
           </motion.div>
         </AnimatePresence>
 
@@ -756,13 +782,22 @@ export default function Present() {
               {/* Join URL — large + white so late joiners can see it without asking */}
               <span className="text-sm font-semibold text-white">{window.location.host}/join</span>
 
-              {/* Quiz mode indicator — lets the presenter confirm scoring is on */}
+              {/* Scoring indicators — lets the presenter confirm scoring is on */}
               {isQuiz && (
                 <>
                   <div className="h-5 w-px shrink-0 bg-white/15" />
                   <div className="flex items-center gap-1.5 rounded-full bg-golden-sun/15 px-2.5 py-1 text-xs font-semibold text-golden-sun">
                     <Trophy className="size-3.5" />
-                    Quiz mode
+                    Live quiz
+                  </div>
+                </>
+              )}
+              {hasTest && (
+                <>
+                  <div className="h-5 w-px shrink-0 bg-white/15" />
+                  <div className="flex items-center gap-1.5 rounded-full bg-golden-sun/15 px-2.5 py-1 text-xs font-semibold text-golden-sun">
+                    <Trophy className="size-3.5" />
+                    Self-paced test
                   </div>
                 </>
               )}
@@ -1036,6 +1071,7 @@ export default function Present() {
               joinUrl={joinUrl}
               viewers={viewers}
               isQuiz={isQuiz}
+              hasTest={hasTest}
               onStart={() => { setHasStarted(true); setShowingWaitingRoom(false) }}
             />
           </motion.div>
@@ -1078,17 +1114,18 @@ export default function Present() {
                     let lastResults: DeckResults | undefined
                     if (isRealSession) {
                       try {
-                        const all = await fetchAllSessionResponses(code)
+                        const [all, sess] = await Promise.all([fetchAllSessionResponses(code), getSessionByCode(code)])
                         const snapshot = buildResultsSnapshot(
                           deck, all, code,
                           sessionStartedAt.current,
                           peakViewerRef.current,
+                          sess?.tests,
                         )
                         // Only keep a results record if at least one question
                         // actually received a response. Skips empty history from
                         // content-only runs or sessions nobody answered, so the
                         // saved data (and the all-data export) stays meaningful.
-                        if (snapshot.questions.some(q => q.responseCount > 0)) {
+                        if (snapshot.questions.some(q => q.responseCount > 0) || snapshot.tests?.some(t => t.participants.length > 0)) {
                           lastResults = snapshot
                         }
                       } catch (e) {
@@ -1175,12 +1212,13 @@ const QR_MODAL_SIZE = `min(96vh - ${QR_MODAL_CHROME}px, 86vw, 900px)`
 const QR_QUIET = 0.035
 
 function WaitingRoom({
-  code, joinUrl, viewers, isQuiz, onStart,
+  code, joinUrl, viewers, isQuiz, hasTest, onStart,
 }: {
   code:    string
   joinUrl: string
   viewers: { id: string; name: string; emoji: string }[]
   isQuiz:  boolean
+  hasTest: boolean
   onStart: () => void
 }) {
   const count = viewers.length
@@ -1282,7 +1320,13 @@ function WaitingRoom({
         {isQuiz && (
           <div className="flex items-center gap-1.5 rounded-full border border-golden-sun/30 bg-golden-sun/10 px-3 py-1">
             <Trophy className="size-3.5 text-golden-sun" />
-            <span className="text-sm font-semibold text-golden-sun">Quiz mode</span>
+            <span className="text-sm font-semibold text-golden-sun">Live quiz</span>
+          </div>
+        )}
+{hasTest && (
+          <div className="flex items-center gap-1.5 rounded-full border border-golden-sun/30 bg-golden-sun/10 px-3 py-1">
+            <Trophy className="size-3.5 text-golden-sun" />
+            <span className="text-sm font-semibold text-golden-sun">Self-paced test</span>
           </div>
         )}
       </header>
@@ -1515,6 +1559,7 @@ function SlideContent({
   if (slide.type === 'content')      return <ContentSlideView slide={slide as ContentSlide} />
   if (slide.type === 'canvas')       return <CanvasSlideView slide={slide as CanvasSlide} />
   if (slide.type === 'leaderboard')  return <LeaderboardSlideView sessionCode={sessionCode} deck={deck} questionMeta={questionMeta} slide={slide as LeaderboardSlide} />
+  if (slide.type === 'testblock')    return null   // rendered by TestBlockView
   if (phase === 'results')  return (
     <ResultsSlideView
       slide={slide}
@@ -3727,6 +3772,7 @@ function buildResultsSnapshot(
   sessionCode: string,
   startedAt: number,
   peakAudience: number,
+  testStates?: Record<string, TestState>,
 ): DeckResults {
   const QTYPES = new Set<string>(['mcq', 'wordcloud', 'openended', 'rating', 'ranking'])
   // Group responses by slideId for fast lookup
@@ -3776,6 +3822,27 @@ function buildResultsSnapshot(
       ...(q.type === 'mcq' && q.correctAnswers?.length ? { correctAnswers: q.correctAnswers } : {}),
     })
   }
+  // Self-paced tests: everyone's score, time and every answer
+  const tests: DeckResults['tests'] = []
+  for (const s of deck) {
+    if (s.type !== 'testblock') continue
+    const t = s as TestBlockShowSlide
+    const state = testStates?.[t.id]
+    const sheets = (byId.get(t.id) ?? []) as unknown as TestAnswerDoc[]
+    if (!state || sheets.length === 0) continue
+    tests.push({
+      blockId:   t.id,
+      timeLimit: t.timeLimit,
+      questions: t.questions.map(q => ({
+        id: q.id, question: q.question, options: q.options, correctAnswers: q.correctAnswers,
+        ...(q.explanation ? { explanation: q.explanation } : {}),
+      })),
+      participants: rankTest(sheets, t.questions, state).map(r => ({
+        id: r.id, name: r.name, correct: r.correct, total: r.total,
+        timeMs: Math.round(r.timeMs), status: r.status, place: r.place, answers: r.answers,
+      })),
+    })
+  }
   return {
     id:            `s_${startedAt}`,
     sessionCode,
@@ -3783,6 +3850,7 @@ function buildResultsSnapshot(
     endedAt:       Date.now(),
     audienceCount: peakAudience,
     questions,
+    ...(tests.length ? { tests } : {}),
   }
 }
 
@@ -3887,14 +3955,16 @@ function calculateQuizLeaderboard(
 const MEDAL_COLORS = ['#ffc709', '#c0c0c0', '#cd7f32']
 
 function LeaderboardSlideView({
-  sessionCode, deck, questionMeta, slide,
+  sessionCode, deck, questionMeta, slide, preset,
 }: {
   sessionCode:  string
   deck:         AnySlide[]
   questionMeta: Record<string, { openedAt: number; duration: number | null }>
   slide?:       LeaderboardSlide
+  /** A self-paced test passes its own ranked board and publishes results itself. */
+  preset?:      { entries: LeaderboardEntry[]; onWinnerRevealed: () => void; emptyText: string }
 }) {
-  const [leaderboard, setLeaderboard] = useState<{ id?: string; name: string; score: number; emoji?: string }[]>([])
+  const [leaderboard, setLeaderboard] = useState<{ id?: string; name: string; score: number; emoji?: string; display?: string }[]>([])
   const [revealCount, setRevealCount] = useState(0)
   // Which podium place is being teased right now ("In 3rd place…"), if any
   const [announce, setAnnounce] = useState<number | null>(null)
@@ -3922,6 +3992,11 @@ function LeaderboardSlideView({
   }, [loaded, leaderboard.length])
 
   useEffect(() => {
+    if (preset) {
+      setLeaderboard(preset.entries.slice(0, 10))
+      setLoaded(true)
+      return
+    }
     if (sessionCode === 'DEMO') {
       setLeaderboard([
         { name: 'Sarah M.',  score: 380, emoji: '🦁' },
@@ -3977,9 +4052,12 @@ function LeaderboardSlideView({
   // Once the winner is on the big screen, send every player their result.
   // Not before — a phone must never spoil who won.
   useEffect(() => {
-    if (!winnerRevealed || publishedRef.current || sessionCode === 'DEMO' || !slide?.id) return
+    if (!winnerRevealed || publishedRef.current || sessionCode === 'DEMO') return
+    if (preset) { publishedRef.current = true; preset.onWinnerRevealed(); return }
+    if (!slide?.id) return
     publishedRef.current = true
     publishQuizRanks(sessionCode, slide.id, fullBoardRef.current).catch(console.error)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [winnerRevealed, sessionCode, slide?.id])
 
   const lbBg = slide?.bg
@@ -4030,7 +4108,7 @@ function LeaderboardSlideView({
 
   // One leaderboard row. `still` renders it without entrance animations —
   // used for the invisible copy that measures how tall the full list is.
-  const renderRow = (entry: { id?: string; name: string; score: number; emoji?: string }, still = false) => {
+  const renderRow = (entry: { id?: string; name: string; score: number; emoji?: string; display?: string }, still = false) => {
       const rank = top10.indexOf(entry) + 1
       const barPct = maxScore > 0 ? (entry.score / maxScore) * 100 : 0
       const medalColor = rank <= 3 ? MEDAL_COLORS[rank - 1] : null
@@ -4132,7 +4210,7 @@ function LeaderboardSlideView({
             className={`shrink-0 whitespace-nowrap text-right font-extrabold tabular-nums ${sz.pts}`}
             style={{ color: medalColor ?? 'rgba(255,255,255,0.75)' }}
           >
-            {still ? entry.score.toLocaleString() : <CountUp value={entry.score} />} pts
+            {entry.display ?? <>{still ? entry.score.toLocaleString() : <CountUp value={entry.score} />} pts</>}
           </motion.span>
         </motion.div>
       )
@@ -4223,7 +4301,7 @@ function LeaderboardSlideView({
 
       {!loaded ? null : leaderboard.length === 0 ? (
         <div className="relative flex flex-1 items-center justify-center">
-          <p className="text-white/30">No scores yet — no quiz questions have been answered.</p>
+          <p className="text-white/30">{preset?.emptyText ?? 'No scores yet — no quiz questions have been answered.'}</p>
         </div>
       ) : (
         <div ref={lbBoxRef} className="relative flex min-h-0 flex-1 flex-col justify-center overflow-hidden">

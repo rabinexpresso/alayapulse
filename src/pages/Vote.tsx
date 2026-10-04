@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Check, Send, LogOut, Clock } from 'lucide-react'
 import { cn, optionLabel } from '@/lib/utils'
 import { Confetti, CountUp } from '@/components/Celebration'
+import { TestRunner } from '@/components/TestRunner'
+import type { StoredTestBlockSlide } from '@/lib/selfPacedTest'
 import {
   subscribeToSession, submitResponse, joinAsViewer, sendReaction, getViewerId,
   type Session, type QType, type ReactionType,
@@ -109,8 +111,9 @@ export default function Vote() {
     // No name in URL: need session to determine quiz vs non-quiz
     if (session === undefined) return  // Still loading
 
-    // Quiz with no name: wait until the gate screen is submitted
-    if (session?.isQuiz && !quizName) return
+    // Quiz or self-paced test with no name: wait until the gate screen is submitted
+    const needsName = !!session?.isQuiz || !!session?.slides?.some(x => x.type === 'testblock')
+    if (needsName && !quizName) return
 
     // Non-quiz (anonymous OK) or quiz name just entered
     const nameToUse = quizName || undefined
@@ -176,8 +179,9 @@ export default function Vote() {
     return <WrapState session={session} attendeeName={attendeeName} />
   }
 
-  // ── Quiz name gate — must enter name before participating ───────────────
-  if (session.isQuiz && !attendeeName && !quizName) {
+  // ── Name gate — a live quiz or a self-paced test needs a name ──────────
+  const hasTest = session.slides.some(x => x.type === 'testblock')
+  if ((session.isQuiz || hasTest) && !attendeeName && !quizName) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center bg-white px-5">
         <div className="w-full max-w-sm rounded-3xl border border-midnight-sky-100 bg-white p-8 shadow-[0_8px_40px_-8px_rgba(0,0,121,0.15)]">
@@ -467,7 +471,16 @@ export default function Vote() {
             transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
             className="flex flex-1 flex-col"
           >
-            {isWaiting && (slideData as { type?: string } | undefined)?.type === 'leaderboard' && session.isQuiz ? (
+            {slideData?.type === 'testblock' ? (
+              <TestRunner
+                code={sessionCode!}
+                block={slideData as StoredTestBlockSlide}
+                state={session.tests?.[slideData.id]}
+                personId={personId}
+                name={quizName || attendeeName}
+                emoji={attendeeEmoji || undefined}
+              />
+            ) : isWaiting && (slideData as { type?: string } | undefined)?.type === 'leaderboard' && session.isQuiz ? (
               <LeaderboardPhoneState ranks={session.quizRanks} slideId={slideId} personId={personId} />
             ) : isWaiting ? (
               <WaitingState sessionCode={sessionCode} />
@@ -601,8 +614,10 @@ export default function Vote() {
         </AnimatePresence>
       </div>
 
-      {/* ── Reaction bar — always visible, no pill housing ──────────────── */}
-      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 flex justify-center pb-4">
+      {/* ── Reaction bar — always visible, no pill housing (hidden while a
+          self-paced test is being answered: it would cover the options) ── */}
+      <div className={cn('pointer-events-none fixed inset-x-0 bottom-0 z-20 flex justify-center pb-4',
+        slideData?.type === 'testblock' && ['running', 'paused'].includes(session.tests?.[slideData.id]?.status ?? '') && 'hidden')}>
         <div className="pointer-events-auto flex items-center gap-3">
           {REACTION_CONFIG.map(r => (
             <motion.button

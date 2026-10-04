@@ -1,0 +1,443 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Self-paced test block — everyone answers a set of MCQs on their own phone,
+   at their own pace, within one time limit. Answers are revealed at the end;
+   the winner has the most correct answers, ties going to the faster finish.
+
+   Three shapes of the same block:
+     • Editor  — flat: a `testblock` header slide, its MCQs, then a `testend`
+                 marker. Membership is position: an MCQ between a header and
+                 its end belongs to that test. Keeps every existing editor
+                 feature (edit, undo, save, drag) working on plain slides.
+     • Show    — collapsed: one `testblock` slide holding its questions, with
+                 correct answers, for the presenter.
+     • Phone   — the show slide minus correct answers and explanations, so
+                 nobody can read them from the session doc before the end.
+   ───────────────────────────────────────────────────────────────────────── */
+
+export type TestAfterOrder  = 'lb-review' | 'review-lb' | 'lb-only'
+export type TestScoreTiming = 'submit' | 'end'
+
+export interface TestSettings {
+  /** Minutes for the whole test. */
+  timeLimit:   number
+  /** When a phone shows its own score: as soon as it submits, or at the end. */
+  scoreTiming: TestScoreTiming
+  /** What the block shows once the test is over. */
+  afterOrder:  TestAfterOrder
+  /** Optional extra line shown with the rules. */
+  rules?:      string
+}
+
+export const DEFAULT_TEST_SETTINGS: TestSettings = {
+  timeLimit:   15,
+  scoreTiming: 'end',
+  afterOrder:  'lb-review',
+}
+
+export const AFTER_ORDER_LABEL: Record<TestAfterOrder, string> = {
+  'lb-review': 'Leaderboard, then review',
+  'review-lb': 'Review, then leaderboard',
+  'lb-only':   'Leaderboard only',
+}
+
+/** Editor header slide. */
+export interface TestHeaderSlide extends TestSettings {
+  id:         string
+  type:       'testblock'
+  collapsed?: boolean
+}
+
+/** Editor end marker. */
+export interface TestEndSlide {
+  id:      string
+  type:    'testend'
+  blockId: string
+}
+
+/** A question as the presenter sees it (with the answer). */
+export interface TestQuestion {
+  id:             string
+  question:       string
+  options:        string[]
+  correctAnswers: number[]
+  explanation?:   string
+  imgUrl?:        string
+}
+
+/** Collapsed block in a running show. */
+export interface TestBlockShowSlide extends TestSettings {
+  id:        string
+  type:      'testblock'
+  questions: TestQuestion[]
+}
+
+/** A question as phones receive it: no answers, just how many to pick. */
+export interface StoredTestQuestion {
+  id:       string
+  question: string
+  options:  string[]
+  pick:     number
+  imgUrl?:  string
+}
+
+export interface StoredTestBlockSlide extends TestSettings {
+  id:        string
+  type:      'testblock'
+  questions: StoredTestQuestion[]
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyS = any
+
+const isHeader = (s: AnyS) => s?.type === 'testblock' && !Array.isArray(s.questions)
+const isEnd    = (s: AnyS) => s?.type === 'testend'
+export const isTestable = (s: AnyS) => s?.type === 'mcq'
+
+/** Settings picked off a header slide (fills gaps from older decks). */
+export function testSettingsOf(s: AnyS): TestSettings {
+  return {
+    timeLimit:   Number(s?.timeLimit) > 0 ? Number(s.timeLimit) : DEFAULT_TEST_SETTINGS.timeLimit,
+    scoreTiming: s?.scoreTiming === 'submit' ? 'submit' : 'end',
+    afterOrder:  s?.afterOrder === 'review-lb' || s?.afterOrder === 'lb-only' ? s.afterOrder : 'lb-review',
+    ...(typeof s?.rules === 'string' && s.rules.trim() ? { rules: s.rules.trim() } : {}),
+  }
+}
+
+export interface TestRange {
+  headerId: string
+  start:    number   // header index
+  end:      number   // end-marker index
+  memberIds: string[]
+}
+
+/** Every block's header/end positions and the questions between them. */
+export function testRanges(slides: AnyS[]): TestRange[] {
+  const out: TestRange[] = []
+  for (let i = 0; i < slides.length; i++) {
+    if (!isHeader(slides[i])) continue
+    const id = slides[i].id
+    const end = slides.findIndex((s, j) => j > i && isEnd(s) && s.blockId === id)
+    if (end < 0) continue
+    out.push({ headerId: id, start: i, end, memberIds: slides.slice(i + 1, end).map(s => s.id) })
+  }
+  return out
+}
+
+/** Map slide id → header id, for every question inside a block. */
+export function testMembership(slides: AnyS[]): Map<string, string> {
+  const m = new Map<string, string>()
+  for (const r of testRanges(slides)) r.memberIds.forEach(id => m.set(id, r.headerId))
+  return m
+}
+
+/**
+ * Restores the block rules after any edit — drag, paste, import, undo:
+ *  • every header has an end marker (added after its questions if missing);
+ *    an end with no header is dropped;
+ *  • anything that can't be in a test (non-MCQ, another block) found between
+ *    a header and its end moves to just after the end, keeping its order.
+ * Returns the same array when nothing needed fixing, so callers can skip a
+ * state update. `movedOut` lists the slides that had to move.
+ */
+export function normalizeTestBlocks(slides: AnyS[]): { slides: AnyS[]; movedOut: AnyS[] } {
+  let list = slides
+  let changed = false
+
+  // Drop orphan ends / duplicate ends
+  const headerIds = new Set(list.filter(isHeader).map(s => s.id))
+  const seenEnd = new Set<string>()
+  const kept = list.filter(s => {
+    if (!isEnd(s)) return true
+    if (!headerIds.has(s.blockId) || seenEnd.has(s.blockId)) return false
+    seenEnd.add(s.blockId); return true
+  })
+  if (kept.length !== list.length) { list = kept; changed = true }
+
+  // Missing ends: close each header after the run of MCQs that follows it
+  for (const h of list.filter(isHeader)) {
+    if (list.some(s => isEnd(s) && s.blockId === h.id)) continue
+    const i = list.indexOf(h)
+    let j = i + 1
+    while (j < list.length && isTestable(list[j])) j++
+    list = [...list.slice(0, j), { id: Math.random().toString(36).slice(2, 10), type: 'testend', blockId: h.id }, ...list.slice(j)]
+    changed = true
+  }
+
+  // An end before its header (dragged above it): put the end right after the header
+  for (const h of list.filter(isHeader)) {
+    const hi = list.indexOf(h)
+    const ei = list.findIndex(s => isEnd(s) && s.blockId === h.id)
+    if (ei < hi) {
+      const end = list[ei]
+      list = list.filter((_, k) => k !== ei)
+      const nh = list.indexOf(h)
+      list = [...list.slice(0, nh + 1), end, ...list.slice(nh + 1)]
+      changed = true
+    }
+  }
+
+  // Move out anything that can't be a test question
+  const movedOut: AnyS[] = []
+  let guard = 0
+  for (;;) {
+    if (guard++ > 50) break
+    let fixed = false
+    for (const r of testRanges(list)) {
+      const k = list.findIndex((s, idx) => idx > r.start && idx < r.end && !isTestable(s))
+      if (k < 0) continue
+      // A whole inner block moves as one unit; anything else moves alone
+      const s = list[k]
+      let unit: AnyS[] = [s]
+      if (isHeader(s)) {
+        const innerEnd = list.findIndex((x, idx) => idx > k && isEnd(x) && x.blockId === s.id)
+        unit = innerEnd > k ? list.slice(k, innerEnd + 1) : [s]
+      }
+      const ids = new Set(unit.map(u => u.id))
+      const rest = list.filter(x => !ids.has(x.id))
+      const endIdx = rest.findIndex(x => isEnd(x) && x.blockId === r.headerId)
+      list = [...rest.slice(0, endIdx + 1), ...unit, ...rest.slice(endIdx + 1)]
+      movedOut.push(...unit.filter(u => !isEnd(u)))
+      fixed = changed = true
+      break
+    }
+    if (!fixed) break
+  }
+
+  return { slides: changed ? list : slides, movedOut }
+}
+
+/** Editor slides → show slides: each block becomes one `testblock` slide. */
+export function collapseTestBlocks(slides: AnyS[]): AnyS[] {
+  const out: AnyS[] = []
+  for (let i = 0; i < slides.length; i++) {
+    const s = slides[i]
+    if (isEnd(s)) continue
+    if (!isHeader(s)) { out.push(s); continue }
+    const end = slides.findIndex((x, j) => j > i && isEnd(x) && x.blockId === s.id)
+    const members = end > i ? slides.slice(i + 1, end) : []
+    const block: TestBlockShowSlide = {
+      id: s.id,
+      type: 'testblock',
+      ...testSettingsOf(s),
+      questions: members.filter(isTestable).map((q: AnyS) => ({
+        id:             q.id,
+        question:       q.question ?? '',
+        options:        q.options ?? [],
+        correctAnswers: Array.isArray(q.correctAnswers) ? q.correctAnswers : [],
+        ...(typeof q.explanation === 'string' && q.explanation.trim() ? { explanation: q.explanation.trim() } : {}),
+        ...(q.imgUrl ? { imgUrl: String(q.imgUrl) } : {}),
+      })),
+    }
+    out.push({ ...block, _members: members, _header: s, ...(end > i ? { _end: slides[end] } : {}) })
+    if (end > i) i = end
+  }
+  return out
+}
+
+/** Show slides coming back from a show → editor slides again. */
+export function expandTestBlocks(slides: AnyS[]): AnyS[] {
+  const out: AnyS[] = []
+  for (const s of slides) {
+    if (!(s?.type === 'testblock' && Array.isArray(s.questions))) { out.push(s); continue }
+    const header = s._header ?? { id: s.id, type: 'testblock', ...testSettingsOf(s) }
+    const members = Array.isArray(s._members) ? s._members : s.questions.map((q: TestQuestion) => ({
+      id: q.id, type: 'mcq', question: q.question, options: q.options,
+      ...(q.correctAnswers?.length ? { correctAnswers: q.correctAnswers } : {}),
+      ...(q.explanation ? { explanation: q.explanation } : {}),
+      ...(q.imgUrl ? { imgUrl: q.imgUrl } : {}),
+    }))
+    out.push(header, ...members, s._end ?? { id: `${s.id}-end`, type: 'testend', blockId: s.id })
+  }
+  return out
+}
+
+/** Show slide → what phones get: correct answers and explanations removed. */
+export function toStoredTestBlock(s: TestBlockShowSlide): StoredTestBlockSlide {
+  return {
+    id: s.id, type: 'testblock', ...testSettingsOf(s),
+    questions: s.questions.map(q => ({
+      id: q.id, question: q.question, options: q.options,
+      pick: Math.max(1, q.correctAnswers.length),
+      ...(q.imgUrl ? { imgUrl: q.imgUrl } : {}),
+    })),
+  }
+}
+
+/** Blocks a show can't start with, with a reason the host can act on. */
+export function testProblems(slides: AnyS[]): { slideId: string; message: string }[] {
+  const out: { slideId: string; message: string }[] = []
+  for (const r of testRanges(slides)) {
+    const qs = slides.slice(r.start + 1, r.end)
+    if (qs.length === 0) { out.push({ slideId: r.headerId, message: 'Your self-paced test block has no questions yet.' }); continue }
+    qs.forEach((q, i) => {
+      if (!(q.correctAnswers?.length > 0)) out.push({ slideId: q.id, message: `Question ${i + 1} in your self-paced test has no correct answer ticked.` })
+      else if ((q.options ?? []).filter((o: string) => String(o).trim()).length < 2) out.push({ slideId: q.id, message: `Question ${i + 1} in your self-paced test needs at least two options.` })
+    })
+  }
+  return out
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Live state — session doc field `tests.<blockId>`
+   Clock: `endsAt` and `pausedAt` are presenter Date.now() values (phones
+   count down against them, like the existing question timer). Ranking time
+   uses server timestamps so a phone's clock can't help or hurt anyone.
+   ───────────────────────────────────────────────────────────────────────── */
+
+export type TestStatus = 'ready' | 'running' | 'paused' | 'ended'
+export type TestStage  = 'test' | 'leaderboard' | 'review'
+
+export interface TestState {
+  status:        TestStatus
+  /** Bumped by "Restart test" — answers from an older round don't count. */
+  round:         number
+  /** Full time limit, for "Restart timer". */
+  durationMs:    number
+  endsAt:        number | null
+  remainingMs:   number | null
+  pausedAt:      number | null
+  pausedTotalMs: number
+  /** Server time the clock (re)started — finish times count from here. */
+  startedServer?: { seconds: number; nanoseconds: number } | null
+  endedServer?:   { seconds: number; nanoseconds: number } | null
+  /** Where the presenter is after the test (phones follow along). */
+  stage:         TestStage
+  reviewIndex:   number
+  /** Correct answers + explanations, published once the test ends. */
+  reveal?:       Record<string, { correct: number[]; explanation?: string }>
+  /** Everyone's result, published once the winner is shown:
+   *  person id → [place, correct, time in ms, 1 if they ran out of time]. */
+  ranks?:        { total: number; questions: number; at: number; entries: Record<string, [number, number, number, number?]> }
+}
+
+/** One person's test sheet — a doc in `responses`, id `${blockId}__${personId}`. */
+export interface TestAnswerDoc {
+  slideId:          string          // the block id
+  type:             'testblock'
+  value:            string          // '' — keeps the shared Response shape
+  respondentId:     string
+  respondentName:   string
+  respondentEmoji?: string
+  round:            number
+  answers:          Record<string, number[]>
+  current:          number
+  finished:         boolean
+  finishedServer?:  { seconds: number; nanoseconds: number; toMillis?: () => number } | null
+  /** Paused time so far when this person submitted — later pauses aren't theirs. */
+  pausedAtFinish?:  number
+  /** Written by the presenter when the block shows scores on submit. */
+  score?:           number
+  submittedAt?:     unknown
+}
+
+export const testAnswerDocId = (blockId: string, personId: string) => `${blockId}__${personId}`
+
+const tsMs = (t: AnyS): number | null => {
+  if (!t) return null
+  if (typeof t.toMillis === 'function') return t.toMillis()
+  if (typeof t.seconds === 'number') return t.seconds * 1000 + Math.round((t.nanoseconds ?? 0) / 1e6)
+  return null
+}
+
+export const sameAnswer = (a: number[] | undefined, b: number[]) =>
+  !!a && a.length === b.length && [...a].sort((x, y) => x - y).every((v, i) => v === [...b].sort((x, y) => x - y)[i])
+
+export function countCorrect(answers: Record<string, number[]>, questions: TestQuestion[]): number {
+  return questions.reduce((n, q) => n + (q.correctAnswers.length && sameAnswer(answers[q.id], q.correctAnswers) ? 1 : 0), 0)
+}
+
+export interface TestResultRow {
+  id:       string
+  name:     string
+  emoji?:   string
+  correct:  number
+  total:    number
+  /** Start → submit (or → end for those who ran out), minus pauses. */
+  timeMs:   number
+  status:   'submitted' | 'timeout'
+  answers:  Record<string, number[]>
+  place:    number
+}
+
+/** Rank everyone: most correct first, then those who submitted before time
+ *  ran out, then the faster finish, then name for a stable order. */
+export function rankTest(docs: TestAnswerDoc[], questions: TestQuestion[], state: TestState): TestResultRow[] {
+  const start = tsMs(state.startedServer)
+  const end   = tsMs(state.endedServer)
+  const paused = state.pausedTotalMs ?? 0
+  const rows = docs
+    .filter(d => d.round === state.round)
+    .map(d => {
+      const fin = d.finished ? tsMs(d.finishedServer) : null
+      const stop = fin ?? end
+      // Only pauses that happened before this person finished come off their time
+      const off = fin !== null && typeof d.pausedAtFinish === 'number' ? d.pausedAtFinish : paused
+      const timeMs = start !== null && stop !== null ? Math.max(0, stop - start - off) : state.durationMs
+      return {
+        id: d.respondentId,
+        name: (d.respondentName || 'Anonymous').trim() || 'Anonymous',
+        ...(d.respondentEmoji ? { emoji: d.respondentEmoji } : {}),
+        correct: countCorrect(d.answers ?? {}, questions),
+        total: questions.length,
+        timeMs: Math.min(timeMs, state.durationMs + 24 * 3600_000),
+        status: (d.finished ? 'submitted' : 'timeout') as 'submitted' | 'timeout',
+        answers: d.answers ?? {},
+        place: 0,
+      }
+    })
+    .sort((a, b) =>
+      b.correct - a.correct ||
+      (a.status === b.status ? 0 : a.status === 'submitted' ? -1 : 1) ||
+      a.timeMs - b.timeMs ||
+      a.name.localeCompare(b.name))
+  // Same score, same status and same time (to the second) share a place
+  rows.forEach((r, i) => {
+    const prev = rows[i - 1]
+    r.place = prev && prev.correct === r.correct && prev.status === r.status && Math.round(prev.timeMs / 1000) === Math.round(r.timeMs / 1000)
+      ? prev.place : i + 1
+  })
+  return rows
+}
+
+/** "9 min 12 s", "48 s" */
+export function formatDuration(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000))
+  const m = Math.floor(s / 60)
+  return m > 0 ? `${m} min ${String(s % 60).padStart(2, '0')} s` : `${s} s`
+}
+
+/** "08:42" for countdowns */
+export function formatClock(ms: number): string {
+  const s = Math.max(0, Math.ceil(ms / 1000))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+    : `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+}
+
+/** Time left right now for a live state. */
+export function remainingOf(state: TestState | undefined, now = Date.now()): number {
+  if (!state) return 0
+  if (state.status === 'paused') return Math.max(0, state.remainingMs ?? 0)
+  if (state.status === 'running') return Math.max(0, (state.endsAt ?? now) - now)
+  if (state.status === 'ready') return state.durationMs
+  return 0
+}
+
+export function freshTestState(durationMs: number, round = 0): TestState {
+  return {
+    status: 'ready', round, durationMs,
+    endsAt: null, remainingMs: durationMs, pausedAt: null, pausedTotalMs: 0,
+    startedServer: null, endedServer: null,
+    stage: 'test', reviewIndex: 0,
+  }
+}
+
+/** The steps the block plays after the test, in the host's chosen order. */
+export function afterSteps(order: TestAfterOrder, questionCount: number): ({ stage: 'leaderboard' } | { stage: 'review'; index: number })[] {
+  const review = Array.from({ length: questionCount }, (_, index) => ({ stage: 'review' as const, index }))
+  const lb = [{ stage: 'leaderboard' as const }]
+  return order === 'review-lb' ? [...review, ...lb] : order === 'lb-only' ? lb : [...lb, ...review]
+}

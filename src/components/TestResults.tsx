@@ -1,0 +1,399 @@
+import { useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Check, X, ChevronDown, ChevronUp, Info, ClipboardCheck, Users, Clock, Trophy, Target } from 'lucide-react'
+import { cn, optionLabel } from '@/lib/utils'
+import type { ResultQuestion, TestResult, TestResultQuestion, TestResultParticipant } from '@/lib/deckStorage'
+import { formatDuration, sameAnswer } from '@/lib/selfPacedTest'
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Results for self-paced tests, plus the three question kinds every
+   results view, export and PDF labels questions with.
+   ───────────────────────────────────────────────────────────────────────── */
+
+export type QuestionKind = 'test' | 'live' | 'poll'
+
+export const KIND_INFO: Record<QuestionKind, { label: string; definition: string; cls: string }> = {
+  test: {
+    label: 'Self-paced test',
+    definition: 'Questions inside a Self-paced test block. Everyone answers on their own phone at their own pace within one time limit, sees the answers at the end, and is ranked by correct answers, then finish time.',
+    cls: 'bg-golden-sun/15 text-[#8a6600]',
+  },
+  live: {
+    label: 'Live quiz',
+    definition: 'Multiple-choice questions with a correct answer, shown one at a time on the big screen while Live quiz is on. Points for each right answer, plus extra points for answering fast.',
+    cls: 'bg-hot-pink/10 text-hot-pink',
+  },
+  poll: {
+    label: 'Poll',
+    definition: "Questions that aren't scored, such as word clouds, open-ended, rating, ranking, and multiple choice with no correct answer. They show what the room thinks.",
+    cls: 'bg-midnight-sky-100 text-midnight-sky-600',
+  },
+}
+
+/** Live quiz if it was scored live (or marked while the deck is a live quiz); otherwise a poll. */
+export function liveKind(q: ResultQuestion, deckIsQuiz: boolean): QuestionKind {
+  if (q.type !== 'mcq' || !(q.correctAnswers?.length)) return 'poll'
+  return q.responses.some(r => r.quizPoints) || deckIsQuiz ? 'live' : 'poll'
+}
+
+/** A small tag with the kind's definition on hover / tap. */
+export function KindTag({ kind }: { kind: QuestionKind }) {
+  const [open, setOpen] = useState(false)
+  const info = KIND_INFO[kind]
+  return (
+    <span className="relative inline-flex">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        title={info.definition}
+        className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider', info.cls)}
+      >
+        {info.label}
+        <Info className="size-3 opacity-70" />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.span
+            initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}
+            className="absolute left-0 top-full z-30 mt-1.5 w-72 rounded-xl border border-midnight-sky-100 bg-white p-3 text-left text-xs font-normal normal-case leading-relaxed tracking-normal text-midnight-sky-700 shadow-xl"
+          >
+            {info.definition}
+          </motion.span>
+        )}
+      </AnimatePresence>
+    </span>
+  )
+}
+
+/* ── Shared text helpers (page, Excel, PDF) ─────────────────────────────── */
+
+const letters = (idxs: number[], n: number) => idxs.slice().sort((a, b) => a - b).map(i => optionLabel(i, n)).join(', ')
+const full = (idxs: number[], q: TestResultQuestion) =>
+  idxs.slice().sort((a, b) => a - b).map(i => `${optionLabel(i, q.options.length)}. ${q.options[i] ?? ''}`.trim()).join(', ')
+
+/** "✗ missed B", "✗ C wasn't correct", "✗ not answered", "✓" */
+export function answerVerdict(got: number[] | undefined, q: TestResultQuestion): { ok: boolean; note: string } {
+  if (!got?.length) return { ok: false, note: 'not answered' }
+  if (sameAnswer(got, q.correctAnswers)) return { ok: true, note: '' }
+  const missed = q.correctAnswers.filter(c => !got.includes(c))
+  const extra = got.filter(g => !q.correctAnswers.includes(g))
+  const parts = []
+  if (missed.length) parts.push(`missed ${letters(missed, q.options.length)}`)
+  if (extra.length) parts.push(`${letters(extra, q.options.length)} ${extra.length > 1 ? "weren't" : "wasn't"} correct`)
+  return { ok: false, note: parts.join(' · ') }
+}
+
+export const statusLabel = (p: TestResultParticipant) => (p.status === 'submitted' ? 'Submitted' : 'Ran out of time')
+const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0)
+
+/* ── Results page section ──────────────────────────────────────────────── */
+
+export function TestResultSection({ test, index }: { test: TestResult; index: number }) {
+  const [openPerson, setOpenPerson] = useState<string | null>(null)
+  const [showAll, setShowAll] = useState(false)
+  const ps = test.participants
+  const n = test.questions.length
+  const submitted = ps.filter(p => p.status === 'submitted')
+  const shown = showAll ? ps : ps.slice(0, 25)
+
+  return (
+    <motion.section
+      initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: index * 0.05 }}
+      className="overflow-hidden rounded-2xl border border-golden-sun/40 bg-white shadow-[0_2px_12px_-4px_rgba(0,0,121,0.06)]"
+    >
+      <div className="h-1 bg-golden-sun" />
+      <div className="px-6 py-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <KindTag kind="test" />
+        </div>
+        <h2 className="mt-2 flex items-center gap-2 text-2xl font-bold text-midnight-sky-900">
+          <ClipboardCheck className="size-6 text-golden-sun" />
+          Self-paced test · {n} question{n !== 1 ? 's' : ''} · {test.timeLimit} min
+        </h2>
+
+        {/* Summary */}
+        <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+          <Mini icon={<Users className="size-4" />} label="Took the test" value={String(ps.length)} />
+          <Mini icon={<Check className="size-4" />} label="Submitted" value={`${submitted.length}`} sub={`${ps.length - submitted.length} ran out of time`} />
+          <Mini icon={<Target className="size-4" />} label="Average score" value={`${avg(ps.map(p => p.correct)).toFixed(1)} / ${n}`} />
+          <Mini icon={<Clock className="size-4" />} label="Average time" value={submitted.length ? formatDuration(avg(submitted.map(p => p.timeMs))) : '—'} sub="of those who submitted" />
+        </div>
+
+        {/* Participants */}
+        <h3 className="mt-7 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-midnight-sky-500">
+          <Trophy className="size-4 text-golden-sun" /> Participants
+        </h3>
+        <p className="mt-1 text-xs text-midnight-sky-400">Click a name to see every answer they gave.</p>
+        <div className="mt-3 overflow-hidden rounded-xl border border-midnight-sky-100">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-midnight-sky-50 text-[11px] uppercase tracking-wider text-midnight-sky-500">
+              <tr>
+                <th className="px-4 py-2.5 font-semibold">Place</th>
+                <th className="px-4 py-2.5 font-semibold">Name</th>
+                <th className="px-4 py-2.5 font-semibold">Score</th>
+                <th className="px-4 py-2.5 font-semibold">Time taken</th>
+                <th className="px-4 py-2.5 font-semibold">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map(p => (
+                <PersonRows key={p.id} p={p} test={test} open={openPerson === p.id} onToggle={() => setOpenPerson(openPerson === p.id ? null : p.id)} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {ps.length > 25 && (
+          <button onClick={() => setShowAll(v => !v)} className="mt-2 text-sm font-medium text-sky-blue hover:underline">
+            {showAll ? 'Show fewer' : `Show all ${ps.length} participants`}
+          </button>
+        )}
+
+        {/* Questions */}
+        <h3 className="mt-8 text-sm font-semibold uppercase tracking-wider text-midnight-sky-500">Questions</h3>
+        <div className="mt-3 space-y-3">
+          {test.questions.map((q, i) => <TestQuestionCard key={q.id} q={q} i={i} ps={ps} />)}
+        </div>
+      </div>
+    </motion.section>
+  )
+}
+
+function Mini({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub?: string }) {
+  return (
+    <div className="rounded-xl border border-midnight-sky-100 bg-midnight-sky-50/50 px-4 py-3">
+      <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-midnight-sky-500">{icon}{label}</p>
+      <p className="mt-1.5 text-xl font-bold tabular-nums text-midnight-sky-900">{value}</p>
+      {sub && <p className="text-[11px] text-midnight-sky-400">{sub}</p>}
+    </div>
+  )
+}
+
+function PersonRows({ p, test, open, onToggle }: { p: TestResultParticipant; test: TestResult; open: boolean; onToggle: () => void }) {
+  return (
+    <>
+      <tr onClick={onToggle} className={cn('cursor-pointer border-t border-midnight-sky-100 transition hover:bg-midnight-sky-50', open && 'bg-midnight-sky-50')}>
+        <td className="px-4 py-2.5 font-semibold tabular-nums text-midnight-sky-700">{p.place}</td>
+        <td className="px-4 py-2.5 font-medium text-midnight-sky-900">
+          <span className="inline-flex items-center gap-1.5">{open ? <ChevronUp className="size-3.5 text-midnight-sky-400" /> : <ChevronDown className="size-3.5 text-midnight-sky-400" />}{p.name}</span>
+        </td>
+        <td className="px-4 py-2.5 tabular-nums text-midnight-sky-800">{p.correct}/{p.total}</td>
+        <td className="px-4 py-2.5 tabular-nums text-midnight-sky-600">{formatDuration(p.timeMs)}</td>
+        <td className={cn('px-4 py-2.5 text-xs font-medium', p.status === 'submitted' ? 'text-fresh-green' : 'text-amber-600')}>{statusLabel(p)}</td>
+      </tr>
+      {open && (
+        <tr className="border-t border-midnight-sky-100 bg-midnight-sky-50/40">
+          <td colSpan={5} className="px-4 py-3">
+            <table className="w-full text-left text-xs">
+              <thead className="text-[10px] uppercase tracking-wider text-midnight-sky-400">
+                <tr><th className="py-1.5 pr-3">Question</th><th className="py-1.5 pr-3">Their answer</th><th className="py-1.5 pr-3">Correct answer</th><th className="py-1.5" /></tr>
+              </thead>
+              <tbody>
+                {test.questions.map((q, i) => {
+                  const got = p.answers[q.id]
+                  const v = answerVerdict(got, q)
+                  return (
+                    <tr key={q.id} className="border-t border-midnight-sky-100 align-top">
+                      <td className="max-w-xs py-1.5 pr-3 text-midnight-sky-700"><span className="font-semibold">Q{i + 1}</span> {q.question.length > 70 ? q.question.slice(0, 70) + '…' : q.question}</td>
+                      <td className="py-1.5 pr-3 text-midnight-sky-800">{got?.length ? full(got, q) : <span className="italic text-midnight-sky-400">Not answered</span>}</td>
+                      <td className="py-1.5 pr-3 text-midnight-sky-600">{full(q.correctAnswers, q)}</td>
+                      <td className={cn('whitespace-nowrap py-1.5 font-semibold', v.ok ? 'text-fresh-green' : 'text-hot-pink')}>
+                        {v.ok ? <Check className="inline size-3.5" /> : <><X className="inline size-3.5" /> {v.note}</>}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
+function TestQuestionCard({ q, i, ps }: { q: TestResultQuestion; i: number; ps: TestResultParticipant[] }) {
+  const [open, setOpen] = useState(false)
+  const answered = ps.filter(p => (p.answers[q.id]?.length ?? 0) > 0)
+  const right = answered.filter(p => sameAnswer(p.answers[q.id], q.correctAnswers)).length
+  const pct = (x: number) => (answered.length ? Math.round((x / answered.length) * 100) : 0)
+  return (
+    <div className="rounded-xl border border-midnight-sky-100">
+      <div className="px-5 py-4">
+        <div className="flex items-start justify-between gap-4">
+          <p className="text-sm font-semibold leading-snug text-midnight-sky-900"><span className="mr-1.5 text-[#a07800]">Q{i + 1}</span>{q.question}</p>
+          <span className="shrink-0 rounded-full bg-fresh-green/10 px-2.5 py-1 text-xs font-bold text-fresh-green">{pct(right)}% correct</span>
+        </div>
+        <div className="mt-3 space-y-1.5">
+          {q.options.map((o, k) => {
+            const c = answered.filter(p => p.answers[q.id].includes(k)).length
+            const isRight = q.correctAnswers.includes(k)
+            return (
+              <div key={k} className="flex items-center gap-2.5 text-sm">
+                <span className={cn('flex size-6 shrink-0 items-center justify-center rounded-md text-[11px] font-bold', isRight ? 'bg-fresh-green text-white' : 'bg-midnight-sky-100 text-midnight-sky-500')}>
+                  {isRight ? <Check className="size-3.5" /> : optionLabel(k, q.options.length)}
+                </span>
+                <div className="relative h-7 flex-1 overflow-hidden rounded-md bg-midnight-sky-50">
+                  <div className={cn('absolute inset-y-0 left-0', isRight ? 'bg-fresh-green/25' : 'bg-midnight-sky-200/60')} style={{ width: `${pct(c)}%` }} />
+                  <span className={cn('relative flex h-full items-center px-2.5', isRight ? 'font-medium text-midnight-sky-900' : 'text-midnight-sky-700')}>{o}</span>
+                </div>
+                <span className="w-10 shrink-0 text-right text-xs tabular-nums text-midnight-sky-500">{pct(c)}%</span>
+              </div>
+            )
+          })}
+        </div>
+        {q.explanation && <p className="mt-3 rounded-lg bg-golden-sun/10 px-3 py-2 text-xs leading-relaxed text-midnight-sky-700"><span className="font-semibold">Explanation: </span>{q.explanation}</p>}
+      </div>
+      {answered.length > 0 && (
+        <>
+          <button onClick={() => setOpen(v => !v)} className="flex w-full items-center justify-between border-t border-midnight-sky-100 px-5 py-2.5 text-xs font-medium text-midnight-sky-600 hover:bg-midnight-sky-50">
+            <span>{open ? 'Hide' : 'Show'} {answered.length} response{answered.length !== 1 ? 's' : ''}</span>
+            {open ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+          </button>
+          {open && (
+            <div className="max-h-72 overflow-y-auto border-t border-midnight-sky-100 px-5 py-2">
+              {answered.map(p => {
+                const v = answerVerdict(p.answers[q.id], q)
+                return (
+                  <div key={p.id} className="flex items-center gap-3 border-b border-midnight-sky-50 py-1.5 text-xs last:border-0">
+                    <span className="w-40 shrink-0 truncate font-medium text-midnight-sky-800">{p.name}</span>
+                    <span className="flex-1 text-midnight-sky-600">{full(p.answers[q.id], q)}</span>
+                    <span className={cn('shrink-0 font-semibold', v.ok ? 'text-fresh-green' : 'text-hot-pink')}>{v.ok ? '✓' : `✗ ${v.note}`}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+/* ── Excel ─────────────────────────────────────────────────────────────── */
+
+type Row = Record<string, string | number>
+
+/** The three test tabs: overview, every answer in full, and per question. */
+export function testSheets(test: TestResult): { results: Row[]; answers: Row[]; questions: Row[] } {
+  const qs = test.questions
+  const qCol = (i: number) => `Q${i + 1}`
+  const correctRow: Row = { Place: '', Name: 'Correct answer', Score: '', 'Time taken': '', Seconds: '', Status: '' }
+  qs.forEach((q, i) => { correctRow[qCol(i)] = letters(q.correctAnswers, q.options.length) })
+  const results: Row[] = [correctRow, ...test.participants.map(p => {
+    const row: Row = {
+      Place: p.place, Name: p.name, Score: `${p.correct}/${p.total}`,
+      'Time taken': formatDuration(p.timeMs), Seconds: Math.round(p.timeMs / 1000), Status: statusLabel(p),
+    }
+    qs.forEach((q, i) => {
+      const got = p.answers[q.id]
+      row[qCol(i)] = `${got?.length ? letters(got, q.options.length) : '—'} ${answerVerdict(got, q).ok ? '✓' : '✗'}`
+    })
+    return row
+  })]
+
+  const answers: Row[] = []
+  for (const p of test.participants) {
+    qs.forEach((q, i) => {
+      const got = p.answers[q.id]
+      const v = answerVerdict(got, q)
+      answers.push({
+        Name: p.name,
+        Question: `Q${i + 1} ${q.question.replace(/\s+/g, ' ').slice(0, 120)}`,
+        'Their answer': got?.length ? full(got, q) : 'Not answered',
+        'Correct answer': full(q.correctAnswers, q),
+        Result: v.ok ? '✓' : `✗ ${v.note}`,
+      })
+    })
+  }
+
+  const questions: Row[] = qs.map((q, i) => {
+    const answered = test.participants.filter(p => (p.answers[q.id]?.length ?? 0) > 0)
+    const right = answered.filter(p => sameAnswer(p.answers[q.id], q.correctAnswers)).length
+    // Most common wrong answer (as a set of letters)
+    const wrong = new Map<string, number>()
+    answered.forEach(p => { if (!sameAnswer(p.answers[q.id], q.correctAnswers)) { const k = letters(p.answers[q.id], q.options.length); wrong.set(k, (wrong.get(k) ?? 0) + 1) } })
+    const top = [...wrong.entries()].sort((a, b) => b[1] - a[1])[0]
+    return {
+      'Q#': i + 1,
+      Question: q.question,
+      'Correct answer': full(q.correctAnswers, q),
+      Answered: answered.length,
+      Correct: right,
+      '% Correct': answered.length ? `${Math.round((right / answered.length) * 100)}%` : '',
+      'Most common wrong answer': top ? `${top[0]} (${top[1]})` : '',
+      Explanation: q.explanation ?? '',
+    }
+  })
+  return { results, answers, questions }
+}
+
+/* ── PDF ───────────────────────────────────────────────────────────────── */
+
+/** Adds the self-paced test pages: summary, participants, then each question. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function addTestPdf(doc: any, autoTable: any, test: TestResult, title: string) {
+  const pageW = doc.internal.pageSize.getWidth()
+  const margin = 40
+  const ps = test.participants
+  const n = test.questions.length
+  const submitted = ps.filter(p => p.status === 'submitted')
+  const lastY = () => (doc as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 100
+
+  doc.addPage()
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(0, 0, 121)
+  doc.text(title, margin, 60)
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(120)
+  doc.text(`${n} questions · ${test.timeLimit} min time limit · ranked by correct answers, then finish time`, margin, 78)
+  autoTable(doc, {
+    startY: 92,
+    head: [['Took the test', 'Submitted', 'Ran out of time', 'Average score', 'Average time (submitted)']],
+    body: [[String(ps.length), String(submitted.length), String(ps.length - submitted.length),
+      `${avg(ps.map(p => p.correct)).toFixed(1)} / ${n}`, submitted.length ? formatDuration(avg(submitted.map(p => p.timeMs))) : '-']],
+    theme: 'grid', headStyles: { fillColor: [255, 199, 9], textColor: [26, 22, 64] }, styles: { fontSize: 10, cellPadding: 6 },
+    margin: { left: margin, right: margin },
+  })
+  autoTable(doc, {
+    startY: lastY() + 18,
+    head: [['Place', 'Name', 'Score', 'Time taken', 'Status']],
+    body: ps.map(p => [String(p.place), p.name, `${p.correct}/${p.total}`, formatDuration(p.timeMs), statusLabel(p)]),
+    theme: 'striped', headStyles: { fillColor: [0, 0, 121] }, styles: { fontSize: 9, cellPadding: 5 },
+    columnStyles: { 0: { cellWidth: 40 }, 2: { cellWidth: 50 }, 3: { cellWidth: 80 }, 4: { cellWidth: 90 } },
+    margin: { left: margin, right: margin },
+  })
+
+  // Questions flow one after another (a page break only when needed)
+  let y = lastY() + 28
+  test.questions.forEach((q, i) => {
+    const answered = ps.filter(p => (p.answers[q.id]?.length ?? 0) > 0)
+    const right = answered.filter(p => sameAnswer(p.answers[q.id], q.correctAnswers)).length
+    const pct = (x: number) => (answered.length ? Math.round((x / answered.length) * 100) : 0)
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(0, 0, 121)
+    const lines: string[] = doc.splitTextToSize(`Q${i + 1}. ${q.question.replace(/\s+/g, ' ')}`, pageW - margin * 2)
+    if (y + lines.length * 14 + 120 > doc.internal.pageSize.getHeight() - 40) { doc.addPage(); y = 60 }
+    doc.text(lines, margin, y)
+    y += lines.length * 14 + 4
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(0, 130, 70)
+    doc.text(`${pct(right)}% correct (${right} of ${answered.length})`, margin, y)
+    autoTable(doc, {
+      startY: y + 6,
+      head: [['', 'Option', 'Picked by', '%']],
+      body: q.options.map((o, k) => {
+        const c = answered.filter(p => p.answers[q.id].includes(k)).length
+        return [optionLabel(k, q.options.length), q.correctAnswers.includes(k) ? `${o}  (correct)` : o, String(c), `${pct(c)}%`]
+      }),
+      theme: 'striped', headStyles: { fillColor: [0, 0, 121] }, styles: { fontSize: 9, cellPadding: 4, overflow: 'linebreak' },
+      columnStyles: { 0: { cellWidth: 18 }, 2: { cellWidth: 56, halign: 'center' }, 3: { cellWidth: 40, halign: 'center' } },
+      margin: { left: margin, right: margin },
+    })
+    y = lastY() + 10
+    if (q.explanation) {
+      doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(90)
+      const ex: string[] = doc.splitTextToSize(`Explanation: ${q.explanation}`, pageW - margin * 2)
+      doc.text(ex, margin, y + 6)
+      y += ex.length * 11 + 8
+    }
+    y += 18
+  })
+}

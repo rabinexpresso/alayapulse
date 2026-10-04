@@ -232,13 +232,21 @@ exports.exportAllSessions = onCall(
     await Promise.all(picked.map(async (p) => {
       if (!p.data.responsesSplit || !Array.isArray(p.data.questions)) return
       const partsSnap = await p.ref.collection('responseParts').get()
-      const parts = partsSnap.docs.map((s) => s.data())
+      const all = partsSnap.docs.map((s) => s.data())
+      const parts = all.filter((x) => x.kind !== 'test')
         .sort((a, b) => a.question - b.question || a.part - b.part)
       const byQuestion = new Map()
       parts.forEach((part) => {
         byQuestion.set(part.question, (byQuestion.get(part.question) || []).concat(part.responses || []))
       })
       p.data.questions = p.data.questions.map((q, i) => ({ ...q, responses: byQuestion.get(i) || [] }))
+      // Self-paced tests keep their participants in parts of their own
+      if (Array.isArray(p.data.tests)) {
+        const tparts = all.filter((x) => x.kind === 'test').sort((a, b) => a.test - b.test || a.part - b.part)
+        const byTest = new Map()
+        tparts.forEach((t) => byTest.set(t.test, (byTest.get(t.test) || []).concat(t.participants || [])))
+        p.data.tests = p.data.tests.map((t, i) => ({ ...t, participants: byTest.get(i) || [] }))
+      }
     }))
 
     // Resolve deck titles + quiz flag (batched).
@@ -280,6 +288,7 @@ exports.exportAllSessions = onCall(
         audienceCount: Number(data.audienceCount) || 0,
         trimmed: !!data.trimmed,
         questions: Array.isArray(data.questions) ? data.questions : [],
+        tests: Array.isArray(data.tests) ? data.tests : [],
       }
     })
 
