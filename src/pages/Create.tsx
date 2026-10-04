@@ -3205,9 +3205,11 @@ function HtmlSlideEditor({
                   </p>
                 </div>
               ) : (
-                <div className="mt-4 rounded-xl border border-white/10 bg-white/5 px-3.5 py-2.5">
-                  <p className="text-xs leading-snug text-white/55">
-                    Couldn't auto-detect slide count in <span className="font-medium text-white/75">{slide.fileName}</span>. Please enter it manually.
+                <div className="mt-4 rounded-xl border border-golden-sun/30 bg-golden-sun/10 px-3.5 py-2.5">
+                  <p className="text-xs leading-snug text-golden-sun/90">
+                    <span className="font-semibold">No separate slides found in {slide.fileName}.</span>{' '}
+                    If it's an interactive app — a quiz, game or form you click through — don't split it:
+                    split copies can't jump to its later pages. Keep it as one slide and click through it during the show.
                   </p>
                 </div>
               )}

@@ -55,6 +55,19 @@ export function PersistentHtmlIframe({
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const [busy, setBusy] = useState(true)
   const [currentInternalIndex, setCurrentInternalIndex] = useState(0)
+  // Some HTML files can't be moved to a given internal slide at all — e.g. an
+  // interactive quiz app that only changes page after a click and a chosen
+  // answer. Each target gets a couple of tries; after that we stop and say so,
+  // instead of re-sending "goto" forever behind an endless loading splash.
+  const MAX_TRIES = 2
+  const triesRef = useRef<{ target: number; count: number }>({ target: -1, count: 0 })
+  const [stuck, setStuck] = useState(false)
+  const noteTry = (target: number | null) => {
+    if (target === null) return
+    const t = triesRef.current
+    if (t.target !== target) triesRef.current = { target, count: 1 }
+    else t.count++
+  }
 
   // Capture the *initial* target AND the interactive flag so srcDoc is
   // stable across re-renders. useMemo only re-runs when html changes
@@ -90,6 +103,7 @@ export function PersistentHtmlIframe({
         if (typeof data.currentIndex === 'number') {
           setCurrentInternalIndex(data.currentIndex)
         }
+        if (data.reached === true) setStuck(false)
       } else if (data.type === 'pulse-key' && typeof data.key === 'string') {
         try {
           window.dispatchEvent(new KeyboardEvent('keydown', {
@@ -106,12 +120,19 @@ export function PersistentHtmlIframe({
   useEffect(() => {
     if (busy) return
     if (targetIndex === null) return
-    if (targetIndex === currentInternalIndex) return
+    if (targetIndex === currentInternalIndex) { setStuck(false); return }
     const win = iframeRef.current?.contentWindow
     if (!win) return
+    const t = triesRef.current
+    if (t.target === targetIndex && t.count >= MAX_TRIES) { setStuck(true); return }
+    noteTry(targetIndex)
     setBusy(true)
     win.postMessage({ type: 'pulse-goto', target: targetIndex }, '*')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [busy, targetIndex, currentInternalIndex])
+
+  // The first load also counts as a try at the starting target
+  useEffect(() => { noteTry(initialTargetRef.current) }, [])
 
   // Safety: never let the splash stick around forever if the iframe
   // doesn't respond (e.g. very stubborn slideshow framework).
@@ -150,9 +171,24 @@ export function PersistentHtmlIframe({
         sandbox="allow-scripts allow-popups allow-modals"
         className="h-full w-full border-0 bg-white"
       />
+      {/* Couldn't reach this internal slide — say why, rather than loading forever */}
+      {stuck && visible && !busy && targetIndex !== null && targetIndex !== currentInternalIndex && (
+        <div className="absolute inset-0 flex items-center justify-center bg-midnight-sky-900/95 p-8">
+          <div className="max-w-md text-center">
+            <p className="text-lg font-semibold text-white">This page of the HTML file can't be shown</p>
+            <p className="mt-2 text-sm font-light leading-relaxed text-white/60">
+              The file looks like an interactive app (a quiz, game or form) rather than a slideshow,
+              so Alaya Pulse can't jump to its page {targetIndex + 1} on its own.
+            </p>
+            <p className="mt-3 text-sm font-light leading-relaxed text-white/60">
+              Keep it as one slide instead: delete these split copies and import the file again.
+            </p>
+          </div>
+        </div>
+      )}
       {/* Brand splash overlay — only for genuine big jumps */}
       <AnimatePresence>
-        {busy && visible && isBigJump && (
+        {busy && visible && isBigJump && !stuck && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -412,8 +448,8 @@ export function injectPersistentHtmlNavScript(
     if (s && s.parentNode) s.parentNode.removeChild(s);
   }
 
-  function postReady() {
-    try { window.parent.postMessage({ type: 'pulse-ready', currentIndex: currentIndex }, '*'); } catch (e) {}
+  function postReady(reached) {
+    try { window.parent.postMessage({ type: 'pulse-ready', currentIndex: currentIndex, reached: reached !== false }, '*'); } catch (e) {}
   }
 
   // ── Read the HTML's own slide counter from the DOM ─────────────────
@@ -748,7 +784,7 @@ export function injectPersistentHtmlNavScript(
     navigating = true;
     navigateTo(target, function() {
       navigating = false;
-      postReady();
+      postReady(currentIndex === target);
     });
   });
 
@@ -762,7 +798,7 @@ export function injectPersistentHtmlNavScript(
       if (detected !== null) currentIndex = detected;
       function finish() {
         navigating = false;
-        postReady();
+        postReady(currentIndex === initialTarget);
       }
       if (currentIndex !== initialTarget) {
         navigateTo(initialTarget, finish, true);
