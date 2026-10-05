@@ -18,6 +18,16 @@ import { AlayaMark } from '@/components/AlayaMark'
    (e.g. /guide#quiz-mode) when answering "how do I…?" questions.
    ───────────────────────────────────────────────────────────────────────── */
 
+/** Scrolls up to the walkthrough video and plays it from `seconds`. */
+function playVideoAt(seconds: number) {
+  const v = document.getElementById('guide-video') as HTMLVideoElement | null
+  if (!v) return
+  v.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  const go = () => { v.currentTime = seconds; v.play().catch(() => {}) }
+  if (v.readyState >= 1) go()
+  else { v.addEventListener('loadedmetadata', go, { once: true }); v.load() }
+}
+
 interface Step {
   text: React.ReactNode
   image?: string       // file name inside public/guide/
@@ -31,6 +41,8 @@ interface Topic {
   steps: Step[]
   tip?: React.ReactNode
   warning?: React.ReactNode
+  /** Where this topic starts in the walkthrough video, in seconds */
+  videoAt?: number
 }
 interface Stage {
   id: string
@@ -185,6 +197,7 @@ const GUIDE: Stage[] = [
         id: 'self-paced-test',
         icon: <ClipboardCheck className="size-4" />,
         title: 'Self-paced test — everyone at their own pace',
+        videoAt: 209,
         intro: 'A self-paced test gives everyone the whole set of questions on their phone at once. They go at their own pace within one time limit, see the answers only at the end, and the winner has the most correct answers — a tie goes to the faster finish.',
         steps: [
           { text: <><strong>Add the block:</strong> in <strong>Add slide</strong>, click <Btn color="gold">Self-paced test</Btn>. A gold block appears in the sidebar. Questions <em>inside</em> the gold frame are the test; anything outside is a normal live question.</> },
@@ -303,10 +316,11 @@ export default function Guide() {
               everything stays inside our own Google Cloud project. */}
           <figure className="mt-8 overflow-hidden rounded-2xl border border-white/10 bg-black">
             <video
+              id="guide-video"
               controls
               preload="metadata"
               playsInline
-              poster="/guide/lobby-qr.png"
+              poster="/guide/video-poster.jpg"
               className="block w-full"
             >
               <source src="/alaya-pulse-tutorial.mp4" type="video/mp4" />
@@ -314,7 +328,7 @@ export default function Guide() {
             </video>
             <figcaption className="flex items-center gap-2 border-t border-white/10 px-4 py-2.5 text-[13px] text-white/50">
               <Play className="size-3.5 shrink-0 text-hot-pink" />
-              Full walkthrough — 2 min 45 sec. Prefer reading? Every step is written out below.
+              Full walkthrough — 6 min 19 sec. Prefer reading? Every step is written out below.
             </figcaption>
           </figure>
 
@@ -345,6 +359,15 @@ export default function Guide() {
                     </h3>
                     {topic.intro && (
                       <p className="mt-2.5 text-sm font-light leading-relaxed text-white/60">{topic.intro}</p>
+                    )}
+                    {topic.videoAt !== undefined && (
+                      <button
+                        onClick={() => playVideoAt(topic.videoAt!)}
+                        className="mt-3 inline-flex items-center gap-2 rounded-full border border-hot-pink/40 bg-hot-pink/10 px-3.5 py-1.5 text-[13px] font-medium text-white/90 transition hover:bg-hot-pink/20"
+                      >
+                        <Play className="size-3.5 text-hot-pink" />
+                        Watch this part of the video ({Math.floor(topic.videoAt / 60)}:{String(topic.videoAt % 60).padStart(2, '0')})
+                      </button>
                     )}
 
                     <ol className="mt-4 space-y-4">
