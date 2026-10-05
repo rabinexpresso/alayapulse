@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Team Session Demo Deck</title>
+<style>
+  body { margin:0; font-family: 'Segoe UI', sans-serif; background:#0b1030; color:#fff; overflow:hidden; }
+  .slide { position:absolute; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:4rem; }
+  .slide.active { display:flex; }
+  h1 { font-size:3.2rem; margin:0 0 1rem; }
+  p  { font-size:1.2rem; opacity:.75; max-width:640px; }
+  .badge { font-size:.8rem; letter-spacing:.2em; text-transform:uppercase; color:#7dd3fc; margin-bottom:1.2rem; }
+  #counter { position:fixed; bottom:16px; right:24px; font-family:monospace; font-size:14px; opacity:.7; }
+</style>
+</head>
+<body>
+  <section class="slide active"><div class="badge">Welcome</div><h1>Team Session Demo</h1><p>A sample slide deck used to demonstrate importing HTML slides into Alaya Pulse.</p></section>
+  <section class="slide"><div class="badge">Agenda</div><h1>What we will cover</h1><p>Three short topics, one interactive quiz, and a word cloud to finish.</p></section>
+  <section class="slide"><div class="badge">Topic 1</div><h1>The big idea</h1><p>Every presentation gets better when the audience participates.</p></section>
+  <section class="slide"><div class="badge">Topic 2</div><h1>Deep dive</h1><p>Detail slides work exactly like they do in your original deck.</p></section>
+  <section class="slide"><div class="badge">Topic 3</div><h1>Workshop</h1><p>Insert Alaya Pulse question slides anywhere between these slides.</p></section>
+  <section class="slide"><div class="badge">Close</div><h1>Wrap-up</h1><p>Thanks for following along!</p></section>
+  <div id="counter">1 / 6</div>
+<script>
+  var slides = document.querySelectorAll('.slide');
+  var current = 0;
+  function goToSlide(i) {
+    if (i < 0 || i >= slides.length) return;
+    slides[current].classList.remove('active');
+    current = i;
+    slides[current].classList.add('active');
+    document.getElementById('counter').textContent = (current + 1) + ' / ' + slides.length;
+  }
+  function nextSlide() { goToSlide(current + 1); }
+  function prevSlide() { goToSlide(current - 1); }
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowRight') nextSlide();
+    else if (e.key === 'ArrowLeft') prevSlide();
+  });
+</script>
+</body>
+</html>

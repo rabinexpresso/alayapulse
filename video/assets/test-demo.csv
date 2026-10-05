@@ -1,0 +1,6 @@
+type,question,option_a,option_b,option_c,option_d,option_e,option_f,correct,explanation,timer
+mcq,How long should a good team stand-up take?,About 15 minutes,An hour,Two hours,Half a day,,,A,Short and focused keeps everyone engaged.,
+mcq,Which slide is easiest for an audience to read?,A full paragraph,Big text and few words,Tiny text and a table,Lots of clip art,,,B,Fewer words in bigger text can be read at a glance.,
+mcq,Choose 2: what keeps an audience engaged?,Asking them questions,Reading every slide aloud,Live polls,Talking for an hour without a break,,,A|C,Questions and live polls turn listeners into participants.,
+mcq,When is the best time to take audience questions?,Never,Only by email afterwards,At planned points and at the end,While you are mid-sentence,,,C,Planned pauses keep the flow and still let people ask.,
+mcq,What should every meeting end with?,Clear next steps,A longer agenda,No decisions,Another meeting,,,A,Everyone should leave knowing who does what next.,
