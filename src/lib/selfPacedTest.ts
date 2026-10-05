@@ -26,6 +26,8 @@ export interface TestSettings {
   afterOrder:  TestAfterOrder
   /** Optional extra line shown with the rules. */
   rules?:      string
+  /** Big-screen colour theme (TEST_THEMES id); navy when missing. */
+  theme?:      string
 }
 
 export const DEFAULT_TEST_SETTINGS: TestSettings = {
@@ -100,8 +102,35 @@ export function testSettingsOf(s: AnyS): TestSettings {
     scoreTiming: s?.scoreTiming === 'submit' ? 'submit' : 'end',
     afterOrder:  s?.afterOrder === 'review-lb' || s?.afterOrder === 'lb-only' ? s.afterOrder : 'lb-review',
     ...(typeof s?.rules === 'string' && s.rules.trim() ? { rules: s.rules.trim() } : {}),
+    ...(TEST_THEMES.some(t => t.id === s?.theme) && s.theme !== 'navy' ? { theme: s.theme } : {}),
   }
 }
+
+/* Big-screen colours for the test's own pages (rules, dashboard, summary,
+   answer review). Same brand palette as slide themes; each set keeps the
+   "good" (progress, correct answer) and "danger" (End test, last minute)
+   colours visible against its background. */
+export interface TestTheme {
+  id: string; label: string
+  bg: string; fg: string
+  /** Small labels and the explanation box */
+  accent: string
+  /** Progress bar, correct answers, Resume */
+  good: string; goodInk: string; goodText: string
+  /** End test, the last minute on the clock */
+  danger: string; dangerInk: string
+  /** The Start test button */
+  start: string; startInk: string
+}
+export const TEST_THEMES: TestTheme[] = [
+  { id: 'navy',   label: 'Navy',   bg: '#000079', fg: '#ffffff', accent: '#ffc709', good: '#42db66', goodInk: '#000079', goodText: '#42db66', danger: '#ff0065', dangerInk: '#ffffff', start: '#ffc709', startInk: '#000079' },
+  { id: 'pink',   label: 'Pink',   bg: '#ff0065', fg: '#ffffff', accent: '#ffc709', good: '#ffc709', goodInk: '#000079', goodText: '#ffffff', danger: '#000079', dangerInk: '#ffffff', start: '#ffc709', startInk: '#000079' },
+  { id: 'sky',    label: 'Sky',    bg: '#00b0ff', fg: '#000079', accent: '#000079', good: '#ffc709', goodInk: '#000079', goodText: '#000079', danger: '#ff0065', dangerInk: '#ffffff', start: '#ffc709', startInk: '#000079' },
+  { id: 'green',  label: 'Green',  bg: '#42db66', fg: '#000079', accent: '#000079', good: '#000079', goodInk: '#ffffff', goodText: '#000079', danger: '#ff0065', dangerInk: '#ffffff', start: '#000079', startInk: '#ffffff' },
+  { id: 'golden', label: 'Golden', bg: '#ffc709', fg: '#000079', accent: '#000079', good: '#000079', goodInk: '#ffffff', goodText: '#000079', danger: '#ff0065', dangerInk: '#ffffff', start: '#000079', startInk: '#ffffff' },
+  { id: 'white',  label: 'White',  bg: '#f4f4f9', fg: '#000079', accent: '#ff0065', good: '#42db66', goodInk: '#000079', goodText: '#16a34a', danger: '#ff0065', dangerInk: '#ffffff', start: '#ff0065', startInk: '#ffffff' },
+]
+export const testTheme = (id?: string): TestTheme => TEST_THEMES.find(t => t.id === id) ?? TEST_THEMES[0]
 
 export interface TestRange {
   headerId: string
@@ -327,6 +356,8 @@ export interface TestAnswerDoc {
   pausedAtFinish?:  number
   /** Written by the presenter when the block shows scores on submit. */
   score?:           number
+  /** Set when the host restarted the timer after this person submitted. */
+  reopened?:        boolean
   submittedAt?:     unknown
 }
 

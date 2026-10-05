@@ -25,7 +25,7 @@ import { PersistentHtmlIframe } from '@/components/PersistentHtmlIframe'
 import { cn, optionLabel, MAX_MCQ_OPTIONS, MAX_VIZ_OPTIONS } from '@/lib/utils'
 import { injectSlideNavigation } from '@/lib/importFile'
 import {
-  DEFAULT_TEST_SETTINGS, AFTER_ORDER_LABEL,
+  DEFAULT_TEST_SETTINGS, AFTER_ORDER_LABEL, TEST_THEMES, testTheme,
   normalizeTestBlocks, collapseTestBlocks, expandTestBlocks, testRanges, testMembership, testProblems,
   type TestHeaderSlide, type TestEndSlide, type TestAfterOrder, type TestScoreTiming,
 } from '@/lib/selfPacedTest'
@@ -1158,7 +1158,12 @@ export default function Create() {
     const outside  = newSlides.filter(q => q.type !== 'mcq')
     setSlides(prev => {
       const block = testRanges(prev).find(r => r.headerId === headerId) ?? testRanges(prev)[0]
-      if (!block) return [...prev, ...newSlides]
+      if (!block) {
+        // No test yet: start one at the end of the deck
+        const header: TestHeaderSlide = { id: uid(), type: 'testblock', ...DEFAULT_TEST_SETTINGS }
+        const end: TestEndSlide = { id: uid(), type: 'testend', blockId: header.id }
+        return [...prev, header, ...intoTest, end, ...outside]
+      }
       return [...prev.slice(0, block.end), ...intoTest, prev[block.end], ...outside, ...prev.slice(block.end + 1)]
     })
     if (intoTest[0]) setSelectedId(intoTest[0].id)
@@ -2067,6 +2072,7 @@ export default function Create() {
         {csvModal && (
           <CsvImportModal
             destination={csvModal.dest}
+            hasTest={slides.some(s => s.type === 'testblock')}
             onClose={() => setCsvModal(null)}
             onImport={(list, dest) => { importCsvSlides(list, dest, csvModal.headerId); setCsvModal(null) }}
           />
@@ -2193,7 +2199,7 @@ export default function Create() {
           onDuplicate={duplicateSlide}
           onDragEnd={handleDragEnd}
           onImport={importFile}
-          onOpenCsv={() => setCsvModal({ dest: slides.some(s => s.type === 'testblock') ? 'ask' : 'live' })}
+          onOpenCsv={() => setCsvModal({ dest: 'ask' })}
           onOpenSorter={() => setShowSorter(true)}
           onSetAddMenu={setAddMenu}
           onAddQuestion={addQuestion}
@@ -2248,14 +2254,16 @@ export default function Create() {
    CSV Import Modal
    ───────────────────────────────────────────────────────────────────────── */
 
-function CsvImportModal({ onClose, onImport, destination = 'live' }: {
+function CsvImportModal({ onClose, onImport, destination = 'live', hasTest = false }: {
   onClose: () => void
   onImport: (slides: QuestionSlide[], dest: 'live' | 'test') => void
-  /** 'ask' — the deck has a test block, so let the host choose */
+  /** 'ask' — let the host choose (nothing picked until they do) */
   destination?: 'live' | 'test' | 'ask'
+  /** The deck already has a self-paced test block */
+  hasTest?: boolean
 }) {
   const [parseResult, setParseResult] = useState<CsvParseResult | null>(null)
-  const [dest, setDest] = useState<'live' | 'test'>(destination === 'test' ? 'test' : 'live')
+  const [dest, setDest] = useState<'live' | 'test' | null>(destination === 'ask' ? null : destination)
   const [dragOver, setDragOver]       = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -2294,7 +2302,8 @@ function CsvImportModal({ onClose, onImport, destination = 'live' }: {
         </div>
 
         <div className="flex flex-col gap-4 overflow-y-auto p-5">
-          {/* How to import — step by step */}
+          {/* How to import — step by step (folded away once a file is in) */}
+          {!parseResult && (
           <div className="rounded-xl border border-midnight-sky-100 bg-midnight-sky-50 px-4 py-3.5">
             <p className="text-sm font-semibold text-midnight-sky-800">How to import your questions</p>
             <ol className="mt-2.5 space-y-2.5 text-xs leading-relaxed text-midnight-sky-700">
@@ -2327,6 +2336,7 @@ function CsvImportModal({ onClose, onImport, destination = 'live' }: {
               </CsvStep>
             </ol>
           </div>
+          )}
 
           {/* Upload area or parsed results */}
           {!parseResult ? (
@@ -2348,43 +2358,13 @@ function CsvImportModal({ onClose, onImport, destination = 'live' }: {
             </div>
           ) : (
             <div className="flex flex-col gap-3">
-              {/* Errors */}
-              {parseResult.errors.length > 0 && (
-                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
-                  <p className="mb-1.5 text-[11px] font-semibold text-red-700">
-                    {parseResult.errors.length} row{parseResult.errors.length > 1 ? 's' : ''} skipped
-                  </p>
-                  {parseResult.errors.map((err, i) => (
-                    <p key={i} className="text-[11px] text-red-600">{err.message}</p>
-                  ))}
-                </div>
-              )}
-
-              {/* Slides preview list */}
-              {parseResult.slides.length > 0 ? (
-                <div className="flex flex-col gap-1 rounded-xl border border-midnight-sky-100 p-1.5" style={{ maxHeight: 280, overflowY: 'auto' }}>
-                  {parseResult.slides.map((s, i) => (
-                    <div key={s.id} className="flex items-start gap-2.5 rounded-lg px-2.5 py-2 hover:bg-midnight-sky-50">
-                      <span className="mt-0.5 w-5 shrink-0 text-right text-[11px] font-medium text-midnight-sky-400">{i + 1}</span>
-                      <span className={cn('mt-0.5 shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide', TYPE_COLOUR[s.type])}>
-                        {TYPE_LABEL[s.type]}
-                      </span>
-                      <span className="text-[11px] leading-snug text-midnight-sky-700 line-clamp-2">{s.question}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-xl border border-midnight-sky-100 bg-midnight-sky-50 py-8 text-center">
-                  <p className="text-sm text-midnight-sky-400">No valid questions found in this file.</p>
-                </div>
-              )}
-
               {/* Where these go */}
               {parseResult.slides.length > 0 && destination === 'ask' && (
-                <div className="rounded-xl border border-midnight-sky-100 p-3">
-                  <p className="mb-2 text-xs font-semibold text-midnight-sky-800">Where should these questions go?</p>
+                <div className={cn('rounded-xl border p-3', dest === null ? 'border-sky-blue/50 bg-sky-blue/5' : 'border-midnight-sky-100')}>
+                  <p className="text-sm font-semibold text-midnight-sky-800">Where should these {parseResult.slides.length} questions go?</p>
+                  <p className="mb-2.5 text-[11px] text-midnight-sky-500">Choose one to continue</p>
                   {([
-                    ['test', 'Into the self-paced test block', 'Everyone answers at their own pace'],
+                    ['test', hasTest ? 'Into the self-paced test block' : 'Into a new self-paced test block', 'Everyone answers at their own pace, scored automatically'],
                     ['live', 'As live questions', 'You show them one at a time'],
                   ] as const).map(([v, title, sub]) => (
                     <button
@@ -2420,6 +2400,38 @@ function CsvImportModal({ onClose, onImport, destination = 'live' }: {
                 )
               })()}
 
+              {/* Errors */}
+              {parseResult.errors.length > 0 && (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+                  <p className="mb-1.5 text-[11px] font-semibold text-red-700">
+                    {parseResult.errors.length} row{parseResult.errors.length > 1 ? 's' : ''} skipped
+                  </p>
+                  {parseResult.errors.map((err, i) => (
+                    <p key={i} className="text-[11px] text-red-600">{err.message}</p>
+                  ))}
+                </div>
+              )}
+
+              {/* Slides preview list */}
+              {parseResult.slides.length > 0 ? (
+                <div className="flex flex-col gap-1 rounded-xl border border-midnight-sky-100 p-1.5" style={{ maxHeight: 280, overflowY: 'auto' }}>
+                  {parseResult.slides.map((s, i) => (
+                    <div key={s.id} className="flex items-start gap-2.5 rounded-lg px-2.5 py-2 hover:bg-midnight-sky-50">
+                      <span className="mt-0.5 w-5 shrink-0 text-right text-[11px] font-medium text-midnight-sky-400">{i + 1}</span>
+                      <span className={cn('mt-0.5 shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide', TYPE_COLOUR[s.type])}>
+                        {TYPE_LABEL[s.type]}
+                      </span>
+                      <span className="text-[11px] leading-snug text-midnight-sky-700 line-clamp-2">{s.question}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-midnight-sky-100 bg-midnight-sky-50 py-8 text-center">
+                  <p className="text-sm text-midnight-sky-400">No valid questions found in this file.</p>
+                </div>
+              )}
+
+
               <button
                 onClick={() => setParseResult(null)}
                 className="text-center text-[11px] text-midnight-sky-400 transition hover:text-midnight-sky-700"
@@ -2439,15 +2451,17 @@ function CsvImportModal({ onClose, onImport, destination = 'live' }: {
             Cancel
           </button>
           <button
-            onClick={() => { if (parseResult?.slides.length) { onImport(parseResult.slides, dest); onClose() } }}
-            disabled={!parseResult || parseResult.slides.length === 0}
+            onClick={() => { if (parseResult?.slides.length && dest) { onImport(parseResult.slides, dest); onClose() } }}
+            disabled={!parseResult || parseResult.slides.length === 0 || !dest}
             className="rounded-xl bg-sky-blue px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
           >
             {!parseResult?.slides.length
-              ? 'Add slides'
-              : dest === 'test'
-                ? `Add ${parseResult.slides.filter(q => q.type === 'mcq').length} to test`
-                : `Add ${parseResult.slides.length} slide${parseResult.slides.length !== 1 ? 's' : ''}`}
+              ? 'Add questions'
+              : !dest
+                ? 'Choose where these go'
+                : dest === 'test'
+                  ? `Add ${parseResult.slides.filter(q => q.type === 'mcq').length} to self-paced test`
+                  : `Add ${parseResult.slides.length} as live question${parseResult.slides.length !== 1 ? 's' : ''}`}
           </button>
         </div>
       </motion.div>
@@ -6805,6 +6819,24 @@ function TestBlockEditor({
           </div>
 
           <p className="mb-2 mt-5 text-sm font-medium text-midnight-sky-700">
+            Theme <span className="font-light text-midnight-sky-500">how the test looks on the big screen</span>
+          </p>
+          <div className="flex flex-wrap gap-3">
+            {TEST_THEMES.map(t => {
+              const on = (header.theme ?? 'navy') === t.id
+              return (
+                <button key={t.id} onClick={() => onUpdate({ theme: t.id })} className={cn('flex flex-col items-center gap-1 transition-all', on ? 'opacity-100' : 'opacity-60 hover:opacity-90')}>
+                  <span
+                    className={cn('size-6 rounded-full ring-offset-1', on ? 'ring-2 ring-midnight-sky-700' : '')}
+                    style={{ backgroundColor: t.bg, border: t.id === 'white' ? '1px solid rgba(0,0,0,0.12)' : undefined }}
+                  />
+                  <span className="text-[9px] font-medium text-midnight-sky-700">{t.label}</span>
+                </button>
+              )
+            })}
+          </div>
+
+          <p className="mb-2 mt-5 text-sm font-medium text-midnight-sky-700">
             Extra rule <span className="font-light text-midnight-sky-500">optional — shown with the rules before the test</span>
           </p>
           <input
@@ -6816,16 +6848,28 @@ function TestBlockEditor({
           />
         </div>
 
-        {/* Rules preview */}
+        {/* Rules preview, in the chosen theme */}
         <div className={card}>
-          <p className="mb-2 text-sm font-semibold text-midnight-sky-800">What everyone sees before the test</p>
-          <ul className="space-y-1 text-sm text-midnight-sky-600">
-            <li>{questions.length} question{questions.length !== 1 ? 's' : ''} · {header.timeLimit} minutes · go at your own pace</li>
-            <li>Change any answer until you submit</li>
-            <li>Most correct answers wins</li>
-            <li>Tie? The faster finish ranks higher</li>
-            {header.rules && <li>{header.rules}</li>}
-          </ul>
+          <p className="mb-2 text-sm font-semibold text-midnight-sky-800">What everyone sees on the big screen before the test</p>
+          {(() => {
+            const th = testTheme(header.theme)
+            return (
+              <div className="rounded-xl px-6 py-5 text-center transition-colors duration-300" style={{ backgroundColor: th.bg, color: th.fg, border: th.id === 'white' ? '1px solid rgba(0,0,121,0.1)' : undefined }}>
+                <p className="flex items-center justify-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.2em]" style={{ color: th.accent }}>
+                  <ClipboardCheck className="size-3" /> Self-paced test
+                </p>
+                <p className="mt-1.5 text-xl font-extrabold tracking-tight">{questions.length} question{questions.length !== 1 ? 's' : ''} · {header.timeLimit} minutes</p>
+                <ul className="mx-auto mt-3 inline-flex flex-col gap-1 text-left text-sm" style={{ opacity: 0.85 }}>
+                  {['Answer on your phone, at your own pace', 'Go back and change answers until you submit', 'Most correct answers wins', 'Tie? The faster finish ranks higher', ...(header.rules ? [header.rules] : [])].map(r => (
+                    <li key={r} className="flex items-center gap-2"><Check className="size-3.5 shrink-0" style={{ color: th.goodText }} /> {r}</li>
+                  ))}
+                </ul>
+                <div className="mt-4">
+                  <span className="inline-flex items-center gap-1.5 rounded-xl px-4 py-1.5 text-xs font-extrabold" style={{ backgroundColor: th.start, color: th.startInk }}>Start test</span>
+                </div>
+              </div>
+            )
+          })()}
         </div>
 
         <button onClick={() => onDelete(header.id)} className="self-start rounded-xl px-3 py-2 text-xs font-medium text-red-500 transition hover:bg-red-50">

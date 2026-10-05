@@ -45,6 +45,7 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
   const [reviewing, setReviewing] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [note, setNote] = useState<string | null>(null)
+  const [hideReopened, setHideReopened] = useState(false)
   const [now, setNow] = useState(Date.now())
   const loadedRound = useRef<number | null>(null)
   const createdRound = useRef<number | null>(null)
@@ -187,6 +188,16 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
 
   return (
     <div className="relative flex flex-1 flex-col">
+      {/* The host restarted the clock after this person submitted */}
+      {sheet?.reopened && !hideReopened && (
+        <div className="mb-3 flex items-start gap-2.5 rounded-2xl border border-golden-sun/50 bg-golden-sun/15 px-3.5 py-3">
+          <Clock className="mt-0.5 size-4 shrink-0 text-[#8a6600]" />
+          <p className="flex-1 text-sm leading-snug text-[#5c4400]">
+            <strong>The host restarted the clock.</strong> You have the full time again and your answers are kept. Check them, then submit again.
+          </p>
+          <button onClick={() => setHideReopened(true)} aria-label="Close" className="shrink-0 text-[#8a6600]"><X className="size-4" /></button>
+        </div>
+      )}
       {/* Clock + progress */}
       <div className="flex items-center justify-between">
         <span className="text-sm font-semibold text-midnight-sky-500">Question {current + 1} of {qs.length}</span>

@@ -1,6 +1,6 @@
 import {
   doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot,
-  collection, query, where, serverTimestamp, deleteField, increment,
+  collection, query, where, serverTimestamp, deleteField, increment, writeBatch,
   type Timestamp,
 } from 'firebase/firestore'
 import { db, auth } from './firebase'
@@ -665,7 +665,21 @@ export async function saveTestAnswers(
 /** A phone marks its sheet as submitted (server time = its finish time). */
 export async function submitTestAnswers(code: string, blockId: string, personId: string, round: number, pausedAtFinish: number): Promise<void> {
   const ref = doc(db, 'sessions', code.toUpperCase(), 'responses', testAnswerDocId(blockId, personId))
-  await setDoc(ref, { finished: true, finishedServer: serverTimestamp(), round, pausedAtFinish }, { merge: true })
+  await setDoc(ref, { finished: true, finishedServer: serverTimestamp(), round, pausedAtFinish, reopened: false }, { merge: true })
+}
+
+/** Restart timer: anyone who already submitted is taken back to their answers
+    and submits again, so every finish time counts from the same restart. */
+export async function reopenTestSheets(code: string, blockId: string, personIds: string[]): Promise<void> {
+  for (let i = 0; i < personIds.length; i += 400) {
+    const batch = writeBatch(db)
+    for (const id of personIds.slice(i, i + 400)) {
+      batch.update(doc(db, 'sessions', code.toUpperCase(), 'responses', testAnswerDocId(blockId, id)), {
+        finished: false, finishedServer: null, pausedAtFinish: deleteField(), score: deleteField(), reopened: true,
+      })
+    }
+    await batch.commit()
+  }
 }
 
 /** A phone follows its own sheet (to restore answers and receive its score). */

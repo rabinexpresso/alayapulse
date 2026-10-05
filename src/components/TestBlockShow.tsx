@@ -1,15 +1,15 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ClipboardCheck, Pause, Play, RotateCcw, Square, Check, Clock, Users, Timer,
 } from 'lucide-react'
 import { cn, optionLabel } from '@/lib/utils'
 import {
-  subscribeToSession, subscribeToSlideResponses, setTestState, updateTestState, setTestScore, serverNow,
+  subscribeToSession, subscribeToSlideResponses, setTestState, updateTestState, setTestScore, serverNow, reopenTestSheets,
   type Response as FirestoreResponse,
 } from '@/lib/session'
 import {
-  freshTestState, remainingOf, formatClock, formatDuration, rankTest, countCorrect, afterSteps, sameAnswer,
+  freshTestState, remainingOf, formatClock, formatDuration, rankTest, countCorrect, afterSteps, sameAnswer, testTheme,
   type TestBlockShowSlide, type TestState, type TestAnswerDoc, type TestResultRow,
 } from '@/lib/selfPacedTest'
 
@@ -20,6 +20,17 @@ import {
    the next slide. The live state is on the session doc (tests.<blockId>),
    so phones follow along and a presenter refresh picks up where it was.
    ───────────────────────────────────────────────────────────────────────── */
+
+/** The block's colour theme as CSS variables; everything below reads them. */
+function themeVars(id?: string): CSSProperties {
+  const t = testTheme(id)
+  return {
+    '--bg': t.bg, '--fg': t.fg, '--accent': t.accent,
+    '--good': t.good, '--good-ink': t.goodInk, '--good-text': t.goodText,
+    '--danger': t.danger, '--danger-ink': t.dangerInk,
+    '--start': t.start, '--start-ink': t.startInk,
+  } as CSSProperties
+}
 
 export interface TestNav {
   /** Returns true when the block handled the arrow itself. */
@@ -208,19 +219,19 @@ export function TestBlockView({
     const avg = rows.length ? rows.reduce((a, r) => a + r.correct, 0) / rows.length : 0
     body = (
       <Centered>
-        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-golden-sun">Self-paced test</p>
+        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-(--accent)">Self-paced test</p>
         <h1 className="mt-3 text-6xl font-extrabold tracking-tight">Test finished</h1>
-        <p className="mt-6 text-2xl text-white/80">
-          <span className="font-bold text-white">{submitted}</span> of {participants} submitted
-          {timedOut > 0 && <> · <span className="font-bold text-white">{timedOut}</span> ran out of time</>}
+        <p className="mt-6 text-2xl text-(--fg)/80">
+          <span className="font-bold text-(--fg)">{submitted}</span> of {participants} submitted
+          {timedOut > 0 && <> · <span className="font-bold text-(--fg)">{timedOut}</span> ran out of time</>}
         </p>
         {rows.length > 0 && (
-          <p className="mt-2 text-lg text-white/55">Average score {avg.toFixed(1)} / {questions.length}</p>
+          <p className="mt-2 text-lg text-(--fg)/55">Average score {avg.toFixed(1)} / {questions.length}</p>
         )}
-        <p className="mt-10 text-sm text-white/40">
+        <p className="mt-10 text-sm text-(--fg)/40">
           Press → for {steps[0]?.stage === 'leaderboard' ? 'the leaderboard' : 'the answer review'}
         </p>
-        <button onClick={() => setShowRestart(true)} className="mt-4 text-xs text-white/35 underline-offset-4 hover:text-white/70 hover:underline">
+        <button onClick={() => setShowRestart(true)} className="mt-4 text-xs text-(--fg)/35 underline-offset-4 hover:text-(--fg)/70 hover:underline">
           Restart…
         </button>
       </Centered>
@@ -233,14 +244,14 @@ export function TestBlockView({
       <div className="flex h-full w-full flex-col items-center justify-center px-14 pb-24 pt-10">
         <div className="flex w-full max-w-5xl items-end justify-between">
           <div>
-            <p className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.2em] text-golden-sun">
+            <p className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.2em] text-(--accent)">
               <ClipboardCheck className="size-4" /> Self-paced test
             </p>
             <h1 className="mt-2 text-4xl font-extrabold tracking-tight">{paused ? 'Test paused' : 'Test in progress'}</h1>
           </div>
           <div className="text-right">
-            <p className="text-xs uppercase tracking-widest text-white/45">Time left</p>
-            <p className={cn('font-mono text-7xl font-bold tabular-nums', remaining < 60_000 && !paused ? 'text-hot-pink' : 'text-white')}>
+            <p className="text-xs uppercase tracking-widest text-(--fg)/45">Time left</p>
+            <p className={cn('font-mono text-7xl font-bold tabular-nums', remaining < 60_000 && !paused ? 'text-(--danger)' : 'text-(--fg)')}>
               {formatClock(remaining)}
             </p>
           </div>
@@ -248,11 +259,11 @@ export function TestBlockView({
 
         <div className="mt-10 w-full max-w-5xl">
           <p className="text-3xl font-semibold">
-            <span className="text-fresh-green">{submitted}</span>
-            <span className="text-white/70"> of {participants} completed</span>
+            <span className="text-(--good-text)">{submitted}</span>
+            <span className="text-(--fg)/70"> of {participants} completed</span>
           </p>
-          <div className="mt-4 h-4 overflow-hidden rounded-full bg-white/10">
-            <motion.div className="h-full rounded-full bg-fresh-green" animate={{ width: `${done * 100}%` }} transition={{ duration: 0.6 }} />
+          <div className="mt-4 h-4 overflow-hidden rounded-full bg-(--fg)/10">
+            <motion.div className="h-full rounded-full bg-(--good)" animate={{ width: `${done * 100}%` }} transition={{ duration: 0.6 }} />
           </div>
           <div className="mt-6 grid grid-cols-3 gap-4">
             <Stat icon={<Timer className="size-4" />} label="Answering" value={answering} />
@@ -264,38 +275,38 @@ export function TestBlockView({
         {/* Host controls */}
         <div className="mt-10 flex w-full max-w-5xl flex-wrap items-center gap-2">
           {[-5, -1, 1, 5].map(m => (
-            <button key={m} onClick={() => adjust(m * 60_000)} className="rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold transition hover:bg-white/12">
+            <button key={m} onClick={() => adjust(m * 60_000)} className="rounded-xl border border-(--fg)/15 bg-(--fg)/5 px-4 py-2.5 text-sm font-semibold transition hover:bg-(--fg)/12">
               {m > 0 ? `+${m}` : `−${-m}`} min
             </button>
           ))}
           <form
             onSubmit={e => { e.preventDefault(); const v = parseFloat(setMinutes); if (!isNaN(v)) { setTimeLeft(Math.round(v * 60_000)); setSetMinutes('') } }}
-            className="flex items-center gap-1.5 rounded-xl border border-white/15 bg-white/5 py-1 pl-3 pr-1"
+            className="flex items-center gap-1.5 rounded-xl border border-(--fg)/15 bg-(--fg)/5 py-1 pl-3 pr-1"
           >
-            <span className="text-xs text-white/50">Set</span>
+            <span className="text-xs text-(--fg)/50">Set</span>
             <input
               value={setMinutes} onChange={e => setSetMinutes(e.target.value)} inputMode="decimal" placeholder="10"
-              className="w-12 bg-transparent text-center text-sm text-white outline-none placeholder:text-white/25"
+              className="w-12 bg-transparent text-center text-sm text-(--fg) outline-none placeholder:text-(--fg)/25"
             />
-            <span className="text-xs text-white/50">min left</span>
-            <button type="submit" className="rounded-lg bg-white/10 px-2.5 py-1.5 text-xs font-semibold hover:bg-white/20">Set</button>
+            <span className="text-xs text-(--fg)/50">min left</span>
+            <button type="submit" className="rounded-lg bg-(--fg)/10 px-2.5 py-1.5 text-xs font-semibold hover:bg-(--fg)/20">Set</button>
           </form>
           <div className="flex-1" />
           {paused ? (
-            <button onClick={resume} className="flex items-center gap-2 rounded-xl bg-fresh-green px-5 py-2.5 text-sm font-bold text-midnight-sky-900 transition hover:brightness-105">
+            <button onClick={resume} className="flex items-center gap-2 rounded-xl bg-(--good) px-5 py-2.5 text-sm font-bold text-(--good-ink) transition hover:brightness-105">
               <Play className="size-4" /> Resume
             </button>
           ) : (
-            <button onClick={pause} className="flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold transition hover:bg-white/12">
+            <button onClick={pause} className="flex items-center gap-2 rounded-xl border border-(--fg)/15 bg-(--fg)/5 px-4 py-2.5 text-sm font-semibold transition hover:bg-(--fg)/12">
               <Pause className="size-4" /> Pause
             </button>
           )}
-          <button onClick={() => setShowRestart(true)} className="flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold transition hover:bg-white/12">
+          <button onClick={() => setShowRestart(true)} className="flex items-center gap-2 rounded-xl border border-(--fg)/15 bg-(--fg)/5 px-4 py-2.5 text-sm font-semibold transition hover:bg-(--fg)/12">
             <RotateCcw className="size-4" /> Restart
           </button>
           <button
             onClick={() => setConfirm({ title: 'End the test now?', body: `${submitted} of ${participants} have submitted. Everyone else's answers so far will be marked as they are.`, action: 'End test', danger: true, run: endTest })}
-            className="flex items-center gap-2 rounded-xl bg-hot-pink px-4 py-2.5 text-sm font-bold text-white transition hover:brightness-105"
+            className="flex items-center gap-2 rounded-xl bg-(--danger) px-4 py-2.5 text-sm font-bold text-(--danger-ink) transition hover:brightness-105"
           >
             <Square className="size-4" /> End test
           </button>
@@ -304,7 +315,7 @@ export function TestBlockView({
         {/* Paused overlay text */}
         <AnimatePresence>
           {paused && (
-            <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="mt-6 text-sm text-white/50">
+            <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="mt-6 text-sm text-(--fg)/50">
               Questions are hidden on every phone until you press Resume.
             </motion.p>
           )}
@@ -314,7 +325,7 @@ export function TestBlockView({
   }
 
   return (
-    <div className="relative h-full w-full bg-midnight-sky-900 text-white">
+    <div className="relative h-full w-full bg-(--bg) text-(--fg)" style={themeVars(step?.stage === 'leaderboard' ? 'navy' : slide.theme)}>
       {body}
 
       {/* Little "can't do that yet" note */}
@@ -322,7 +333,7 @@ export function TestBlockView({
         {hint && (
           <motion.div
             initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}
-            className="absolute bottom-24 left-1/2 z-30 -translate-x-1/2 rounded-full bg-white/10 px-4 py-2 text-sm text-white/80 backdrop-blur"
+            className="absolute bottom-24 left-1/2 z-30 -translate-x-1/2 rounded-full bg-(--fg)/10 px-4 py-2 text-sm text-(--fg)/80 backdrop-blur"
           >
             {hint}
           </motion.div>
@@ -334,20 +345,25 @@ export function TestBlockView({
         {showRestart && (
           <Modal onClose={() => setShowRestart(false)}>
             <h3 className="text-xl font-semibold">Restart</h3>
-            <p className="mt-1 text-sm text-white/55">Choose what to restart.</p>
+            <p className="mt-1 text-sm text-(--fg)/55">Choose what to restart.</p>
             <button
               onClick={() => {
                 setShowRestart(false)
                 setConfirm({
                   title: 'Restart the timer?', action: 'Restart timer',
-                  body: `The clock goes back to ${slide.timeLimit} minutes for everyone. Everyone keeps the answers they've given.`,
-                  run: () => startClock(),
+                  body: `The clock goes back to ${slide.timeLimit} minutes for everyone, and everyone keeps their answers. `
+                    + (submitted > 0 ? `The ${submitted} who already submitted can check their answers and submit again, so every finish time counts from the restart.` : ''),
+                  run: () => {
+                    startClock()
+                    const done = sheets.filter(d => d.finished).map(d => d.respondentId)
+                    if (done.length) reopenTestSheets(code, slide.id, done).catch(console.error)
+                  },
                 })
               }}
-              className="mt-5 w-full rounded-xl border border-white/15 bg-white/5 p-4 text-left transition hover:bg-white/10"
+              className="mt-5 w-full rounded-xl border border-(--fg)/15 bg-(--fg)/5 p-4 text-left transition hover:bg-(--fg)/10"
             >
               <p className="flex items-center gap-2 font-semibold"><Clock className="size-4" /> Restart timer</p>
-              <p className="mt-1 text-sm text-white/55">Clock back to full time. Everyone keeps their answers.</p>
+              <p className="mt-1 text-sm text-(--fg)/55">Clock back to full time. Answers are kept; anyone who submitted submits again.</p>
             </button>
             <button
               onClick={() => {
@@ -361,9 +377,9 @@ export function TestBlockView({
               className="mt-3 w-full rounded-xl border border-hot-pink/30 bg-hot-pink/10 p-4 text-left transition hover:bg-hot-pink/15"
             >
               <p className="flex items-center gap-2 font-semibold"><RotateCcw className="size-4" /> Restart test</p>
-              <p className="mt-1 text-sm text-white/55">Clears every answer. Everyone starts again from question 1.</p>
+              <p className="mt-1 text-sm text-(--fg)/55">Clears every answer. Everyone starts again from question 1.</p>
             </button>
-            <button onClick={() => setShowRestart(false)} className="mt-4 w-full rounded-xl py-2 text-sm text-white/50 hover:text-white">Cancel</button>
+            <button onClick={() => setShowRestart(false)} className="mt-4 w-full rounded-xl py-2 text-sm text-(--fg)/50 hover:text-(--fg)">Cancel</button>
           </Modal>
         )}
       </AnimatePresence>
@@ -373,12 +389,12 @@ export function TestBlockView({
         {confirm && (
           <Modal onClose={() => setConfirm(null)}>
             <h3 className="text-xl font-semibold">{confirm.title}</h3>
-            <p className="mt-2 text-sm leading-relaxed text-white/60">{confirm.body}</p>
+            <p className="mt-2 text-sm leading-relaxed text-(--fg)/60">{confirm.body}</p>
             <div className="mt-6 flex gap-3">
-              <button onClick={() => setConfirm(null)} className="flex-1 rounded-xl border border-white/15 bg-white/5 py-3 text-sm font-medium hover:bg-white/10">Cancel</button>
+              <button onClick={() => setConfirm(null)} className="flex-1 rounded-xl border border-(--fg)/15 bg-(--fg)/5 py-3 text-sm font-medium hover:bg-(--fg)/10">Cancel</button>
               <button
                 onClick={() => { confirm.run(); setConfirm(null) }}
-                className={cn('flex-1 rounded-xl py-3 text-sm font-semibold', confirm.danger ? 'bg-hot-pink text-white' : 'bg-fresh-green text-midnight-sky-900')}
+                className={cn('flex-1 rounded-xl py-3 text-sm font-semibold', confirm.danger ? 'bg-(--danger) text-(--danger-ink)' : 'bg-(--good) text-(--good-ink)')}
               >
                 {confirm.action}
               </button>
@@ -405,8 +421,8 @@ function Centered({ children }: { children: ReactNode }) {
 
 function Stat({ icon, label, value }: { icon: ReactNode; label: string; value: number }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 px-5 py-4">
-      <p className="flex items-center gap-2 text-sm text-white/55">{icon}{label}</p>
+    <div className="rounded-2xl border border-(--fg)/10 bg-(--fg)/5 px-5 py-4">
+      <p className="flex items-center gap-2 text-sm text-(--fg)/55">{icon}{label}</p>
       <p className="mt-1 text-4xl font-bold tabular-nums">{value}</p>
     </div>
   )
@@ -422,7 +438,8 @@ function Modal({ children, onClose }: { children: ReactNode; onClose: () => void
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
         onClick={e => e.stopPropagation()}
-        className="w-full max-w-md rounded-2xl border border-white/10 bg-midnight-sky-800 p-7 text-white shadow-2xl"
+        className="w-full max-w-md rounded-2xl border border-white/10 bg-midnight-sky-800 p-7 text-(--fg) shadow-2xl"
+        style={themeVars('navy')}
       >
         {children}
       </motion.div>
@@ -434,21 +451,21 @@ function RulesView({ slide, participants, onStart }: { slide: TestBlockShowSlide
   const n = slide.questions.length
   return (
     <Centered>
-      <p className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.2em] text-golden-sun">
+      <p className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.2em] text-(--accent)">
         <ClipboardCheck className="size-4" /> Self-paced test
       </p>
       <h1 className="mt-4 text-6xl font-extrabold tracking-tight">{n} question{n !== 1 ? 's' : ''} · {slide.timeLimit} minutes</h1>
-      <ul className="mt-8 space-y-3 text-left text-2xl text-white/80">
-        <li className="flex items-center gap-3"><Check className="size-6 text-fresh-green" /> Answer on your phone, at your own pace</li>
-        <li className="flex items-center gap-3"><Check className="size-6 text-fresh-green" /> Go back and change answers until you submit</li>
-        <li className="flex items-center gap-3"><Check className="size-6 text-fresh-green" /> Most correct answers wins</li>
-        <li className="flex items-center gap-3"><Check className="size-6 text-fresh-green" /> Tie? The faster finish ranks higher</li>
-        {slide.rules && <li className="flex items-center gap-3"><Check className="size-6 text-fresh-green" /> {slide.rules}</li>}
+      <ul className="mt-8 space-y-3 text-left text-2xl text-(--fg)/80">
+        <li className="flex items-center gap-3"><Check className="size-6 text-(--good-text)" /> Answer on your phone, at your own pace</li>
+        <li className="flex items-center gap-3"><Check className="size-6 text-(--good-text)" /> Go back and change answers until you submit</li>
+        <li className="flex items-center gap-3"><Check className="size-6 text-(--good-text)" /> Most correct answers wins</li>
+        <li className="flex items-center gap-3"><Check className="size-6 text-(--good-text)" /> Tie? The faster finish ranks higher</li>
+        {slide.rules && <li className="flex items-center gap-3"><Check className="size-6 text-(--good-text)" /> {slide.rules}</li>}
       </ul>
-      <p className="mt-10 text-lg text-white/55"><span className="font-bold text-white">{participants}</span> {participants === 1 ? 'person' : 'people'} joined</p>
+      <p className="mt-10 text-lg text-(--fg)/55"><span className="font-bold text-(--fg)">{participants}</span> {participants === 1 ? 'person' : 'people'} joined</p>
       <button
         onClick={onStart}
-        className="mt-5 flex items-center gap-2.5 rounded-2xl bg-golden-sun px-10 py-4 text-xl font-extrabold text-midnight-sky-900 shadow-[0_0_40px_-6px] shadow-golden-sun/60 transition hover:brightness-105 active:scale-[0.98]"
+        className="mt-5 flex items-center gap-2.5 rounded-2xl bg-(--start) px-10 py-4 text-xl font-extrabold text-(--start-ink) shadow-[0_0_40px_-6px_var(--start)] transition hover:brightness-105 active:scale-[0.98]"
       >
         <Play className="size-5" /> Start test
       </button>
@@ -476,12 +493,12 @@ function TestReviewView({ index, total, question, sheets }: {
     >
       <div className="flex items-start justify-between gap-8">
         <div className="min-w-0">
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-golden-sun">Answer review · {index + 1} of {total}</p>
-          <h2 className="mt-3 text-2xl font-semibold leading-snug text-white/95 xl:text-3xl">{question.question}</h2>
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-(--accent)">Answer review · {index + 1} of {total}</p>
+          <h2 className="mt-3 text-2xl font-semibold leading-snug text-(--fg)/95 xl:text-3xl">{question.question}</h2>
         </div>
-        <div className="shrink-0 rounded-2xl border border-fresh-green/30 bg-fresh-green/10 px-6 py-4 text-center">
-          <p className="text-5xl font-extrabold text-fresh-green">{pct(right)}%</p>
-          <p className="mt-1 text-xs uppercase tracking-wider text-white/55">got it right</p>
+        <div className="shrink-0 rounded-2xl border border-(--good)/30 bg-(--good)/10 px-6 py-4 text-center">
+          <p className="text-5xl font-extrabold text-(--good-text)">{pct(right)}%</p>
+          <p className="mt-1 text-xs uppercase tracking-wider text-(--fg)/55">got it right</p>
         </div>
       </div>
 
@@ -490,31 +507,31 @@ function TestReviewView({ index, total, question, sheets }: {
           const isRight = question.correctAnswers.includes(i)
           return (
             <div key={i} className="flex items-center gap-4">
-              <span className={cn('flex size-10 shrink-0 items-center justify-center rounded-xl text-base font-bold', isRight ? 'bg-fresh-green text-midnight-sky-900' : 'bg-white/10 text-white/70')}>
+              <span className={cn('flex size-10 shrink-0 items-center justify-center rounded-xl text-base font-bold', isRight ? 'bg-(--good) text-(--good-ink)' : 'bg-(--fg)/10 text-(--fg)/70')}>
                 {isRight ? <Check className="size-5" /> : optionLabel(i, question.options.length)}
               </span>
-              <div className="relative h-12 flex-1 overflow-hidden rounded-xl bg-white/5">
+              <div className="relative h-12 flex-1 overflow-hidden rounded-xl bg-(--fg)/5">
                 <motion.div
-                  className={cn('absolute inset-y-0 left-0 rounded-xl', isRight ? 'bg-fresh-green/35' : 'bg-white/12')}
+                  className={cn('absolute inset-y-0 left-0 rounded-xl', isRight ? 'bg-(--good)/35' : 'bg-(--fg)/12')}
                   initial={{ width: 0 }} animate={{ width: `${pct(counts[i])}%` }} transition={{ duration: 0.7, delay: 0.1 + i * 0.05 }}
                 />
-                <span className={cn('relative flex h-full items-center px-4 text-lg', isRight ? 'font-semibold text-white' : 'text-white/80')}>{o}</span>
+                <span className={cn('relative flex h-full items-center px-4 text-lg', isRight ? 'font-semibold text-(--fg)' : 'text-(--fg)/80')}>{o}</span>
               </div>
-              <span className="w-16 shrink-0 text-right text-lg font-semibold tabular-nums text-white/80">{pct(counts[i])}%</span>
+              <span className="w-16 shrink-0 text-right text-lg font-semibold tabular-nums text-(--fg)/80">{pct(counts[i])}%</span>
             </div>
           )
         })}
       </div>
 
-      {multi && <p className="mt-3 text-sm text-white/45">{question.correctAnswers.length} correct options — percentages show how many people picked each one.</p>}
+      {multi && <p className="mt-3 text-sm text-(--fg)/45">{question.correctAnswers.length} correct options — percentages show how many people picked each one.</p>}
 
       {question.explanation && (
-        <div className="mt-6 rounded-2xl border border-golden-sun/25 bg-golden-sun/10 px-6 py-4">
-          <p className="text-xs font-bold uppercase tracking-widest text-golden-sun">Explanation</p>
-          <p className="mt-1.5 text-lg leading-relaxed text-white/90">{question.explanation}</p>
+        <div className="mt-6 rounded-2xl border border-(--accent)/25 bg-(--accent)/10 px-6 py-4">
+          <p className="text-xs font-bold uppercase tracking-widest text-(--accent)">Explanation</p>
+          <p className="mt-1.5 text-lg leading-relaxed text-(--fg)/90">{question.explanation}</p>
         </div>
       )}
-      <p className="mt-auto pt-4 text-sm text-white/35">{answered.length} answered this question</p>
+      <p className="mt-auto pt-4 text-sm text-(--fg)/35">{answered.length} answered this question</p>
     </motion.div>
   )
 }
