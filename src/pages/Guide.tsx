@@ -78,6 +78,7 @@ const GUIDE: Stage[] = [
     topics: [
       {
         id: 'import-slides',
+        videoAt: 9,
         icon: <Upload className="size-4" />,
         title: 'Import your slides',
         intro: 'Already have slides? Bring them in as HTML, PDF, images or video. PowerPoint / Keynote / Google Slides users: export to PDF first, then import the PDF.',
@@ -91,6 +92,7 @@ const GUIDE: Stage[] = [
       },
       {
         id: 'split-html',
+        videoAt: 27,
         icon: <Scissors className="size-4" />,
         title: 'Fix the split when auto-detect misses',
         intro: 'Alaya Pulse tries to detect how many slides your HTML file contains, but some files hide it too well. You always have a manual override.',
@@ -104,6 +106,7 @@ const GUIDE: Stage[] = [
       },
       {
         id: 'add-slides',
+        videoAt: 44,
         icon: <ListPlus className="size-4" />,
         title: 'Add question & content slides',
         intro: 'Questions are what make a session interactive — mix them between your normal slides.',
@@ -118,6 +121,7 @@ const GUIDE: Stage[] = [
       },
       {
         id: 'import-questions',
+        videoAt: 74,
         icon: <FileSpreadsheet className="size-4" />,
         title: 'Import many questions at once (CSV + AI)',
         intro: 'Typing 20 questions by hand is slow. If your questions already live in a Word document, let an AI convert them into the import template for you.',
@@ -131,6 +135,7 @@ const GUIDE: Stage[] = [
       },
       {
         id: 'rearrange',
+        videoAt: 98,
         icon: <LayoutGrid className="size-4" />,
         title: 'Rearrange slides in Slide Overview',
         steps: [
@@ -142,6 +147,7 @@ const GUIDE: Stage[] = [
       },
       {
         id: 'save-undo',
+        videoAt: 109,
         icon: <Bookmark className="size-4" />,
         title: 'Save, undo, redo',
         steps: [
@@ -160,6 +166,7 @@ const GUIDE: Stage[] = [
     topics: [
       {
         id: 'slideshow',
+        videoAt: 135,
         icon: <Play className="size-4" />,
         title: 'Start the show & get your audience in',
         steps: [
@@ -171,6 +178,7 @@ const GUIDE: Stage[] = [
       },
       {
         id: 'navigate',
+        videoAt: 162,
         icon: <Compass className="size-4" />,
         title: 'Moving between slides during the show',
         steps: [
@@ -182,6 +190,7 @@ const GUIDE: Stage[] = [
       },
       {
         id: 'quiz-mode',
+        videoAt: 118,
         icon: <Trophy className="size-4" />,
         title: 'Live quiz — points, timer resets, re-votes',
         intro: 'Live quiz turns the MCQ questions you show one at a time into a scored competition: right answers earn points, faster answers earn more, and a Leaderboard slide shows the champions. (Self-paced tests don’t need it — they’re always scored.)',
@@ -218,6 +227,7 @@ const GUIDE: Stage[] = [
     topics: [
       {
         id: 'results',
+        videoAt: 349,
         icon: <Download className="size-4" />,
         title: 'Download the results',
         steps: [
@@ -230,6 +240,7 @@ const GUIDE: Stage[] = [
       },
       {
         id: 'share',
+        videoAt: 366,
         icon: <Share2 className="size-4" />,
         title: 'Share your deck',
         steps: [
