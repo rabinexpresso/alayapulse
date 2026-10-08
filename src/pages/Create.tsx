@@ -25,7 +25,7 @@ import { PersistentHtmlIframe } from '@/components/PersistentHtmlIframe'
 import { cn, optionLabel, MAX_MCQ_OPTIONS, MAX_VIZ_OPTIONS } from '@/lib/utils'
 import { injectSlideNavigation } from '@/lib/importFile'
 import {
-  DEFAULT_TEST_SETTINGS, AFTER_ORDER_LABEL, TEST_THEMES, testTheme, isTestable, OE_WORD_LIMITS, DEFAULT_OE_WORDS,
+  DEFAULT_TEST_SETTINGS, AFTER_ORDER_LABEL, TEST_THEMES, testTheme, isTestable, OE_MAX_WORDS,
   normalizeTestBlocks, collapseTestBlocks, expandTestBlocks, testRanges, testMembership, testProblems,
   type TestHeaderSlide, type TestEndSlide, type TestAfterOrder, type TestScoreTiming,
 } from '@/lib/selfPacedTest'
@@ -258,8 +258,6 @@ interface QuestionSlide {
   marks?: number
   /** In a self-paced test (not MCQ): what a good answer includes. Never sent to phones. */
   markingGuide?: string
-  /** Open-ended in a self-paced test: word limit (100 / 250 / 500). */
-  oeWordLimit?: number
 }
 type ContentTemplate = 'heading' | 'bullets' | 'quote'
 interface ContentSlide {
@@ -389,12 +387,15 @@ function parseCsvRow(line: string): string[] {
 interface CsvParseResult {
   slides: QuestionSlide[]
   errors: Array<{ row: number; message: string }>
+  /** Some MCQ rows set their own timer (every MCQ gets 30 s otherwise) */
+  timersInFile?: boolean
 }
 
 function parseCsvQuestions(csvText: string): CsvParseResult {
   const lines = csvText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
   const slides: QuestionSlide[] = []
   const errors: Array<{ row: number; message: string }> = []
+  let timersInFile = false
 
   let headerIdx = -1
   let headers: string[] = []
@@ -441,6 +442,7 @@ function parseCsvQuestions(csvText: string): CsvParseResult {
     }
 
     const timerVal = parseInt(get('timer'))
+    if (type === 'mcq' && !isNaN(timerVal) && timerVal > 0) timersInFile = true
     const slide: QuestionSlide = {
       id: uid(),
       type: type as QType,
@@ -495,6 +497,10 @@ function parseCsvQuestions(csvText: string): CsvParseResult {
       }
       const expl = get('explanation')
       if (expl) slide.explanation = expl
+    } else {
+      // Other types: the explanation becomes the marking guide when the question is in a self-paced test
+      const guide = get('explanation')
+      if (guide) slide.markingGuide = guide
     }
 
     if (type === 'ranking') {
@@ -527,7 +533,7 @@ function parseCsvQuestions(csvText: string): CsvParseResult {
     slides.push(slide)
   }
 
-  return { slides, errors }
+  return { slides, errors, timersInFile }
 }
 
 /* ── CSV import modal: step list + copyable AI prompt ─────────────────── */
@@ -1176,8 +1182,7 @@ export default function Create() {
     setCsvImportToast({
       count: intoTest.length,
       message: `${intoTest.length} question${intoTest.length !== 1 ? 's' : ''} added to the self-paced test`
-        + (outside.length ? ` · ${outside.length} other slide${outside.length !== 1 ? 's' : ''} added after the block` : '')
-        + (intoTest.some(q => q.timer) ? ' · timers ignored (the test has one time limit)' : ''),
+        + (outside.length ? ` · ${outside.length} other slide${outside.length !== 1 ? 's' : ''} added after the block` : ''),
     })
   }, [pushHistory])
 
@@ -2401,7 +2406,7 @@ function CsvImportModal({ onClose, onImport, destination = 'live', hasTest = fal
                     <p className="text-fresh-green"><Check className="mr-1 inline size-3" />{parseResult.slides.length} question{parseResult.slides.length !== 1 ? 's' : ''} go into the test</p>
                     {mcqs.length > 0 && others > 0 && <p className="text-midnight-sky-600">{mcqs.length} multiple choice (marked automatically) · {others} other{others !== 1 ? 's' : ''} (you mark them afterwards)</p>}
                     {noAnswer > 0 && <p className="text-amber-700">{noAnswer} {noAnswer !== 1 ? 'have' : 'has'} no correct answer — tick one before the show</p>}
-                    {mcqs.some(q => q.timer) && <p className="text-midnight-sky-500">Timers in the file are ignored — the test has one time limit</p>}
+                    {parseResult.timersInFile && <p className="text-midnight-sky-500">Timers in the file are ignored — the test has one time limit</p>}
                   </div>
                 )
               })()}
@@ -4014,7 +4019,12 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
             {slide.type === 'mcq' && <MCQEditor slide={slide} onUpdate={onUpdate} onPushHistory={onPushHistory} />}
             {slide.type === 'rating' && <RatingEditor slide={slide} onUpdate={onUpdate} onPushHistory={onPushHistory} />}
             {slide.type === 'ranking' && <RankingEditor slide={slide} onUpdate={onUpdate} onPushHistory={onPushHistory} />}
-            {slide.type === 'openended' && inTest && <TestWordLimit slide={slide} onUpdate={onUpdate} />}
+            {slide.type === 'openended' && inTest && (
+              <div className="mb-4 flex items-start gap-2.5 rounded-xl bg-midnight-sky-50 p-4">
+                <div className="mt-0.5 size-1.5 shrink-0 rounded-full bg-golden-sun" />
+                <p className="text-sm text-midnight-sky-500">Each person writes one answer on their phone — up to {OE_MAX_WORDS.toLocaleString()} words (about 4 A4 pages). You mark it afterwards.</p>
+              </div>
+            )}
             {slide.type === 'openended' && !inTest && (
               <div className="mb-6 space-y-4">
                 <div className="flex items-start gap-2.5 rounded-xl bg-midnight-sky-50 p-4">
@@ -4059,7 +4069,8 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
                 </div>
                 <div>
                   <label className="mb-2 block text-sm font-medium text-midnight-sky-700">
-                    Max submissions per person
+                    {inTest ? 'Answers per person' : 'Max submissions per person'}
+                    {inTest && <span className="ml-1.5 font-light text-midnight-sky-500">each gets its own box on the phone</span>}
                   </label>
                   <div className="flex gap-2">
                     {[1, 2, 3, 5, 8, 10].map(n => (
@@ -6922,36 +6933,6 @@ function TestBlockEditor({
 }
 
 /* ── Self-paced test: settings for questions the host marks ─────────────── */
-
-/** Open-ended in a test: one written answer, with a word limit. */
-function TestWordLimit({ slide, onUpdate }: { slide: QuestionSlide; onUpdate: (patch: Partial<QuestionSlide>) => void }) {
-  const limit = OE_WORD_LIMITS.includes(slide.oeWordLimit ?? 0) ? slide.oeWordLimit : DEFAULT_OE_WORDS
-  return (
-    <div className="mb-4 space-y-3">
-      <div className="flex items-start gap-2.5 rounded-xl bg-midnight-sky-50 p-4">
-        <div className="mt-0.5 size-1.5 shrink-0 rounded-full bg-golden-sun" />
-        <p className="text-sm text-midnight-sky-500">Each person writes one answer on their phone. You mark it afterwards.</p>
-      </div>
-      <div>
-        <label className="mb-2 block text-sm font-medium text-midnight-sky-700">
-          Word limit <span className="ml-1 font-light text-midnight-sky-500">the phone counts words as people type</span>
-        </label>
-        <div className="flex gap-2">
-          {OE_WORD_LIMITS.map(n => (
-            <button
-              key={n}
-              onClick={() => onUpdate({ oeWordLimit: n })}
-              className={cn('rounded-xl border px-4 py-2 text-sm transition-all',
-                limit === n ? 'border-golden-sun bg-golden-sun/10 font-medium text-[#a07800]' : 'border-midnight-sky-200 text-midnight-sky-500 hover:border-midnight-sky-400 hover:text-midnight-sky-700')}
-            >
-              {n} words
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
 
 const MARK_PRESETS = [1, 2, 5, 10]
 

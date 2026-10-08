@@ -56,8 +56,8 @@ export const TEST_QTYPE_LABEL: Record<TestQType, string> = {
 /** Marks a question gets when it first goes into a test (the host can change
  *  them, or choose "Not marked" = 0). Rating is usually opinion, so unmarked. */
 export const DEFAULT_MARKS: Partial<Record<TestQType, number>> = { openended: 5, wordcloud: 1, ranking: 1 }
-export const OE_WORD_LIMITS = [100, 250, 500]
-export const DEFAULT_OE_WORDS = 250
+/** Open-ended answers in a test: up to this many words (about 4 A4 pages). */
+export const OE_MAX_WORDS = 2000
 
 /** One answer on a sheet, by question type:
  *   multiple choice → option indexes picked
@@ -88,8 +88,6 @@ interface TestQuestionSettings {
   imgUrl?:      string
   /** Marks available for a question the host marks (not multiple choice). */
   marks?:       number
-  /** Open-ended: word limit. */
-  wordLimit?:   number
   /** Word cloud: how many short answers each person can give. */
   maxEntries?:  number
   /** Rating: top of the 0..N scale, and each item's end labels. */
@@ -336,7 +334,6 @@ function toTestQuestion(q: AnyS): TestQuestion {
     ...base,
     ...(marks > 0 ? { marks } : {}),
     ...(typeof q.markingGuide === 'string' && q.markingGuide.trim() ? { guide: q.markingGuide.trim() } : {}),
-    ...(type === 'openended' ? { wordLimit: OE_WORD_LIMITS.includes(q.oeWordLimit) ? q.oeWordLimit : DEFAULT_OE_WORDS } : {}),
     ...(type === 'wordcloud' ? { maxEntries: Math.min(10, Math.max(1, Number(q.wcMaxSubmissions) || 3)) } : {}),
     ...(type === 'rating' ? {
       ratingMax: q.ratingMax === 10 ? 10 : 5,
@@ -359,7 +356,6 @@ export function expandTestBlocks(slides: AnyS[]): AnyS[] {
       ...(q.imgUrl ? { imgUrl: q.imgUrl } : {}),
       ...(q.marks ? { marks: q.marks } : {}),
       ...(q.guide ? { markingGuide: q.guide } : {}),
-      ...(q.wordLimit ? { oeWordLimit: q.wordLimit } : {}),
       ...(q.maxEntries ? { wcMaxSubmissions: q.maxEntries } : {}),
       ...(q.ratingMax === 10 ? { ratingMax: 10 } : {}),
       ...(q.leftLabels ? { leftLabels: q.leftLabels } : {}),

@@ -23,14 +23,17 @@
 #
 # rating -- people score each item on a scale
 #   Put the things to rate in option_a onwards (1 to 5 items) e.g. Workload then Communication
-#   Leave correct / explanation / timer blank
+#   Leave correct / timer blank
 #
 # ranking -- people put items in order of importance
 #   Put the items to rank in option_a onwards (2 to 10 items)
-#   Leave correct / explanation / timer blank
+#   Leave correct / timer blank
 #
 # wordcloud and openended -- no options needed
-#   Leave option columns / correct / explanation / timer blank
+#   Leave option columns / correct / timer blank
+#
+# SELF-PACED TESTS -- for rating, ranking, wordcloud and openended questions,
+#   explanation = the marking guide: what a good answer includes (optional)
 #
 # MORE THAN 6 OPTIONS
 #   Add more columns to the header: option_g then option_h and so on up to option_z

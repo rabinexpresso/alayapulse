@@ -6,7 +6,7 @@ import { Confetti, CountUp } from '@/components/Celebration'
 import { saveTestAnswers, submitTestAnswers, subscribeToTestAnswers } from '@/lib/session'
 import {
   remainingOf, formatClock, formatDuration, sameAnswer, answerState, answerText, qTypeOf, isMarkable, autoMarked,
-  wordCount, DEFAULT_OE_WORDS,
+  wordCount, OE_MAX_WORDS,
   type StoredTestBlockSlide, type StoredTestQuestion, type TestState, type TestAnswerDoc, type TestAnswer,
 } from '@/lib/selfPacedTest'
 
@@ -88,16 +88,32 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
     return () => window.clearInterval(id)
   }, [state?.status])
 
-  const save = (next: Record<string, TestAnswer>, cur: number) => {
+  // Taps save almost at once; typing saves once the person pauses — and at
+  // least every few seconds during a long answer — so 300 people writing
+  // essays don't flood the presenter with an update per keystroke.
+  const pendingSince = useRef<number | null>(null)
+  const save = (next: Record<string, TestAnswer>, cur: number, wait = 400) => {
     if (saveTimer.current) clearTimeout(saveTimer.current)
+    pendingSince.current ??= Date.now()
+    const overdue = Date.now() - pendingSince.current > 6000
     saveTimer.current = setTimeout(() => {
+      saveTimer.current = null
+      pendingSince.current = null
       saveTestAnswers(code, block.id, personId, { answers: next, current: cur, round }).catch(console.error)
-    }, 400)
+    }, overdue ? 0 : wait)
   }
   const flush = async () => {
     if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null }
+    pendingSince.current = null
     await saveTestAnswers(code, block.id, personId, { answers: latest.current.answers, current: latest.current.current, round })
   }
+  // Phone locked or app switched mid-answer: save what's there now
+  useEffect(() => {
+    const onHide = () => { if (document.visibilityState === 'hidden' && saveTimer.current) flush().catch(console.error) }
+    document.addEventListener('visibilitychange', onHide)
+    return () => document.removeEventListener('visibilitychange', onHide)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const remaining = remainingOf(state, now)
   const finished = !!(sheet && sheet.round === round && sheet.finished)
@@ -120,7 +136,8 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
   const setAnswer = (qi: number, value: TestAnswer) => {
     const all = { ...answers, [qs[qi].id]: value }
     setAnswers(all)
-    save(all, qi)
+    const typed = qTypeOf(qs[qi]) === 'openended' || qTypeOf(qs[qi]) === 'wordcloud'
+    save(all, qi, typed ? 2000 : 400)
   }
   const pick = (qi: number, opt: number) => {
     const q = qs[qi]
@@ -531,9 +548,9 @@ function Rules({ block }: { block: StoredTestBlockSlide }) {
 
 /* ── Answer inputs for the types the host marks ─────────────────────────── */
 
-/** Written answer with a word limit (extra words are trimmed off as you type). */
-function OpenAnswer({ q, value, onChange }: { q: StoredTestQuestion; value: string; onChange: (v: string) => void }) {
-  const limit = q.wordLimit ?? DEFAULT_OE_WORDS
+/** One written answer, up to OE_MAX_WORDS (extra words are trimmed off as you type). */
+function OpenAnswer({ value, onChange }: { q: StoredTestQuestion; value: string; onChange: (v: string) => void }) {
+  const limit = OE_MAX_WORDS
   const [hit, setHit] = useState(false)
   const n = wordCount(value)
   return (
@@ -541,6 +558,7 @@ function OpenAnswer({ q, value, onChange }: { q: StoredTestQuestion; value: stri
       <textarea
         value={value}
         rows={8}
+        style={{ fieldSizing: 'content', minHeight: '12rem' } as React.CSSProperties}
         placeholder="Type your answer…"
         onChange={e => {
           let v = e.target.value
@@ -552,29 +570,64 @@ function OpenAnswer({ q, value, onChange }: { q: StoredTestQuestion; value: stri
         className="w-full resize-none rounded-2xl border-2 border-midnight-sky-100 bg-white px-4 py-3.5 text-base leading-relaxed text-midnight-sky-900 outline-none transition placeholder:text-midnight-sky-400 focus:border-sky-blue"
       />
       <p className={cn('mt-1 text-right text-xs tabular-nums', hit || n >= limit ? 'font-semibold text-hot-pink' : 'text-midnight-sky-400')}>
-        {hit ? 'Word limit reached · ' : ''}{n} / {limit} words
+        {hit ? 'Word limit reached · ' : ''}{n.toLocaleString()} / {limit.toLocaleString()} words
       </p>
     </div>
   )
 }
 
-/** Word cloud in a test: a few short answers. */
+const ORDINAL_WORDS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth']
+
+/** Word cloud in a test: one short answer per box. Typing a comma (or Enter)
+ *  jumps to the next box, and pasting "a, b, c" fills the boxes in turn, so
+ *  nobody squeezes all their answers into the first one. */
 function ShortAnswers({ q, value, onChange }: { q: StoredTestQuestion; value: string[]; onChange: (v: string[]) => void }) {
   const n = q.maxEntries ?? 3
   const vals = Array.from({ length: n }, (_, i) => value[i] ?? '')
+  const refs = useRef<(HTMLInputElement | null)[]>([])
+  const focusBox = (i: number) => window.setTimeout(() => refs.current[i]?.focus(), 0)
+  const change = (i: number, raw: string) => {
+    const next = [...vals]
+    const parts = raw.split(/\s*[,;\n]+\s*/)
+    if (n > 1 && parts.length > 1 && i < n - 1) {
+      next[i] = parts[0].slice(0, 40)
+      let k = i + 1
+      for (const part of parts.slice(1)) {
+        while (k < n && next[k].trim()) k++
+        if (k >= n) break
+        if (part.trim()) next[k] = part.trim().slice(0, 40)
+      }
+      onChange(next)
+      const empty = next.findIndex((x, j) => j > i && !x.trim())
+      focusBox(empty >= 0 ? empty : Math.min(n - 1, i + 1))
+      return
+    }
+    next[i] = raw.replace(/^\s+/, '').slice(0, 40)
+    onChange(next)
+  }
+  const tooLong = vals.some(v => wordCount(v) > 4)
   return (
     <div className="mt-4 flex flex-col gap-2.5">
-      <p className="text-sm text-midnight-sky-500">{n > 1 ? `Up to ${n} short answers` : 'One short answer'} · a few words each</p>
+      <p className="text-sm font-medium text-midnight-sky-700">
+        {n > 1 ? `Give up to ${n} answers — put each one in its own box` : 'Give one short answer'}
+      </p>
+      {n > 1 && <p className="-mt-1.5 text-xs text-midnight-sky-400">A few words each. Typing a comma moves you to the next box.</p>}
       {vals.map((v, i) => (
-        <input
-          key={i}
-          value={v}
-          maxLength={40}
-          placeholder={n > 1 ? `Answer ${i + 1}` : 'Your answer'}
-          onChange={e => { const next = [...vals]; next[i] = e.target.value.slice(0, 40); onChange(next) }}
-          className="w-full rounded-2xl border-2 border-midnight-sky-100 bg-white px-4 py-3 text-base text-midnight-sky-900 outline-none transition placeholder:text-midnight-sky-400 focus:border-sky-blue"
-        />
+        <div key={i} className="flex items-center gap-2.5">
+          {n > 1 && <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-midnight-sky-50 text-xs font-bold text-midnight-sky-500">{i + 1}</span>}
+          <input
+            ref={el => { refs.current[i] = el }}
+            value={v}
+            maxLength={200}
+            enterKeyHint={i < n - 1 ? 'next' : 'done'}
+            placeholder={n > 1 ? `Your ${ORDINAL_WORDS[i] ?? `#${i + 1}`} answer` : 'Your answer'}
+            onKeyDown={e => { if (e.key === 'Enter' && i < n - 1) { e.preventDefault(); focusBox(i + 1) } }}
+            onChange={e => change(i, e.target.value)}
+            className="min-w-0 flex-1 rounded-2xl border-2 border-midnight-sky-100 bg-white px-4 py-3 text-base text-midnight-sky-900 outline-none transition placeholder:text-midnight-sky-400 focus:border-sky-blue"
+          />
+        </div>
       ))}
+      {tooLong && <p className="text-xs font-medium text-hot-pink">Keep each answer to a few words{n > 1 ? ' — use the other boxes for more' : ''}.</p>}
     </div>
   )
 }

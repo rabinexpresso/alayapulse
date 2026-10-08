@@ -90,7 +90,6 @@ export interface TestResultQuestion {
   marks?:         number
   /** What a good answer includes (from the editor). */
   guide?:         string
-  wordLimit?:     number
   maxEntries?:    number
   ratingMax?:     5 | 10
   leftLabels?:    string[]
