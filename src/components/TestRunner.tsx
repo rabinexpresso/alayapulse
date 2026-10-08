@@ -64,6 +64,7 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
   const [answers, setAnswers] = useState<Record<string, TestAnswer>>({})
   const [current, setCurrent] = useState(0)
   const [reviewing, setReviewing] = useState(false)
+  const [fixing, setFixing] = useState(false)        // came from the "not answered yet" list
   const [submitting, setSubmitting] = useState(false)
   const [note, setNote] = useState<string | null>(null)
   const [hideReopened, setHideReopened] = useState(false)
@@ -140,7 +141,7 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
     if (createdRound.current === round) return
     createdRound.current = round
     loadedRound.current = round
-    setAnswers({}); setCurrent(0); setReviewing(false)
+    setAnswers({}); setCurrent(0); setReviewing(false); setFixing(false)
     writeBackup({ answers: {}, current: 0, unsynced: false, submitPending: false })
     send({
       respondentId: personId, respondentName: name || 'Anonymous', ...(emoji ? { respondentEmoji: emoji } : {}),
@@ -255,6 +256,11 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
     save(all, qi)
   }
   const go = (qi: number) => { setCurrent(qi); setReviewing(false); save(answers, qi) }
+  // Fixing leftovers: the main button leads to the next unanswered question, then to Submit
+  const fix = (qi: number) => { go(qi); setFixing(true) }
+  const others = missing.filter(i => i !== current)
+  const nextMissing = others.find(i => i > current) ?? others[0]
+  const showSubmit = fixing ? others.length === 0 : current === qs.length - 1
 
   const submit = async () => {
     if (submitting) return
@@ -412,7 +418,7 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
               <p className="text-sm font-medium text-[#8a6600]">Not answered yet — tap to go there:</p>
               <div className="mt-2 flex flex-wrap gap-2">
                 {missing.map(i => (
-                  <button key={i} onClick={() => go(i)} className="rounded-lg bg-white px-3 py-1.5 text-sm font-semibold text-midnight-sky-800 shadow-sm">
+                  <button key={i} onClick={() => fix(i)} className="rounded-lg bg-white px-3 py-1.5 text-sm font-semibold text-midnight-sky-800 shadow-sm">
                     Q{i + 1}{progress(i)}
                   </button>
                 ))}
@@ -427,7 +433,7 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
             </div>
           )}
           <div className="mt-auto flex gap-2.5 pt-6">
-            <button onClick={() => setReviewing(false)} className="flex-1 rounded-xl border border-midnight-sky-200 py-3.5 text-sm font-medium text-midnight-sky-700">Go back</button>
+            <button onClick={() => { setReviewing(false); setFixing(false) }} className="flex-1 rounded-xl border border-midnight-sky-200 py-3.5 text-sm font-medium text-midnight-sky-700">Go back</button>
             <button onClick={submit} disabled={submitting || timeUp} className="flex-1 rounded-xl bg-hot-pink py-3.5 text-sm font-semibold text-white shadow-[0_0_20px_-4px] shadow-hot-pink/40 disabled:opacity-50">
               {submitting ? 'Submitting…' : submitError ? 'Try again' : 'Submit test'}
             </button>
@@ -472,25 +478,39 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
                 )
               })}
             </div>}
-            <div className="mt-auto flex gap-2.5 pt-6">
-              <button
-                onClick={() => go(Math.max(0, current - 1))}
-                disabled={current === 0}
-                className="flex flex-1 items-center justify-center gap-1 rounded-xl border border-midnight-sky-200 py-3.5 text-sm font-medium text-midnight-sky-700 disabled:opacity-30"
-              >
-                <ChevronLeft className="size-4" /> Back
-              </button>
-              {current < qs.length - 1 ? (
-                <button onClick={() => go(current + 1)} className="flex flex-1 items-center justify-center gap-1 rounded-xl bg-sky-blue py-3.5 text-sm font-semibold text-white">
-                  Next <ChevronRight className="size-4" />
-                </button>
-              ) : (
-                <button onClick={() => setReviewing(true)} className="flex-1 rounded-xl bg-hot-pink py-3.5 text-sm font-semibold text-white">
-                  Review &amp; submit
-                </button>
+            <div className="mt-auto pt-6">
+              {fixing && (
+                <p className={cn('mb-2.5 text-center text-sm font-medium', missing.length ? 'text-[#8a6600]' : 'text-[#178a3a]')}>
+                  {missing.length ? `${missing.length} question${missing.length !== 1 ? 's' : ''} not answered yet` : '✓ All questions answered'}
+                </p>
               )}
+              <div className="flex gap-2.5">
+                <button
+                  onClick={() => go(Math.max(0, current - 1))}
+                  disabled={current === 0}
+                  className="flex flex-1 items-center justify-center gap-1 rounded-xl border border-midnight-sky-200 py-3.5 text-sm font-medium text-midnight-sky-700 disabled:opacity-30"
+                >
+                  <ChevronLeft className="size-4" /> Back
+                </button>
+                {showSubmit ? (
+                  <motion.button
+                    key="submit" initial={fixing ? { scale: 0.9, opacity: 0.6 } : false} animate={{ scale: 1, opacity: 1 }}
+                    onClick={() => setReviewing(true)} className="flex-1 rounded-xl bg-hot-pink py-3.5 text-sm font-semibold text-white shadow-[0_0_20px_-4px] shadow-hot-pink/40"
+                  >
+                    Review &amp; submit
+                  </motion.button>
+                ) : fixing ? (
+                  <button onClick={() => go(nextMissing)} className="flex flex-[1.4] items-center justify-center gap-1 rounded-xl bg-sky-blue py-3.5 text-sm font-semibold text-white">
+                    Next unanswered: Q{nextMissing + 1} <ChevronRight className="size-4" />
+                  </button>
+                ) : (
+                  <button onClick={() => go(current + 1)} className="flex flex-1 items-center justify-center gap-1 rounded-xl bg-sky-blue py-3.5 text-sm font-semibold text-white">
+                    Next <ChevronRight className="size-4" />
+                  </button>
+                )}
+              </div>
             </div>
-            {current < qs.length - 1 && (
+            {!showSubmit && (
               <button onClick={() => setReviewing(true)} className="mt-3 text-center text-sm font-medium text-hot-pink">Finish and submit</button>
             )}
           </motion.div>
