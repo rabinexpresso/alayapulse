@@ -1902,10 +1902,10 @@ export default function Create() {
                     : 'View saved poll results'
                 }
                 className={cn(
-                  'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm font-medium transition-all duration-200',
+                  'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border px-3 py-1.5 text-sm transition-all duration-200',
                   canViewResults && !isSaving
-                    ? 'border-hot-pink/50 bg-hot-pink/5 text-hot-pink hover:border-hot-pink/70 hover:bg-hot-pink/10'
-                    : 'cursor-not-allowed border-white/10 text-white/30',
+                    ? 'border-transparent bg-gradient-to-r from-golden-sun to-[#ff9f1a] font-semibold text-midnight-sky-900 shadow-[0_0_18px_-6px] shadow-golden-sun/70 hover:brightness-105'
+                    : 'cursor-not-allowed border-white/10 font-medium text-white/30',
                 )}
               >
                 <BarChart2 className="size-3.5" />
@@ -2767,10 +2767,14 @@ function SlidePanel({
                       }
                       const inTest = memberOf.has(slide.id)
                       if (!inTest) n++
+                      const own = (slide as QuestionSlide).theme
+                      const shown = inTest && !TEST_THEMES.some(t => t.id === own)
+                        ? { ...slide, theme: headers.get(memberOf.get(slide.id)!)?.theme ?? 'navy' } as Slide
+                        : slide
                       return (
                         <div key={slide.id} data-slide-id={slide.id} className={inTest ? cn(FRAME, 'border-x-2 px-0.5') : undefined}>
                           <SlideThumbnail
-                            slide={slide}
+                            slide={shown}
                             label={inTest ? `Q${qNo.get(slide.id)}` : String(n)}
                             isSelected={slide.id === selectedId}
                             onSelect={() => onSelect(slide.id)}
@@ -4134,8 +4138,8 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
             {inTest && (
               <div className="mt-3 border-t border-midnight-sky-100 pt-3">
                 <label className="mb-2 block text-xs font-semibold text-midnight-sky-700">
-                  Big-screen colour
-                  <span className="ml-1.5 font-normal text-midnight-sky-500">for this question’s answer review after the test</span>
+                  Theme
+                  <span className="ml-1.5 font-normal text-midnight-sky-500">how this question looks on the big screen in the answer review</span>
                 </label>
                 <div className="flex flex-wrap gap-3">
                   <button

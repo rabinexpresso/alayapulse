@@ -4074,7 +4074,8 @@ function LeaderboardSlideView({
   }, [sessionCode])
 
   // Reveal 10th → 4th briskly, then build suspense for the podium: each of
-  // 3rd, 2nd and 1st is teased with a pause that grows before it appears.
+  // 3rd, 2nd and 1st is teased ("In 3rd place…"), then appears — and stays on
+  // screen long enough for the room to read the name before the next tease.
   useEffect(() => {
     if (leaderboard.length === 0) return
     const total = Math.min(leaderboard.length, 10)
@@ -4084,9 +4085,11 @@ function LeaderboardSlideView({
       const id = setTimeout(() => setRevealCount(c => c + 1), revealCount === 0 ? 900 : 600)
       return () => clearTimeout(id)
     }
-    const hold = nextRank === 1 ? 3400 : nextRank === 2 ? 2400 : 1900
-    const lead = setTimeout(() => setAnnounce(nextRank), revealCount === 0 ? 700 : 500)
-    const id = setTimeout(() => { setAnnounce(null); setRevealCount(c => c + 1) }, hold)
+    // Time to read the place just revealed (none before the first podium place)
+    const read = revealCount === 0 ? 700 : nextRank === Math.min(total, 3) ? 600 : 4000
+    const tease = nextRank === 1 ? 3200 : 1900
+    const lead = setTimeout(() => setAnnounce(nextRank), read)
+    const id = setTimeout(() => { setAnnounce(null); setRevealCount(c => c + 1) }, read + tease)
     return () => { clearTimeout(lead); clearTimeout(id) }
   }, [leaderboard, revealCount])
 
@@ -4321,13 +4324,11 @@ function LeaderboardSlideView({
             >
               {announce === 1 ? 'And the winner is…' : announce === 2 ? 'In 2nd place…' : 'In 3rd place…'}
               {announce === 1 && (
-                <motion.span
-                  className="mt-4 block text-[0.45em]"
-                  animate={{ opacity: [0.3, 1, 0.3] }}
-                  transition={{ duration: 0.6, repeat: Infinity }}
-                >
-                  🥁 🥁 🥁
-                </motion.span>
+                <span className="mt-4 flex items-center justify-center gap-[0.5em] text-[0.45em]">
+                  <motion.span className="inline-block" animate={{ rotate: [-14, 6, -14] }} transition={{ duration: 0.5, repeat: Infinity }}>🎺</motion.span>
+                  <motion.span className="inline-block" animate={{ scale: [1, 1.2, 1], y: [0, -6, 0] }} transition={{ duration: 0.22, repeat: Infinity }}>🥁</motion.span>
+                  <motion.span className="inline-block" animate={{ rotate: [14, -6, 14], scale: [1, 1.12, 1] }} transition={{ duration: 0.5, repeat: Infinity }}>🎉</motion.span>
+                </span>
               )}
             </motion.p>
           </motion.div>
