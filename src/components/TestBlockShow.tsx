@@ -10,6 +10,7 @@ import {
 } from '@/lib/session'
 import {
   freshTestState, remainingOf, formatClock, formatDuration, rankTest, countCorrect, afterSteps, sameAnswer, testTheme,
+  autoMarked, qTypeOf, isMarkable, hasAnswer, TEST_QTYPE_LABEL,
   type TestBlockShowSlide, type TestState, type TestAnswerDoc, type TestResultRow,
 } from '@/lib/selfPacedTest'
 
@@ -41,13 +42,16 @@ export interface TestNav {
 export interface LeaderboardEntry { id: string; name: string; score: number; emoji?: string; display: string }
 
 export function TestBlockView({
-  slide, code, viewerCount, navRef, renderLeaderboard,
+  slide, code, viewerCount, navRef, renderLeaderboard, renderAnswers,
 }: {
   slide:        TestBlockShowSlide
   code:         string
   viewerCount:  number
   navRef:       React.MutableRefObject<TestNav | null>
-  renderLeaderboard: (entries: LeaderboardEntry[], onWinnerRevealed: () => void) => ReactNode
+  renderLeaderboard: (entries: LeaderboardEntry[], onWinnerRevealed: () => void, note?: string) => ReactNode
+  /** The big-screen display of everyone's answers to a question the host marks
+   *  (word cloud, answer wall, average ratings, overall ranking). */
+  renderAnswers: (question: TestBlockShowSlide['questions'][number], sheets: TestAnswerDoc[]) => ReactNode
 }) {
   const [state, setState] = useState<TestState | undefined>(undefined)
   const [loaded, setLoaded] = useState(false)
@@ -61,6 +65,8 @@ export function TestBlockView({
 
   const durationMs = slide.timeLimit * 60_000
   const questions = slide.questions
+  const autoQs = useMemo(() => autoMarked(questions), [questions])
+  const hasAuto = autoQs.length > 0
 
   // Live state + everyone's answer sheets
   useEffect(() => subscribeToSession(code, s => {
@@ -94,7 +100,7 @@ export function TestBlockView({
 
   /* ── Host actions ──────────────────────────────────────────────────── */
 
-  const reveal = () => Object.fromEntries(questions.map(q => [q.id, {
+  const reveal = () => Object.fromEntries(autoQs.map(q => [q.id, {
     correct: q.correctAnswers, ...(q.explanation ? { explanation: q.explanation } : {}),
   }]))
 
@@ -159,7 +165,7 @@ export function TestBlockView({
 
   /* ── After-test steps ──────────────────────────────────────────────── */
 
-  const steps = useMemo(() => afterSteps(slide.afterOrder, questions.length), [slide.afterOrder, questions.length])
+  const steps = useMemo(() => afterSteps(slide.afterOrder, questions.length, hasAuto), [slide.afterOrder, questions.length, hasAuto])
   const pos = !state || state.stage === 'test' ? -1
     : state.stage === 'leaderboard' ? steps.findIndex(s => s.stage === 'leaderboard')
     : steps.findIndex(s => s.stage === 'review' && s.index === state.reviewIndex)
@@ -205,17 +211,21 @@ export function TestBlockView({
     body = renderLeaderboard(entries, () => {
       updateTestState(code, slide.id, {
         ranks: {
-          total: rows.length, questions: questions.length, at: Date.now(),
+          total: rows.length, questions: autoQs.length, at: Date.now(),
           entries: Object.fromEntries(rows.map(r => [r.id, [r.place, r.correct, Math.round(r.timeMs), r.status === 'timeout' ? 1 : 0]])),
         },
       }).catch(console.error)
-    })
+    }, autoQs.length < questions.length ? 'Multiple-choice questions only · written answers are marked afterwards' : undefined)
   } else if (step?.stage === 'review') {
-    body = <TestReviewView index={step.index} total={questions.length} question={questions[step.index]} sheets={sheets} />
+    const q = questions[step.index]
+    body = qTypeOf(q) === 'mcq'
+      ? <TestReviewView index={step.index} total={questions.length} question={q} sheets={sheets} />
+      : <TestAnswersReview index={step.index} total={questions.length} question={q} sheets={sheets} display={renderAnswers(q, sheets)} />
   } else if (state.status === 'ready') {
     body = <RulesView slide={slide} participants={participants} onStart={() => startClock()} />
   } else if (state.status === 'ended') {
     const timedOut = rows.filter(r => r.status === 'timeout').length
+    const toMark = sheets.reduce((n, d) => n + questions.filter(q => isMarkable(q) && hasAnswer({ ...q, pick: 1 }, d.answers?.[q.id])).length, 0)
     const avg = rows.length ? rows.reduce((a, r) => a + r.correct, 0) / rows.length : 0
     body = (
       <Centered>
@@ -225,8 +235,11 @@ export function TestBlockView({
           <span className="font-bold text-(--fg)">{submitted}</span> of {participants} submitted
           {timedOut > 0 && <> · <span className="font-bold text-(--fg)">{timedOut}</span> ran out of time</>}
         </p>
-        {rows.length > 0 && (
-          <p className="mt-2 text-lg text-(--fg)/55">Average score {avg.toFixed(1)} / {questions.length}</p>
+        {rows.length > 0 && hasAuto && (
+          <p className="mt-2 text-lg text-(--fg)/55">Average {autoQs.length < questions.length ? 'multiple-choice ' : ''}score {avg.toFixed(1)} / {autoQs.length}</p>
+        )}
+        {toMark > 0 && (
+          <p className="mt-2 text-lg text-(--fg)/55">{toMark} written answer{toMark !== 1 ? 's' : ''} to mark · find them in Results after the session</p>
         )}
         <p className="mt-10 text-sm text-(--fg)/40">
           Press → for {steps[0]?.stage === 'leaderboard' ? 'the leaderboard' : 'the answer review'}
@@ -458,8 +471,11 @@ function RulesView({ slide, participants, onStart }: { slide: TestBlockShowSlide
       <ul className="mt-8 space-y-3 text-left text-2xl text-(--fg)/80">
         <li className="flex items-center gap-3"><Check className="size-6 text-(--good-text)" /> Answer on your phone, at your own pace</li>
         <li className="flex items-center gap-3"><Check className="size-6 text-(--good-text)" /> Go back and change answers until you submit</li>
-        <li className="flex items-center gap-3"><Check className="size-6 text-(--good-text)" /> Most correct answers wins</li>
-        <li className="flex items-center gap-3"><Check className="size-6 text-(--good-text)" /> Tie? The faster finish ranks higher</li>
+        {autoMarked(slide.questions).length > 0 && <>
+          <li className="flex items-center gap-3"><Check className="size-6 text-(--good-text)" /> Most correct answers wins</li>
+          <li className="flex items-center gap-3"><Check className="size-6 text-(--good-text)" /> Tie? The faster finish ranks higher</li>
+        </>}
+        {slide.questions.some(isMarkable) && <li className="flex items-center gap-3"><Check className="size-6 text-(--good-text)" /> Written answers are marked by the host afterwards</li>}
         {slide.rules && <li className="flex items-center gap-3"><Check className="size-6 text-(--good-text)" /> {slide.rules}</li>}
       </ul>
       <p className="mt-10 text-lg text-(--fg)/55"><span className="font-bold text-(--fg)">{participants}</span> {participants === 1 ? 'person' : 'people'} joined</p>
@@ -480,8 +496,9 @@ function TestReviewView({ index, total, question, sheets }: {
   question: TestBlockShowSlide['questions'][number]
   sheets: TestAnswerDoc[]
 }) {
-  const answered = sheets.filter(d => (d.answers?.[question.id]?.length ?? 0) > 0)
-  const counts = question.options.map((_, i) => answered.filter(d => d.answers[question.id].includes(i)).length)
+  const picked = (d: TestAnswerDoc) => (Array.isArray(d.answers?.[question.id]) ? d.answers[question.id] : []) as number[]
+  const answered = sheets.filter(d => picked(d).length > 0)
+  const counts = question.options.map((_, i) => answered.filter(d => picked(d).includes(i)).length)
   const right = answered.filter(d => sameAnswer(d.answers[question.id], question.correctAnswers)).length
   const pct = (n: number) => (answered.length ? Math.round((n / answered.length) * 100) : 0)
   const multi = question.correctAnswers.length > 1
@@ -532,6 +549,43 @@ function TestReviewView({ index, total, question, sheets }: {
         </div>
       )}
       <p className="mt-auto pt-4 text-sm text-(--fg)/35">{answered.length} answered this question</p>
+    </motion.div>
+  )
+}
+
+/** Answer review for a question the host marks: everyone's answers, then the marking guide. */
+function TestAnswersReview({ index, total, question, sheets, display }: {
+  index: number
+  total: number
+  question: TestBlockShowSlide['questions'][number]
+  sheets: TestAnswerDoc[]
+  display: ReactNode
+}) {
+  const answered = sheets.filter(d => hasAnswer({ ...question, pick: 1 }, d.answers?.[question.id])).length
+  return (
+    <motion.div
+      key={question.id}
+      initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.35 }}
+      className="flex h-full w-full flex-col px-14 pb-24 pt-10"
+    >
+      <div className="flex items-start justify-between gap-8">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-(--accent)">Answer review · {index + 1} of {total} · {TEST_QTYPE_LABEL[qTypeOf(question)]}</p>
+          <h2 className="mt-3 text-2xl font-semibold leading-snug text-(--fg)/95 xl:text-3xl">{question.question}</h2>
+        </div>
+        <div className="shrink-0 rounded-2xl border border-(--fg)/15 bg-(--fg)/5 px-6 py-4 text-center">
+          <p className="text-5xl font-extrabold tabular-nums">{answered}</p>
+          <p className="mt-1 text-xs uppercase tracking-wider text-(--fg)/55">answered</p>
+          {isMarkable(question) && <p className="mt-1 text-xs text-(--fg)/55">{question.marks} mark{question.marks !== 1 ? 's' : ''}</p>}
+        </div>
+      </div>
+      <div className="relative mt-6 flex min-h-0 flex-1 flex-col">{display}</div>
+      {question.guide && (
+        <div className="mt-5 rounded-2xl border border-(--accent)/25 bg-(--accent)/10 px-6 py-4">
+          <p className="text-xs font-bold uppercase tracking-widest text-(--accent)">Marking guide</p>
+          <p className="mt-1.5 text-lg leading-relaxed text-(--fg)/90">{question.guide}</p>
+        </div>
+      )}
     </motion.div>
   )
 }

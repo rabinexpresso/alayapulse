@@ -5,15 +5,17 @@ import { cn, optionLabel } from '@/lib/utils'
 import { Confetti, CountUp } from '@/components/Celebration'
 import { saveTestAnswers, submitTestAnswers, subscribeToTestAnswers } from '@/lib/session'
 import {
-  remainingOf, formatClock, formatDuration, sameAnswer,
-  type StoredTestBlockSlide, type TestState, type TestAnswerDoc,
+  remainingOf, formatClock, formatDuration, sameAnswer, answerState, answerText, qTypeOf, isMarkable, autoMarked,
+  wordCount, DEFAULT_OE_WORDS,
+  type StoredTestBlockSlide, type StoredTestQuestion, type TestState, type TestAnswerDoc, type TestAnswer,
 } from '@/lib/selfPacedTest'
 
 /* ─────────────────────────────────────────────────────────────────────────
    A participant's self-paced test, on their phone.
    Answers save as they go (one sheet per person), so a closed tab or a
    rescan carries on where it left off. Correct answers only arrive once
-   the host's test has ended.
+   the host's test has ended. Each question type has its own answer input;
+   only multiple choice is scored here — the rest the host marks later.
    ───────────────────────────────────────────────────────────────────────── */
 
 const tsMs = (t: unknown): number | null => {
@@ -40,7 +42,7 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
   const qs = block.questions
   const round = state?.round ?? 0
   const [sheet, setSheet] = useState<TestAnswerDoc | null | undefined>(undefined)
-  const [answers, setAnswers] = useState<Record<string, number[]>>({})
+  const [answers, setAnswers] = useState<Record<string, TestAnswer>>({})
   const [current, setCurrent] = useState(0)
   const [reviewing, setReviewing] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -86,7 +88,7 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
     return () => window.clearInterval(id)
   }, [state?.status])
 
-  const save = (next: Record<string, number[]>, cur: number) => {
+  const save = (next: Record<string, TestAnswer>, cur: number) => {
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
       saveTestAnswers(code, block.id, personId, { answers: next, current: cur, round }).catch(console.error)
@@ -101,12 +103,28 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
   const finished = !!(sheet && sheet.round === round && sheet.finished)
   const timeUp = state?.status === 'running' && remaining <= 0
 
-  const answeredFully = (qi: number) => (answers[qs[qi].id]?.length ?? 0) >= qs[qi].pick
+  const stateOf = (qi: number) => answerState(qs[qi], answers[qs[qi].id])
+  const answeredFully = (qi: number) => stateOf(qi) === 'full'
   const missing = qs.map((_, i) => i).filter(i => !answeredFully(i))
+  const hasAuto = autoMarked(qs).length > 0
+  // How far a half-done answer got, for the "not answered yet" list
+  const progress = (qi: number) => {
+    const x = qs[qi], a = answers[x.id]
+    if (stateOf(qi) !== 'part' || !Array.isArray(a)) return ''
+    const t = qTypeOf(x)
+    const done = t === 'rating' ? (a as number[]).filter(v => v >= 0).length : a.length
+    const of = t === 'mcq' ? x.pick : x.options.length
+    return ` (${done}/${of})`
+  }
 
+  const setAnswer = (qi: number, value: TestAnswer) => {
+    const all = { ...answers, [qs[qi].id]: value }
+    setAnswers(all)
+    save(all, qi)
+  }
   const pick = (qi: number, opt: number) => {
     const q = qs[qi]
-    const cur = answers[q.id] ?? []
+    const cur = (answers[q.id] as number[] | undefined) ?? []
     let next: number[]
     if (q.pick <= 1) next = [opt]
     else if (cur.includes(opt)) next = cur.filter(x => x !== opt)
@@ -166,15 +184,21 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
           <Check className="size-8 text-fresh-green" />
         </motion.div>
         <h2 className="mt-4 text-2xl font-bold text-midnight-sky-900">Submitted</h2>
-        {typeof sheet?.score === 'number' && (
-          <p className="mt-3 text-5xl font-extrabold tabular-nums text-midnight-sky-900">{sheet.score} <span className="text-2xl font-bold text-midnight-sky-400">/ {qs.length}</span></p>
+        {typeof sheet?.score === 'number' && hasAuto && (
+          <>
+            {autoMarked(qs).length < qs.length && <p className="mt-3 text-xs font-semibold uppercase tracking-widest text-midnight-sky-400">Multiple choice</p>}
+            <p className="mt-1 text-5xl font-extrabold tabular-nums text-midnight-sky-900">{sheet.score} <span className="text-2xl font-bold text-midnight-sky-400">/ {autoMarked(qs).length}</span></p>
+          </>
         )}
         {took !== null && <p className="mt-2 text-midnight-sky-500">Finished in {formatDuration(took)}</p>}
         <p className="mt-4 text-sm text-midnight-sky-400">
-          {typeof sheet?.score === 'number'
-            ? 'The answers and everyone’s places appear when the test ends.'
-            : 'Your score, the answers and everyone’s places appear when the test ends.'}
+          {!hasAuto
+            ? 'Your answers have gone to the host.'
+            : typeof sheet?.score === 'number'
+              ? 'The answers and everyone’s places appear when the test ends.'
+              : 'Your score, the answers and everyone’s places appear when the test ends.'}
         </p>
+        {qs.some(isMarkable) && <p className="mt-2 text-sm text-midnight-sky-400">Your written answers will be marked by the host.</p>}
         <p className="mt-6 text-xs text-midnight-sky-400">Time left for others: {formatClock(remaining)}</p>
       </Card>
     )
@@ -184,7 +208,8 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
   if (sheet === undefined) return <Card><p className="text-midnight-sky-400">Loading the test…</p></Card>
 
   const q = qs[current]
-  const mine = answers[q.id] ?? []
+  const qType = qTypeOf(q)
+  const mine = (qType === 'mcq' && Array.isArray(answers[q.id]) ? answers[q.id] : []) as number[]
 
   return (
     <div className="relative flex flex-1 flex-col">
@@ -214,7 +239,7 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
             className={cn(
               'flex size-8 items-center justify-center rounded-lg text-xs font-semibold transition',
               i === current && !reviewing ? 'ring-2 ring-hot-pink ring-offset-1' : '',
-              answeredFully(i) ? 'bg-sky-blue text-white' : (answers[x.id]?.length ? 'bg-sky-blue/30 text-midnight-sky-800' : 'bg-midnight-sky-50 text-midnight-sky-500'),
+              answeredFully(i) ? 'bg-sky-blue text-white' : (stateOf(i) === 'part' ? 'bg-sky-blue/30 text-midnight-sky-800' : 'bg-midnight-sky-50 text-midnight-sky-500'),
             )}
             aria-label={`Question ${i + 1}${answeredFully(i) ? ', answered' : ''}`}
           >
@@ -233,13 +258,13 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
               <div className="mt-2 flex flex-wrap gap-2">
                 {missing.map(i => (
                   <button key={i} onClick={() => go(i)} className="rounded-lg bg-white px-3 py-1.5 text-sm font-semibold text-midnight-sky-800 shadow-sm">
-                    Q{i + 1}{qs[i].pick > 1 && (answers[qs[i].id]?.length ?? 0) > 0 ? ` (${answers[qs[i].id].length}/${qs[i].pick})` : ''}
+                    Q{i + 1}{progress(i)}
                   </button>
                 ))}
               </div>
             </div>
           )}
-          <p className="mt-4 text-sm text-midnight-sky-500">Once you submit you can't change your answers. If two people get the same score, the faster finish ranks higher.</p>
+          <p className="mt-4 text-sm text-midnight-sky-500">Once you submit you can't change your answers.{hasAuto ? ' If two people get the same score, the faster finish ranks higher.' : ''}</p>
           <div className="mt-auto flex gap-2.5 pt-6">
             <button onClick={() => setReviewing(false)} className="flex-1 rounded-xl border border-midnight-sky-200 py-3.5 text-sm font-medium text-midnight-sky-700">Go back</button>
             <button onClick={submit} disabled={submitting || timeUp} className="flex-1 rounded-xl bg-hot-pink py-3.5 text-sm font-semibold text-white shadow-[0_0_20px_-4px] shadow-hot-pink/40 disabled:opacity-50">
@@ -256,8 +281,13 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
           >
             {q.imgUrl && <img src={q.imgUrl} alt="" className="mb-3 max-h-40 w-full rounded-xl object-cover" />}
             <h2 className="text-lg font-semibold leading-snug text-midnight-sky-900">{q.question}</h2>
-            {q.pick > 1 && <p className="mt-1.5 text-sm font-medium text-sky-blue">Choose {q.pick}</p>}
-            <div className="mt-4 flex flex-col gap-2.5">
+            {isMarkable(q) && <p className="mt-1 text-xs font-medium text-midnight-sky-400">{q.marks} mark{q.marks !== 1 ? 's' : ''}</p>}
+            {qType === 'openended' && <OpenAnswer key={q.id} q={q} value={typeof answers[q.id] === 'string' ? answers[q.id] as string : ''} onChange={v => setAnswer(current, v)} />}
+            {qType === 'wordcloud' && <ShortAnswers q={q} value={Array.isArray(answers[q.id]) ? answers[q.id] as string[] : []} onChange={v => setAnswer(current, v)} />}
+            {qType === 'rating' && <RateItems q={q} value={Array.isArray(answers[q.id]) ? answers[q.id] as number[] : []} onChange={v => setAnswer(current, v)} />}
+            {qType === 'ranking' && <RankItems q={q} value={Array.isArray(answers[q.id]) ? answers[q.id] as number[] : []} onChange={v => setAnswer(current, v)} />}
+            {qType === 'mcq' && q.pick > 1 && <p className="mt-1.5 text-sm font-medium text-sky-blue">Choose {q.pick}</p>}
+            {qType === 'mcq' && <div className="mt-4 flex flex-col gap-2.5">
               {q.options.map((o, i) => {
                 const on = mine.includes(i)
                 return (
@@ -280,7 +310,7 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
                   </button>
                 )
               })}
-            </div>
+            </div>}
             <div className="mt-auto flex gap-2.5 pt-6">
               <button
                 onClick={() => go(Math.max(0, current - 1))}
@@ -339,9 +369,11 @@ function Results({ block, state, sheet, personId }: {
   personId: string
 }) {
   const qs = block.questions
+  const autoQs = autoMarked(qs)
   const reveal = state.reveal ?? {}
   const mine = sheet?.answers ?? {}
-  const score = useMemo(() => qs.reduce((n, q) => n + (reveal[q.id] && sameAnswer(mine[q.id], reveal[q.id].correct) ? 1 : 0), 0), [qs, reveal, mine])
+  const score = useMemo(() => autoQs.reduce((n, q) => n + (reveal[q.id] && sameAnswer(mine[q.id], reveal[q.id].correct) ? 1 : 0), 0), [autoQs, reveal, mine])
+  const hasLeaderboard = autoQs.length > 0 && block.afterOrder !== 'review-only'
   const rank = state.ranks?.entries?.[personId]
   const total = state.ranks?.total ?? 0
   const onLeaderboard = state.stage === 'leaderboard' && !state.ranks
@@ -384,7 +416,13 @@ function Results({ block, state, sheet, personId }: {
           : 'bg-midnight-sky-50 text-midnight-sky-900',
         )}
       >
-        {place ? (
+        {autoQs.length === 0 ? (
+          <>
+            <div className="text-5xl">📝</div>
+            <h2 className="mt-3 text-2xl font-extrabold tracking-tight">Your answers are in</h2>
+            <p className="mt-2 opacity-70">{qs.some(isMarkable) ? 'The host will mark them and share the results.' : 'Thanks for taking part.'}</p>
+          </>
+        ) : place ? (
           <>
             <div className="text-6xl">{place === 1 ? '🏆' : place === 2 ? '🥈' : place === 3 ? '🥉' : place <= 10 ? '⭐' : '🎉'}</div>
             <h2 className="mt-3 text-3xl font-extrabold tracking-tight">
@@ -393,20 +431,35 @@ function Results({ block, state, sheet, personId }: {
             <p className="mt-2 opacity-80">You placed <span className="font-bold">{ordinal(place)}</span> of {total.toLocaleString()}</p>
           </>
         ) : (
-          <p className="text-sm font-semibold uppercase tracking-widest opacity-60">Your score</p>
+          <p className="text-sm font-semibold uppercase tracking-widest opacity-60">{autoQs.length < qs.length ? 'Multiple-choice score' : 'Your score'}</p>
         )}
-        <p className="mt-3 text-5xl font-extrabold tabular-nums">
-          <CountUp value={score} duration={1200} delay={300} /> <span className="text-2xl font-bold opacity-60">/ {qs.length}</span>
-        </p>
+        {autoQs.length > 0 && (
+          <p className="mt-3 text-5xl font-extrabold tabular-nums">
+            <CountUp value={score} duration={1200} delay={300} /> <span className="text-2xl font-bold opacity-60">/ {autoQs.length}</span>
+          </p>
+        )}
         {rank && <p className="mt-1 text-sm opacity-70">{rank[3] ? 'Ran out of time' : `in ${formatDuration(rank[2])}`}</p>}
-        {!place && block.afterOrder && <p className="mt-3 text-xs opacity-60">Your place appears with the leaderboard.</p>}
+        {autoQs.length > 0 && qs.some(isMarkable) && <p className="mt-2 text-xs opacity-70">Your written answers will be marked by the host.</p>}
+        {!place && hasLeaderboard && <p className="mt-3 text-xs opacity-60">Your place appears with the leaderboard.</p>}
       </motion.div>
 
       <h3 className="mt-2 text-sm font-semibold uppercase tracking-wider text-midnight-sky-400">Your answers</h3>
       <div className="flex flex-col gap-3 pb-4">
         {qs.map((q, i) => {
+          if (qTypeOf(q) !== 'mcq') {
+            const text = answerText(q, mine[q.id])
+            return (
+              <div key={q.id} className="rounded-2xl border border-midnight-sky-100 bg-white p-4">
+                <p className="text-sm font-medium leading-snug text-midnight-sky-900">Q{i + 1}. {q.question}</p>
+                <p className="mt-2 whitespace-pre-wrap text-sm text-midnight-sky-600">
+                  <span className="text-midnight-sky-400">Your answer: </span>{text || 'Not answered'}
+                </p>
+                {isMarkable(q) && <p className="mt-2 text-xs font-medium text-midnight-sky-400">Marked by the host · {q.marks} mark{q.marks !== 1 ? 's' : ''}</p>}
+              </div>
+            )
+          }
           const r = reveal[q.id]
-          const got = mine[q.id] ?? []
+          const got = (Array.isArray(mine[q.id]) ? mine[q.id] : []) as number[]
           const ok = !!r && sameAnswer(got, r.correct)
           return (
             <div key={q.id} className={cn('rounded-2xl border p-4', ok ? 'border-fresh-green/30 bg-fresh-green/5' : 'border-hot-pink/25 bg-hot-pink/[0.04]')}>
@@ -457,11 +510,12 @@ function Badge() {
 }
 
 function Rules({ block }: { block: StoredTestBlockSlide }) {
+  const hasAuto = autoMarked(block.questions).length > 0
   const items = [
     'Go at your own pace',
     'Change any answer until you submit',
-    'Most correct answers wins',
-    'Tie? The faster finish ranks higher',
+    ...(hasAuto ? ['Most correct answers wins', 'Tie? The faster finish ranks higher'] : []),
+    ...(block.questions.some(isMarkable) ? ['Written answers are marked by the host afterwards'] : []),
     ...(block.rules ? [block.rules] : []),
   ]
   return (
@@ -472,5 +526,125 @@ function Rules({ block }: { block: StoredTestBlockSlide }) {
         </li>
       ))}
     </ul>
+  )
+}
+
+/* ── Answer inputs for the types the host marks ─────────────────────────── */
+
+/** Written answer with a word limit (extra words are trimmed off as you type). */
+function OpenAnswer({ q, value, onChange }: { q: StoredTestQuestion; value: string; onChange: (v: string) => void }) {
+  const limit = q.wordLimit ?? DEFAULT_OE_WORDS
+  const [hit, setHit] = useState(false)
+  const n = wordCount(value)
+  return (
+    <div className="mt-4">
+      <textarea
+        value={value}
+        rows={8}
+        placeholder="Type your answer…"
+        onChange={e => {
+          let v = e.target.value
+          const over = wordCount(v) > limit
+          if (over) v = v.trim().split(/\s+/).slice(0, limit).join(' ')
+          setHit(over)
+          onChange(v.slice(0, limit * 25))
+        }}
+        className="w-full resize-none rounded-2xl border-2 border-midnight-sky-100 bg-white px-4 py-3.5 text-base leading-relaxed text-midnight-sky-900 outline-none transition placeholder:text-midnight-sky-400 focus:border-sky-blue"
+      />
+      <p className={cn('mt-1 text-right text-xs tabular-nums', hit || n >= limit ? 'font-semibold text-hot-pink' : 'text-midnight-sky-400')}>
+        {hit ? 'Word limit reached · ' : ''}{n} / {limit} words
+      </p>
+    </div>
+  )
+}
+
+/** Word cloud in a test: a few short answers. */
+function ShortAnswers({ q, value, onChange }: { q: StoredTestQuestion; value: string[]; onChange: (v: string[]) => void }) {
+  const n = q.maxEntries ?? 3
+  const vals = Array.from({ length: n }, (_, i) => value[i] ?? '')
+  return (
+    <div className="mt-4 flex flex-col gap-2.5">
+      <p className="text-sm text-midnight-sky-500">{n > 1 ? `Up to ${n} short answers` : 'One short answer'} · a few words each</p>
+      {vals.map((v, i) => (
+        <input
+          key={i}
+          value={v}
+          maxLength={40}
+          placeholder={n > 1 ? `Answer ${i + 1}` : 'Your answer'}
+          onChange={e => { const next = [...vals]; next[i] = e.target.value.slice(0, 40); onChange(next) }}
+          className="w-full rounded-2xl border-2 border-midnight-sky-100 bg-white px-4 py-3 text-base text-midnight-sky-900 outline-none transition placeholder:text-midnight-sky-400 focus:border-sky-blue"
+        />
+      ))}
+    </div>
+  )
+}
+
+/** Rate each item on the 0..N scale. */
+function RateItems({ q, value, onChange }: { q: StoredTestQuestion; value: number[]; onChange: (v: number[]) => void }) {
+  const max = q.ratingMax ?? 5
+  const vals = q.options.map((_, i) => (typeof value[i] === 'number' ? value[i] : -1))
+  const scale = Array.from({ length: max + 1 }, (_, i) => i)
+  return (
+    <div className="mt-4 flex flex-col gap-3">
+      {q.options.map((item, row) => (
+        <div key={row} className={cn('rounded-2xl border-2 bg-white px-4 py-3', vals[row] >= 0 ? 'border-sky-blue/40' : 'border-midnight-sky-100')}>
+          <div className="mb-2 flex items-baseline justify-between gap-2">
+            <p className="text-sm font-semibold text-midnight-sky-800">{item}</p>
+            {vals[row] >= 0 && <span className="text-base font-extrabold tabular-nums text-sky-blue">{vals[row]}<span className="text-xs font-semibold text-midnight-sky-400">/{max}</span></span>}
+          </div>
+          {(q.leftLabels?.[row] || q.rightLabels?.[row]) && (
+            <div className="mb-1 flex justify-between text-[10px] font-semibold uppercase tracking-wider text-midnight-sky-500">
+              <span className="truncate pr-2">{q.leftLabels?.[row]}</span>
+              <span className="truncate pl-2 text-right">{q.rightLabels?.[row]}</span>
+            </div>
+          )}
+          <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${scale.length}, minmax(0, 1fr))` }}>
+            {scale.map(v => (
+              <button
+                key={v}
+                onClick={() => { const next = [...vals]; next[row] = v; onChange(next) }}
+                className={cn('rounded-lg border py-1.5 text-xs font-bold tabular-nums transition',
+                  vals[row] === v ? 'border-sky-blue bg-sky-blue text-white' : 'border-midnight-sky-200 bg-white text-midnight-sky-600')}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** Tap the items in order: first tap is #1; tapping a ranked item takes it out. */
+function RankItems({ q, value, onChange }: { q: StoredTestQuestion; value: number[]; onChange: (v: number[]) => void }) {
+  const order = value.filter(v => Number.isInteger(v) && v >= 0 && v < q.options.length)
+  const done = order.length === q.options.length
+  return (
+    <div className="mt-4 flex flex-col gap-2.5">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-medium text-midnight-sky-600">
+          {done ? 'All ranked — tap one to change it' : order.length === 0 ? 'Tap your #1 first, then keep going' : `Now tap your #${order.length + 1}`}
+        </p>
+        {order.length > 0 && <button onClick={() => onChange([])} className="shrink-0 text-xs font-semibold text-midnight-sky-500 underline-offset-2 hover:underline">Start over</button>}
+      </div>
+      {q.options.map((item, i) => {
+        const pos = order.indexOf(i)
+        return (
+          <button
+            key={i}
+            onClick={() => onChange(pos >= 0 ? order.filter(x => x !== i) : [...order, i])}
+            className={cn('flex items-center gap-3 rounded-2xl border-2 px-4 py-3.5 text-left transition active:scale-[0.99]',
+              pos >= 0 ? 'border-sky-blue bg-sky-blue/10' : 'border-midnight-sky-100 bg-white')}
+          >
+            <span className={cn('flex size-8 shrink-0 items-center justify-center rounded-full text-sm font-extrabold tabular-nums',
+              pos >= 0 ? 'bg-sky-blue text-white' : 'border-2 border-dashed border-midnight-sky-300 text-midnight-sky-400')}>
+              {pos >= 0 ? pos + 1 : ''}
+            </span>
+            <span className="text-base text-midnight-sky-900">{item}</span>
+          </button>
+        )
+      })}
+    </div>
   )
 }

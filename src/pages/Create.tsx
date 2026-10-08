@@ -25,7 +25,7 @@ import { PersistentHtmlIframe } from '@/components/PersistentHtmlIframe'
 import { cn, optionLabel, MAX_MCQ_OPTIONS, MAX_VIZ_OPTIONS } from '@/lib/utils'
 import { injectSlideNavigation } from '@/lib/importFile'
 import {
-  DEFAULT_TEST_SETTINGS, AFTER_ORDER_LABEL, TEST_THEMES, testTheme,
+  DEFAULT_TEST_SETTINGS, AFTER_ORDER_LABEL, TEST_THEMES, testTheme, isTestable, OE_WORD_LIMITS, DEFAULT_OE_WORDS,
   normalizeTestBlocks, collapseTestBlocks, expandTestBlocks, testRanges, testMembership, testProblems,
   type TestHeaderSlide, type TestEndSlide, type TestAfterOrder, type TestScoreTiming,
 } from '@/lib/selfPacedTest'
@@ -254,6 +254,12 @@ interface QuestionSlide {
   timer?: number
   /** MCQ only — optional plain-text explanation shown on the big screen when the answer is revealed. */
   explanation?: string
+  /** In a self-paced test (not MCQ): marks available — 0 means "not marked". */
+  marks?: number
+  /** In a self-paced test (not MCQ): what a good answer includes. Never sent to phones. */
+  markingGuide?: string
+  /** Open-ended in a self-paced test: word limit (100 / 250 / 500). */
+  oeWordLimit?: number
 }
 type ContentTemplate = 'heading' | 'bullets' | 'quote'
 interface ContentSlide {
@@ -1153,9 +1159,9 @@ export default function Create() {
       setCsvImportToast({ count: newSlides.length })
       return
     }
-    // Into a test: MCQs go inside the block, anything else right after it
-    const intoTest = newSlides.filter(q => q.type === 'mcq')
-    const outside  = newSlides.filter(q => q.type !== 'mcq')
+    // Into a test: every question goes inside the block (anything else right after it)
+    const intoTest = newSlides.filter(isTestable)
+    const outside  = newSlides.filter(q => !isTestable(q))
     setSlides(prev => {
       const block = testRanges(prev).find(r => r.headerId === headerId) ?? testRanges(prev)[0]
       if (!block) {
@@ -1170,7 +1176,7 @@ export default function Create() {
     setCsvImportToast({
       count: intoTest.length,
       message: `${intoTest.length} question${intoTest.length !== 1 ? 's' : ''} added to the self-paced test`
-        + (outside.length ? ` · ${outside.length} that aren't multiple choice added after the block as live questions` : '')
+        + (outside.length ? ` · ${outside.length} other slide${outside.length !== 1 ? 's' : ''} added after the block` : '')
         + (intoTest.some(q => q.timer) ? ' · timers ignored (the test has one time limit)' : ''),
     })
   }, [pushHistory])
@@ -1294,15 +1300,15 @@ export default function Create() {
   }, [pushHistory])
 
   // Keep test blocks valid after any change (drag, undo, import, paste…):
-  // only MCQs can sit inside a block; anything else moves to just after it.
+  // only questions can sit inside a block; anything else moves to just after it.
   useEffect(() => {
     const { slides: fixed, movedOut } = normalizeTestBlocks(slides)
     if (fixed === slides) return
     setSlides(fixed as Slide[])
     if (movedOut.length) {
       setTestToast(movedOut.length === 1
-        ? 'Only multiple-choice questions can go in a self-paced test — that slide was placed just after the block'
-        : `Only multiple-choice questions can go in a self-paced test — ${movedOut.length} slides were placed just after the block`)
+        ? 'Only questions can go in a self-paced test — that slide was placed just after the block'
+        : `Only questions can go in a self-paced test — ${movedOut.length} slides were placed just after the block`)
     }
   }, [slides])
 
@@ -1333,9 +1339,9 @@ export default function Create() {
     setTestToast('Self-paced test block added. It scores itself: no need to turn on Live quiz.')
   }, [pushHistory])
 
-  const addTestQuestion = useCallback((headerId: string) => {
+  const addTestQuestion = useCallback((headerId: string, type: QType = 'mcq') => {
     pushHistory()
-    const q = makeQuestion('mcq', false)
+    const q = makeQuestion(type, false)
     setSlides(prev => {
       const r = testRanges(prev).find(x => x.headerId === headerId)
       if (!r) return prev
@@ -2364,7 +2370,7 @@ function CsvImportModal({ onClose, onImport, destination = 'live', hasTest = fal
                   <p className="text-sm font-semibold text-midnight-sky-800">Where should these {parseResult.slides.length} questions go?</p>
                   <p className="mb-2.5 text-[11px] text-midnight-sky-500">Choose one to continue</p>
                   {([
-                    ['test', hasTest ? 'Into the self-paced test block' : 'Into a new self-paced test block', 'Everyone answers at their own pace, scored automatically'],
+                    ['test', hasTest ? 'Into the self-paced test block' : 'Into a new self-paced test block', 'Everyone answers at their own pace; multiple choice is marked automatically'],
                     ['live', 'As live questions', 'You show them one at a time'],
                   ] as const).map(([v, title, sub]) => (
                     <button
@@ -2392,8 +2398,8 @@ function CsvImportModal({ onClose, onImport, destination = 'live', hasTest = fal
                 const noAnswer = mcqs.filter(q => !(q.correctAnswers?.length)).length
                 return (
                   <div className="flex flex-col gap-1.5 rounded-xl border border-golden-sun/30 bg-golden-sun/5 px-3.5 py-3 text-[11px] leading-snug">
-                    <p className="text-fresh-green"><Check className="mr-1 inline size-3" />{mcqs.length} multiple-choice question{mcqs.length !== 1 ? 's' : ''} go into the test</p>
-                    {others > 0 && <p className="text-amber-700">{others} {others !== 1 ? "aren't" : "isn't"} multiple choice — added after the block as live questions</p>}
+                    <p className="text-fresh-green"><Check className="mr-1 inline size-3" />{parseResult.slides.length} question{parseResult.slides.length !== 1 ? 's' : ''} go into the test</p>
+                    {mcqs.length > 0 && others > 0 && <p className="text-midnight-sky-600">{mcqs.length} multiple choice (marked automatically) · {others} other{others !== 1 ? 's' : ''} (you mark them afterwards)</p>}
                     {noAnswer > 0 && <p className="text-amber-700">{noAnswer} {noAnswer !== 1 ? 'have' : 'has'} no correct answer — tick one before the show</p>}
                     {mcqs.some(q => q.timer) && <p className="text-midnight-sky-500">Timers in the file are ignored — the test has one time limit</p>}
                   </div>
@@ -2460,7 +2466,7 @@ function CsvImportModal({ onClose, onImport, destination = 'live', hasTest = fal
               : !dest
                 ? 'Choose where these go'
                 : dest === 'test'
-                  ? `Add ${parseResult.slides.filter(q => q.type === 'mcq').length} to self-paced test`
+                  ? `Add ${parseResult.slides.length} to self-paced test`
                   : `Add ${parseResult.slides.length} as live question${parseResult.slides.length !== 1 ? 's' : ''}`}
           </button>
         </div>
@@ -3372,7 +3378,7 @@ function AddBetweenButton({
   onAddCanvas: () => void
   onAddLeaderboard: () => void
   onAddTest: () => void
-  /** Inside a test block: only multiple-choice questions can go here */
+  /** Inside a test block: only questions can go here */
   testMode?: boolean
 }) {
   return (
@@ -3403,14 +3409,19 @@ function AddBetweenButton({
           >
             {testMode ? (
               <>
-                <button
-                  onClick={() => onAdd('mcq')}
-                  className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-golden-sun/15 px-1 py-1.5 text-[9px] font-semibold text-golden-sun transition-all hover:bg-golden-sun/25"
-                >
-                  <Plus className="size-2.5" />
-                  Add question to test
-                </button>
-                <p className="mt-1 px-1 text-center text-[8px] leading-snug text-white/35">Only multiple-choice questions go in a self-paced test</p>
+                <p className="mb-1 px-1 text-[8px] font-semibold uppercase tracking-wider text-golden-sun/80">Add to the test</p>
+                <div className="grid grid-cols-2 gap-1">
+                  {QTYPES.map(q => (
+                    <button
+                      key={q.type}
+                      onClick={() => onAdd(q.type)}
+                      className="flex items-center justify-center rounded-lg bg-golden-sun/10 px-1 py-1.5 text-[9px] font-medium text-golden-sun transition-all hover:bg-golden-sun/25"
+                    >
+                      {q.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 px-1 text-center text-[8px] leading-snug text-white/35">Multiple choice marks itself; you mark the others afterwards</p>
               </>
             ) : (<>
             <p className="mb-1 px-1 text-[8px] font-semibold uppercase tracking-wider text-white/25">Question</p>
@@ -3939,6 +3950,7 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
   onPushHistory?: () => void
 }) {
   const qInfo = QTYPES.find(q => q.type === slide.type)!
+  const inTest = useContext(TestQuestionCtx) !== null
 
   const PLACEHOLDERS: Record<QType, string> = {
     mcq:       'e.g. What is your biggest leadership challenge right now?',
@@ -4002,7 +4014,8 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
             {slide.type === 'mcq' && <MCQEditor slide={slide} onUpdate={onUpdate} onPushHistory={onPushHistory} />}
             {slide.type === 'rating' && <RatingEditor slide={slide} onUpdate={onUpdate} onPushHistory={onPushHistory} />}
             {slide.type === 'ranking' && <RankingEditor slide={slide} onUpdate={onUpdate} onPushHistory={onPushHistory} />}
-            {slide.type === 'openended' && (
+            {slide.type === 'openended' && inTest && <TestWordLimit slide={slide} onUpdate={onUpdate} />}
+            {slide.type === 'openended' && !inTest && (
               <div className="mb-6 space-y-4">
                 <div className="flex items-start gap-2.5 rounded-xl bg-midnight-sky-50 p-4">
                   <div className="mt-0.5 size-1.5 shrink-0 rounded-full bg-golden-sun" />
@@ -4039,7 +4052,9 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
                 <div className="flex items-start gap-2.5 rounded-xl bg-midnight-sky-50 p-4">
                   <div className="mt-0.5 size-1.5 shrink-0 rounded-full bg-fresh-green" />
                   <p className="text-sm text-midnight-sky-500">
-                    Each person can submit up to <strong>{slide.wcMaxSubmissions ?? 3}</strong> words or short phrases (max 3 words each). Results appear as a live word cloud.
+                    {inTest
+                      ? <>Each person can give up to <strong>{slide.wcMaxSubmissions ?? 3}</strong> short answers. Everyone’s answers become a word cloud in the answer review.</>
+                      : <>Each person can submit up to <strong>{slide.wcMaxSubmissions ?? 3}</strong> words or short phrases (max 3 words each). Results appear as a live word cloud.</>}
                   </p>
                 </div>
                 <div>
@@ -4065,6 +4080,8 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
                 </div>
               </div>
             )}
+
+            {inTest && slide.type !== 'mcq' && <TestMarking slide={slide} onUpdate={onUpdate} />}
 
             {/* Slide image + layout */}
             <div className="mt-3 border-t border-midnight-sky-100 pt-3">
@@ -4094,8 +4111,8 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
               )}
             </div>
 
-            {/* Slide background theme */}
-            <div className="mt-3 border-t border-midnight-sky-100 pt-3">
+            {/* Slide background theme (a test question uses the test's colour instead) */}
+            <div className={cn('mt-3 border-t border-midnight-sky-100 pt-3', inTest && 'hidden')}>
               <label className="mb-2 block text-xs font-semibold text-midnight-sky-700">
                 Slide background
                 <span className="ml-1.5 font-normal text-midnight-sky-500">how it looks on screen</span>
@@ -6655,13 +6672,14 @@ function TestBlockEditor({
   focusAfter: boolean
   onUpdate: (patch: Partial<TestHeaderSlide>) => void
   onSelect: (id: string) => void
-  onAddQuestion: (headerId: string) => void
+  onAddQuestion: (headerId: string, type?: QType) => void
   onImportCsv: (headerId: string) => void
   onMoveIn: (headerId: string, ids: string[]) => void
   onDelete: (id: string) => void
 }) {
   const [picking, setPicking] = useState(false)
   const [picked, setPicked] = useState<string[]>([])
+  const [adding, setAdding] = useState(false)
   const afterRef = useRef<HTMLDivElement>(null)
   useEffect(() => { if (focusAfter) afterRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }, [focusAfter])
   if (!header) return null
@@ -6669,7 +6687,9 @@ function TestBlockEditor({
   const range = testRanges(slides).find(r => r.headerId === header.id)
   const questions = (range ? slides.slice(range.start + 1, range.end) : []) as QuestionSlide[]
   const inAnyTest = testMembership(slides)
-  const outsideMcqs = slides.filter(x => x.type === 'mcq' && !inAnyTest.has(x.id)) as QuestionSlide[]
+  const outsideQs = slides.filter(x => isTestable(x) && !inAnyTest.has(x.id)) as QuestionSlide[]
+  const hasMcq = questions.some(q => q.type === 'mcq')
+  const hasMarked = questions.some(q => q.type !== 'mcq' && (q.marks ?? 0) > 0)
   const problems = testProblems(slides).filter(pb => pb.slideId === header.id || questions.some(q => q.id === pb.slideId))
   const customTime = !TIME_PRESETS.includes(header.timeLimit)
 
@@ -6693,7 +6713,8 @@ function TestBlockEditor({
             </div>
             <p className="text-sm leading-relaxed text-midnight-sky-600">
               Everyone answers these questions on their own phone, at their own pace, within one time limit.
-              Answers are revealed when the test ends. Most correct answers wins — if two people tie, the faster finish ranks higher.
+              Multiple choice is marked automatically: answers are revealed when the test ends, and the most correct answers wins — if two people tie, the faster finish ranks higher.
+              Open-ended, word cloud, rating and ranking answers are collected for you to mark afterwards, by hand or with AI.
             </p>
             <p className="mt-2 text-xs text-midnight-sky-500">It scores itself: no need to turn on Live quiz.</p>
           </div>
@@ -6715,24 +6736,35 @@ function TestBlockEditor({
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold text-midnight-sky-800">Questions ({questions.length})</p>
             <div className="flex-1" />
-            <button onClick={() => onAddQuestion(header.id)} className="flex items-center gap-1.5 rounded-xl border border-midnight-sky-200 px-3 py-1.5 text-xs font-medium text-midnight-sky-700 transition hover:border-midnight-sky-400">
+            <button onClick={() => setAdding(v => !v)} className={cn('flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-medium transition', adding ? 'border-midnight-sky-400 text-midnight-sky-800' : 'border-midnight-sky-200 text-midnight-sky-700 hover:border-midnight-sky-400')}>
               <Plus className="size-3.5" /> Add question
             </button>
             <button onClick={() => onImportCsv(header.id)} className="flex items-center gap-1.5 rounded-xl bg-golden-sun px-3 py-1.5 text-xs font-semibold text-[#1a1640] transition hover:brightness-105">
               <Upload className="size-3.5" /> Import CSV
             </button>
-            {outsideMcqs.length > 0 && (
+            {outsideQs.length > 0 && (
               <button onClick={() => { setPicking(v => !v); setPicked([]) }} className="flex items-center gap-1.5 rounded-xl border border-midnight-sky-200 px-3 py-1.5 text-xs font-medium text-midnight-sky-700 transition hover:border-midnight-sky-400">
                 <ListChecks className="size-3.5" /> Add existing questions
               </button>
             )}
           </div>
 
+          {adding && (
+            <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-xl border border-midnight-sky-150 bg-midnight-sky-50 p-2.5">
+              <span className="mr-1 text-xs font-medium text-midnight-sky-600">Add a:</span>
+              {QTYPES.map(t => (
+                <button key={t.type} onClick={() => { onAddQuestion(header.id, t.type); setAdding(false) }} className="flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-1.5 text-xs font-medium text-midnight-sky-700 shadow-sm transition hover:text-midnight-sky-900">
+                  {t.icon}{t.label}
+                </button>
+              ))}
+            </div>
+          )}
+
           {picking && (
             <div className="mb-3 rounded-xl border border-midnight-sky-150 bg-midnight-sky-50 p-3">
-              <p className="mb-2 text-xs font-medium text-midnight-sky-700">Tick the multiple-choice questions to move into this test</p>
+              <p className="mb-2 text-xs font-medium text-midnight-sky-700">Tick the questions to move into this test</p>
               <div className="flex max-h-56 flex-col gap-1 overflow-y-auto">
-                {outsideMcqs.map(q => (
+                {outsideQs.map(q => (
                   <label key={q.id} className="flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-xs text-midnight-sky-700 hover:bg-white">
                     <input
                       type="checkbox"
@@ -6741,6 +6773,7 @@ function TestBlockEditor({
                       className="mt-0.5"
                     />
                     <span className="line-clamp-2">{q.question || 'Untitled question'}</span>
+                    <span className="ml-auto shrink-0 text-[10px] text-midnight-sky-400">{QTYPES.find(t => t.type === q.type)?.label}</span>
                   </label>
                 ))}
               </div>
@@ -6759,7 +6792,7 @@ function TestBlockEditor({
 
           {questions.length === 0 ? (
             <p className="rounded-xl bg-midnight-sky-50 px-4 py-6 text-center text-sm text-midnight-sky-500">
-              No questions yet — add them one by one, or import a CSV of questions.
+              No questions yet — add them one by one (any question type), or import a CSV of questions.
             </p>
           ) : (
             <div className="flex flex-col gap-1">
@@ -6769,9 +6802,13 @@ function TestBlockEditor({
                   <button key={q.id} onClick={() => onSelect(q.id)} className="flex items-start gap-3 rounded-lg px-2 py-1.5 text-left transition hover:bg-midnight-sky-50">
                     <span className="w-7 shrink-0 pt-px text-xs font-semibold text-[#a07800]">Q{i + 1}</span>
                     <span className="min-w-0 flex-1 truncate text-sm text-midnight-sky-800">{q.question || <span className="italic text-midnight-sky-400">Untitled question</span>}</span>
-                    {marked.length > 0
-                      ? <span className="shrink-0 text-xs font-medium text-fresh-green">{[...marked].sort((a, b) => a - b).map(k => optionLabel(k, q.options.length)).join(' ')}</span>
-                      : <span className="shrink-0 text-xs text-amber-600">No correct answer</span>}
+                    {q.type !== 'mcq'
+                      ? <span className={cn('shrink-0 text-xs', (q.marks ?? 0) > 0 ? 'text-midnight-sky-500' : 'text-midnight-sky-400')}>
+                          {QTYPES.find(t => t.type === q.type)?.label} · {(q.marks ?? 0) > 0 ? `${q.marks} mark${q.marks !== 1 ? 's' : ''}` : 'not marked'}
+                        </span>
+                      : marked.length > 0
+                        ? <span className="shrink-0 text-xs font-medium text-fresh-green">{[...marked].sort((a, b) => a - b).map(k => optionLabel(k, q.options.length)).join(' ')}</span>
+                        : <span className="shrink-0 text-xs text-amber-600">No correct answer</span>}
                   </button>
                 )
               })}
@@ -6807,7 +6844,7 @@ function TestBlockEditor({
               <button key={v} onClick={() => onUpdate({ scoreTiming: v })} className={choice((header.scoreTiming ?? 'end') === v)}>{l}</button>
             ))}
           </div>
-          <p className="mt-1.5 text-xs text-midnight-sky-500">Which answers were right is only shown once the test ends for everyone.</p>
+          <p className="mt-1.5 text-xs text-midnight-sky-500">Which answers were right is only shown once the test ends for everyone.{hasMcq && questions.length > questions.filter(q => q.type === 'mcq').length ? ' The score covers multiple choice only.' : ''}</p>
 
           <div ref={afterRef}>
             <p className="mb-2 mt-5 text-sm font-medium text-midnight-sky-700">After the test</p>
@@ -6816,6 +6853,7 @@ function TestBlockEditor({
                 <button key={v} onClick={() => onUpdate({ afterOrder: v })} className={choice((header.afterOrder ?? 'lb-review') === v)}>{AFTER_ORDER_LABEL[v]}</button>
               ))}
             </div>
+            {!hasMcq && questions.length > 0 && <p className="mt-1.5 text-xs text-midnight-sky-500">No multiple-choice questions, so there’s nothing to rank — the leaderboard is skipped.</p>}
           </div>
 
           <p className="mb-2 mt-5 text-sm font-medium text-midnight-sky-700">
@@ -6860,7 +6898,10 @@ function TestBlockEditor({
                 </p>
                 <p className="mt-1.5 text-xl font-extrabold tracking-tight">{questions.length} question{questions.length !== 1 ? 's' : ''} · {header.timeLimit} minutes</p>
                 <ul className="mx-auto mt-3 inline-flex flex-col gap-1 text-left text-sm" style={{ opacity: 0.85 }}>
-                  {['Answer on your phone, at your own pace', 'Go back and change answers until you submit', 'Most correct answers wins', 'Tie? The faster finish ranks higher', ...(header.rules ? [header.rules] : [])].map(r => (
+                  {['Answer on your phone, at your own pace', 'Go back and change answers until you submit',
+                    ...(hasMcq ? ['Most correct answers wins', 'Tie? The faster finish ranks higher'] : []),
+                    ...(hasMarked ? ['Written answers are marked by the host afterwards'] : []),
+                    ...(header.rules ? [header.rules] : [])].map(r => (
                     <li key={r} className="flex items-center gap-2"><Check className="size-3.5 shrink-0" style={{ color: th.goodText }} /> {r}</li>
                   ))}
                 </ul>
@@ -6876,6 +6917,91 @@ function TestBlockEditor({
           Remove test block (its questions stay as live questions)
         </button>
       </motion.div>
+    </div>
+  )
+}
+
+/* ── Self-paced test: settings for questions the host marks ─────────────── */
+
+/** Open-ended in a test: one written answer, with a word limit. */
+function TestWordLimit({ slide, onUpdate }: { slide: QuestionSlide; onUpdate: (patch: Partial<QuestionSlide>) => void }) {
+  const limit = OE_WORD_LIMITS.includes(slide.oeWordLimit ?? 0) ? slide.oeWordLimit : DEFAULT_OE_WORDS
+  return (
+    <div className="mb-4 space-y-3">
+      <div className="flex items-start gap-2.5 rounded-xl bg-midnight-sky-50 p-4">
+        <div className="mt-0.5 size-1.5 shrink-0 rounded-full bg-golden-sun" />
+        <p className="text-sm text-midnight-sky-500">Each person writes one answer on their phone. You mark it afterwards.</p>
+      </div>
+      <div>
+        <label className="mb-2 block text-sm font-medium text-midnight-sky-700">
+          Word limit <span className="ml-1 font-light text-midnight-sky-500">the phone counts words as people type</span>
+        </label>
+        <div className="flex gap-2">
+          {OE_WORD_LIMITS.map(n => (
+            <button
+              key={n}
+              onClick={() => onUpdate({ oeWordLimit: n })}
+              className={cn('rounded-xl border px-4 py-2 text-sm transition-all',
+                limit === n ? 'border-golden-sun bg-golden-sun/10 font-medium text-[#a07800]' : 'border-midnight-sky-200 text-midnight-sky-500 hover:border-midnight-sky-400 hover:text-midnight-sky-700')}
+            >
+              {n} words
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const MARK_PRESETS = [1, 2, 5, 10]
+
+/** Marks available + marking guide, for a test question that isn't multiple choice. */
+function TestMarking({ slide, onUpdate }: { slide: QuestionSlide; onUpdate: (patch: Partial<QuestionSlide>) => void }) {
+  const marks = slide.marks ?? 0
+  return (
+    <div className="mt-4 rounded-xl border border-golden-sun/40 bg-golden-sun/[0.06] p-4">
+      <p className="flex items-center gap-1.5 text-sm font-semibold text-midnight-sky-800">
+        <ClipboardCheck className="size-4 text-[#a07800]" /> Marking
+        <span className="font-light text-midnight-sky-500">— you mark this after the test, by hand or with AI</span>
+      </p>
+      <label className="mb-2 mt-3 block text-xs font-medium text-midnight-sky-700">Marks available</label>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => onUpdate({ marks: 0 })}
+          className={cn('rounded-xl border px-3 py-1.5 text-sm transition-all', marks === 0 ? 'border-midnight-sky-700 bg-midnight-sky-800 font-medium text-white' : 'border-midnight-sky-200 bg-white text-midnight-sky-500 hover:border-midnight-sky-400')}
+        >
+          Not marked
+        </button>
+        {MARK_PRESETS.map(n => (
+          <button
+            key={n}
+            onClick={() => onUpdate({ marks: n })}
+            className={cn('rounded-xl border px-3 py-1.5 text-sm transition-all', marks === n ? 'border-golden-sun bg-golden-sun/15 font-medium text-[#a07800]' : 'border-midnight-sky-200 bg-white text-midnight-sky-500 hover:border-midnight-sky-400')}
+          >
+            {n}
+          </button>
+        ))}
+        <span className={cn('flex items-center gap-1.5 rounded-xl border bg-white px-2 py-1', marks > 0 && !MARK_PRESETS.includes(marks) ? 'border-golden-sun' : 'border-midnight-sky-200')}>
+          <input
+            type="number" min={0} max={100}
+            value={marks}
+            onChange={e => { const v = Math.round(Number(e.target.value)); if (v >= 0 && v <= 100) onUpdate({ marks: v }) }}
+            className="w-12 bg-transparent text-center text-sm text-midnight-sky-800 outline-none"
+          />
+          <span className="text-xs text-midnight-sky-500">marks</span>
+        </span>
+      </div>
+      {marks === 0 && <p className="mt-1.5 text-xs text-midnight-sky-500">Answers are still collected — they just aren’t added to the “To mark” list.</p>}
+      <label className="mb-1.5 mt-4 block text-xs font-medium text-midnight-sky-700">
+        Marking guide <span className="font-light text-midnight-sky-500">optional — what a good answer includes. Never shown on phones; shown in the answer review and used for AI marking</span>
+      </label>
+      <textarea
+        value={slide.markingGuide ?? ''}
+        onChange={e => onUpdate({ markingGuide: e.target.value || undefined })}
+        rows={3}
+        placeholder="e.g. Mentions capacity to repay (2 marks), names the 5 Cs (2 marks), gives an example (1 mark)"
+        className="w-full resize-y rounded-xl border border-midnight-sky-200 bg-white px-3.5 py-2.5 text-sm text-midnight-sky-800 placeholder:text-midnight-sky-400 focus:border-golden-sun focus:outline-none focus:ring-2 focus:ring-golden-sun/20"
+      />
     </div>
   )
 }

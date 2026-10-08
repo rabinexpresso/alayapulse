@@ -1,3 +1,4 @@
+import type { TestAnswer, TestQType } from './selfPacedTest'
 import { openDB, type IDBPDatabase } from 'idb'
 import { db, auth } from './firebase'
 import {
@@ -80,8 +81,20 @@ export interface TestResultQuestion {
   id:             string
   question:       string
   options:        string[]
+  /** Multiple choice only — empty for every other type. */
   correctAnswers: number[]
   explanation?:   string
+  /** Missing on tests from before other types were allowed (all multiple choice). */
+  type?:          TestQType
+  /** Marks available, for questions the host marks. */
+  marks?:         number
+  /** What a good answer includes (from the editor). */
+  guide?:         string
+  wordLimit?:     number
+  maxEntries?:    number
+  ratingMax?:     5 | 10
+  leftLabels?:    string[]
+  rightLabels?:   string[]
 }
 export interface TestResultParticipant {
   id:      string
@@ -92,8 +105,8 @@ export interface TestResultParticipant {
   timeMs:  number
   status:  'submitted' | 'timeout'
   place:   number
-  /** question id → option indexes picked */
-  answers: Record<string, number[]>
+  /** question id → their answer (shape depends on the question type) */
+  answers: Record<string, TestAnswer>
 }
 export interface TestResult {
   blockId:      string

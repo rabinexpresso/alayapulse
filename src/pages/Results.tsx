@@ -10,6 +10,7 @@ import { AlayaMark } from '@/components/AlayaMark'
 import { cn, optionLabel, fitColumns } from '@/lib/utils'
 import { aggregateRanking, parseRanking, rankingOrder } from '@/lib/ranking'
 import { KindTag, KIND_INFO, TestResultSection, liveKind, testSheets, addTestPdf, type QuestionKind } from '@/components/TestResults'
+import { hasAnswer, isMarkable, qTypeOf, sameAnswer, TEST_QTYPE_LABEL } from '@/lib/selfPacedTest'
 import {
   listResults, deleteResults, isResponseCorrect, getStorageBackend, onAuthStateChanged, auth,
   browserListDecks, cloudListDecks,
@@ -151,7 +152,7 @@ export default function Results() {
   const deckTitle    = deck?.title ?? 'Untitled session'
   // Self-paced test answers count as responses too
   const testAnswers = (results.tests ?? []).reduce((n, t) =>
-    n + t.participants.reduce((m, p) => m + Object.values(p.answers).filter(x => x.length > 0).length, 0), 0)
+    n + t.participants.reduce((m, p) => m + t.questions.filter(q => hasAnswer({ ...q, pick: 1 }, p.answers[q.id])).length, 0), 0)
   const totalResponses = results.questions.reduce((s, q) => s + q.responseCount, 0) + testAnswers
   // Overall participation: average per-question participation, but only across
   // questions that were actually shown (responseCount > 0), against the number
@@ -164,7 +165,7 @@ export default function Results() {
   const respondentCount = uniqueRespondents.size > 0 ? uniqueRespondents.size : results.audienceCount
   // Each test question counts like a question: answered ÷ people taking part
   const testShares = (results.tests ?? []).flatMap(t => t.questions.map(q =>
-    t.participants.filter(p => (p.answers[q.id]?.length ?? 0) > 0).length))
+    t.participants.filter(p => hasAnswer({ ...q, pick: 1 }, p.answers[q.id])).length))
   const shares = [...presentedQuestions.map(q => q.responseCount), ...testShares.filter(x => x > 0)]
   const avgParticipation = shares.length > 0
     ? Math.round(shares.reduce((s, n) => s + Math.min(100, (n / Math.max(1, respondentCount)) * 100), 0) / shares.length)
@@ -284,19 +285,17 @@ export default function Results() {
       // Self-paced test questions also appear in the question summary
       ;(results.tests ?? []).forEach((t, ti) => {
         t.questions.forEach((q, i) => {
-          const answered = t.participants.filter(p => (p.answers[q.id]?.length ?? 0) > 0)
-          const right = answered.filter(p => {
-            const a = p.answers[q.id]
-            return a.length === q.correctAnswers.length && a.every(x => q.correctAnswers.includes(x))
-          }).length
+          const mcq = qTypeOf(q) === 'mcq'
+          const answered = t.participants.filter(p => hasAnswer({ ...q, pick: 1 }, p.answers[q.id]))
+          const right = mcq ? answered.filter(p => sameAnswer(p.answers[q.id], q.correctAnswers)).length : 0
           summaryRows.push({
             'Q#':             `${(results.tests?.length ?? 0) > 1 ? `Test ${ti + 1} ` : 'Test '}Q${i + 1}`,
             'Question':       q.question,
             'Type':           KIND_INFO.test.label,
-            'Format':         TYPE_LABELS.mcq,
-            'Correct Answer': q.correctAnswers.slice().sort((a, b) => a - b).map(k => `${optionLabel(k, q.options.length)} — ${q.options[k] ?? ''}`).join('; '),
+            'Format':         TYPE_LABELS[qTypeOf(q)] ?? TEST_QTYPE_LABEL[qTypeOf(q)],
+            'Correct Answer': mcq ? q.correctAnswers.slice().sort((a, b) => a - b).map(k => `${optionLabel(k, q.options.length)} — ${q.options[k] ?? ''}`).join('; ') : (isMarkable(q) ? `Marked by the host (${q.marks} marks)` : 'Not marked'),
             'Responses':      answered.length,
-            '% Correct':      answered.length ? `${Math.round((right / answered.length) * 100)}%` : '',
+            '% Correct':      mcq && answered.length ? `${Math.round((right / answered.length) * 100)}%` : '',
             'Overall Ranking': '',
           })
         })
@@ -310,6 +309,7 @@ export default function Results() {
         XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(sheets.results), sheets.results), `Test results${suffix}`)
         XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(sheets.answers), sheets.answers), `Test answers${suffix}`)
         XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(sheets.questions), sheets.questions), `Test questions${suffix}`)
+        if (sheets.toMark.length) XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(sheets.toMark), sheets.toMark), `To mark${suffix}`)
       })
       if (scorecardRows.length > 0) XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(scorecardRows), scorecardRows), 'Scorecard')
       XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(summaryRows), summaryRows), 'Question summary')
@@ -548,7 +548,7 @@ export default function Results() {
       {/* Self-paced tests */}
       {(results.tests?.length ?? 0) > 0 && (
         <section className="mx-auto max-w-6xl space-y-4 px-6 pb-8">
-          {results.tests!.map((t, i) => <TestResultSection key={t.blockId} test={t} index={i} />)}
+          {results.tests!.map((t, i) => <TestResultSection key={t.blockId} test={t} index={i} title={`${deckTitle}${(results.tests?.length ?? 0) > 1 ? ` test ${i + 1}` : ''}`} />)}
         </section>
       )}
 

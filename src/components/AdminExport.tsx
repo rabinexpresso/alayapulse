@@ -226,7 +226,7 @@ async function buildAllSessionsWorkbook(sessions: ExportSession[], startDate: st
           'Test':       ti + 1,
           'Place':      p.place,
           'Name':       p.name,
-          'Score':      `${p.correct}/${p.total}`,
+          'Score (multiple choice)': p.total ? `${p.correct}/${p.total}` : '—',
           'Time taken': formatDuration(p.timeMs),
           'Status':     p.status === 'submitted' ? 'Submitted' : 'Ran out of time',
         })

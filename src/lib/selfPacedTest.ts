@@ -1,7 +1,11 @@
+import { optionLabel } from './utils'
+
 /* ─────────────────────────────────────────────────────────────────────────
-   Self-paced test block — everyone answers a set of MCQs on their own phone,
-   at their own pace, within one time limit. Answers are revealed at the end;
-   the winner has the most correct answers, ties going to the faster finish.
+   Self-paced test block — everyone answers a set of questions on their own
+   phone, at their own pace, within one time limit. Multiple choice marks
+   itself: answers are revealed at the end and the winner has the most correct
+   answers, ties going to the faster finish. Open-ended, word cloud, rating and
+   ranking answers are collected for the host to mark afterwards.
 
    Three shapes of the same block:
      • Editor  — flat: a `testblock` header slide, its MCQs, then a `testend`
@@ -14,7 +18,7 @@
                  nobody can read them from the session doc before the end.
    ───────────────────────────────────────────────────────────────────────── */
 
-export type TestAfterOrder  = 'lb-review' | 'review-lb' | 'lb-only'
+export type TestAfterOrder  = 'lb-review' | 'review-lb' | 'lb-only' | 'review-only'
 export type TestScoreTiming = 'submit' | 'end'
 
 export interface TestSettings {
@@ -40,7 +44,28 @@ export const AFTER_ORDER_LABEL: Record<TestAfterOrder, string> = {
   'lb-review': 'Leaderboard, then review',
   'review-lb': 'Review, then leaderboard',
   'lb-only':   'Leaderboard only',
+  'review-only': 'Review only',
 }
+
+/* Question types a test can hold. Multiple choice marks itself; the others
+   are collected for the host to mark afterwards (by hand, or with AI). */
+export type TestQType = 'mcq' | 'openended' | 'wordcloud' | 'rating' | 'ranking'
+export const TEST_QTYPE_LABEL: Record<TestQType, string> = {
+  mcq: 'Multiple choice', openended: 'Open-ended', wordcloud: 'Word cloud', rating: 'Rating', ranking: 'Ranking',
+}
+/** Marks a question gets when it first goes into a test (the host can change
+ *  them, or choose "Not marked" = 0). Rating is usually opinion, so unmarked. */
+export const DEFAULT_MARKS: Partial<Record<TestQType, number>> = { openended: 5, wordcloud: 1, ranking: 1 }
+export const OE_WORD_LIMITS = [100, 250, 500]
+export const DEFAULT_OE_WORDS = 250
+
+/** One answer on a sheet, by question type:
+ *   multiple choice → option indexes picked
+ *   ranking         → item indexes in the person's order (#1 first)
+ *   rating          → a value per item (-1 = not rated yet)
+ *   open-ended      → text
+ *   word cloud      → short answers */
+export type TestAnswer = number[] | string | string[]
 
 /** Editor header slide. */
 export interface TestHeaderSlide extends TestSettings {
@@ -56,14 +81,34 @@ export interface TestEndSlide {
   blockId: string
 }
 
+/** Type-specific settings, shared by the presenter's and the phones' copy. */
+interface TestQuestionSettings {
+  /** Missing on tests made before other types were allowed — those are all MCQ. */
+  type?:        TestQType
+  imgUrl?:      string
+  /** Marks available for a question the host marks (not multiple choice). */
+  marks?:       number
+  /** Open-ended: word limit. */
+  wordLimit?:   number
+  /** Word cloud: how many short answers each person can give. */
+  maxEntries?:  number
+  /** Rating: top of the 0..N scale, and each item's end labels. */
+  ratingMax?:   5 | 10
+  leftLabels?:  string[]
+  rightLabels?: string[]
+}
+
 /** A question as the presenter sees it (with the answer). */
-export interface TestQuestion {
+export interface TestQuestion extends TestQuestionSettings {
   id:             string
   question:       string
+  /** MCQ: options. Rating / ranking: the items. */
   options:        string[]
+  /** MCQ only — empty for every other type. */
   correctAnswers: number[]
   explanation?:   string
-  imgUrl?:        string
+  /** What a good answer includes. Never sent to phones. */
+  guide?:         string
 }
 
 /** Collapsed block in a running show. */
@@ -73,13 +118,13 @@ export interface TestBlockShowSlide extends TestSettings {
   questions: TestQuestion[]
 }
 
-/** A question as phones receive it: no answers, just how many to pick. */
-export interface StoredTestQuestion {
+/** A question as phones receive it: no answers or marking guide; for
+ *  multiple choice, just how many options to pick. */
+export interface StoredTestQuestion extends TestQuestionSettings {
   id:       string
   question: string
   options:  string[]
   pick:     number
-  imgUrl?:  string
 }
 
 export interface StoredTestBlockSlide extends TestSettings {
@@ -93,14 +138,18 @@ type AnyS = any
 
 const isHeader = (s: AnyS) => s?.type === 'testblock' && !Array.isArray(s.questions)
 const isEnd    = (s: AnyS) => s?.type === 'testend'
-export const isTestable = (s: AnyS) => s?.type === 'mcq'
+export const isTestable = (s: AnyS) => ['mcq', 'openended', 'wordcloud', 'rating', 'ranking'].includes(s?.type)
+/** A question's type (tests from before other types were allowed are all MCQ). */
+export const qTypeOf = (q: { type?: string }): TestQType => (q?.type && q.type in TEST_QTYPE_LABEL ? q.type as TestQType : 'mcq')
+/** Marked by the host afterwards (not multiple choice, and has marks set). */
+export const isMarkable = (q: { type?: string; marks?: number }) => qTypeOf(q) !== 'mcq' && (q.marks ?? 0) > 0
 
 /** Settings picked off a header slide (fills gaps from older decks). */
 export function testSettingsOf(s: AnyS): TestSettings {
   return {
     timeLimit:   Number(s?.timeLimit) > 0 ? Number(s.timeLimit) : DEFAULT_TEST_SETTINGS.timeLimit,
     scoreTiming: s?.scoreTiming === 'submit' ? 'submit' : 'end',
-    afterOrder:  s?.afterOrder === 'review-lb' || s?.afterOrder === 'lb-only' ? s.afterOrder : 'lb-review',
+    afterOrder:  ['review-lb', 'lb-only', 'review-only'].includes(s?.afterOrder) ? s.afterOrder : 'lb-review',
     ...(typeof s?.rules === 'string' && s.rules.trim() ? { rules: s.rules.trim() } : {}),
     ...(TEST_THEMES.some(t => t.id === s?.theme) && s.theme !== 'navy' ? { theme: s.theme } : {}),
   }
@@ -163,8 +212,9 @@ export function testMembership(slides: AnyS[]): Map<string, string> {
  * Restores the block rules after any edit — drag, paste, import, undo:
  *  • every header has an end marker (added after its questions if missing);
  *    an end with no header is dropped;
- *  • anything that can't be in a test (non-MCQ, another block) found between
- *    a header and its end moves to just after the end, keeping its order.
+ *  • anything that can't be in a test (a content slide, another block) found
+ *    between a header and its end moves to just after the end, keeping its order;
+ *  • a question new to a test gets its type's default marks.
  * Returns the same array when nothing needed fixing, so callers can skip a
  * state update. `movedOut` lists the slides that had to move.
  */
@@ -232,6 +282,19 @@ export function normalizeTestBlocks(slides: AnyS[]): { slides: AnyS[]; movedOut:
     if (!fixed) break
   }
 
+  // Questions new to a test get default marks (undefined = never set; 0 = "Not marked")
+  for (const r of testRanges(list)) {
+    for (let k = r.start + 1; k < r.end; k++) {
+      const q = list[k]
+      const d = DEFAULT_MARKS[qTypeOf(q)]
+      if (d !== undefined && q.marks === undefined) {
+        if (list === slides) list = [...list]
+        list[k] = { ...q, marks: d }
+        changed = true
+      }
+    }
+  }
+
   return { slides: changed ? list : slides, movedOut }
 }
 
@@ -248,19 +311,39 @@ export function collapseTestBlocks(slides: AnyS[]): AnyS[] {
       id: s.id,
       type: 'testblock',
       ...testSettingsOf(s),
-      questions: members.filter(isTestable).map((q: AnyS) => ({
-        id:             q.id,
-        question:       q.question ?? '',
-        options:        q.options ?? [],
-        correctAnswers: Array.isArray(q.correctAnswers) ? q.correctAnswers : [],
-        ...(typeof q.explanation === 'string' && q.explanation.trim() ? { explanation: q.explanation.trim() } : {}),
-        ...(q.imgUrl ? { imgUrl: String(q.imgUrl) } : {}),
-      })),
+      questions: members.filter(isTestable).map(toTestQuestion),
     }
     out.push({ ...block, _members: members, _header: s, ...(end > i ? { _end: slides[end] } : {}) })
     if (end > i) i = end
   }
   return out
+}
+
+/** An editor question slide → the test's copy of it. */
+function toTestQuestion(q: AnyS): TestQuestion {
+  const type = qTypeOf(q)
+  const options: string[] = Array.isArray(q.options) ? q.options.map((o: unknown) => String(o ?? '')) : []
+  const base: TestQuestion = {
+    id: q.id, type, question: q.question ?? '', options,
+    correctAnswers: type === 'mcq' && Array.isArray(q.correctAnswers) ? q.correctAnswers : [],
+    ...(q.imgUrl ? { imgUrl: String(q.imgUrl) } : {}),
+  }
+  if (type === 'mcq') {
+    return { ...base, ...(typeof q.explanation === 'string' && q.explanation.trim() ? { explanation: q.explanation.trim() } : {}) }
+  }
+  const marks = Math.round(Number(q.marks))
+  return {
+    ...base,
+    ...(marks > 0 ? { marks } : {}),
+    ...(typeof q.markingGuide === 'string' && q.markingGuide.trim() ? { guide: q.markingGuide.trim() } : {}),
+    ...(type === 'openended' ? { wordLimit: OE_WORD_LIMITS.includes(q.oeWordLimit) ? q.oeWordLimit : DEFAULT_OE_WORDS } : {}),
+    ...(type === 'wordcloud' ? { maxEntries: Math.min(10, Math.max(1, Number(q.wcMaxSubmissions) || 3)) } : {}),
+    ...(type === 'rating' ? {
+      ratingMax: q.ratingMax === 10 ? 10 : 5,
+      leftLabels:  options.map((_, i) => String(q.leftLabels?.[i]  ?? q.leftLabel  ?? '')),
+      rightLabels: options.map((_, i) => String(q.rightLabels?.[i] ?? q.rightLabel ?? '')),
+    } : {}),
+  }
 }
 
 /** Show slides coming back from a show → editor slides again. */
@@ -270,25 +353,32 @@ export function expandTestBlocks(slides: AnyS[]): AnyS[] {
     if (!(s?.type === 'testblock' && Array.isArray(s.questions))) { out.push(s); continue }
     const header = s._header ?? { id: s.id, type: 'testblock', ...testSettingsOf(s) }
     const members = Array.isArray(s._members) ? s._members : s.questions.map((q: TestQuestion) => ({
-      id: q.id, type: 'mcq', question: q.question, options: q.options,
+      id: q.id, type: qTypeOf(q), question: q.question, options: q.options,
       ...(q.correctAnswers?.length ? { correctAnswers: q.correctAnswers } : {}),
       ...(q.explanation ? { explanation: q.explanation } : {}),
       ...(q.imgUrl ? { imgUrl: q.imgUrl } : {}),
+      ...(q.marks ? { marks: q.marks } : {}),
+      ...(q.guide ? { markingGuide: q.guide } : {}),
+      ...(q.wordLimit ? { oeWordLimit: q.wordLimit } : {}),
+      ...(q.maxEntries ? { wcMaxSubmissions: q.maxEntries } : {}),
+      ...(q.ratingMax === 10 ? { ratingMax: 10 } : {}),
+      ...(q.leftLabels ? { leftLabels: q.leftLabels } : {}),
+      ...(q.rightLabels ? { rightLabels: q.rightLabels } : {}),
     }))
     out.push(header, ...members, s._end ?? { id: `${s.id}-end`, type: 'testend', blockId: s.id })
   }
   return out
 }
 
-/** Show slide → what phones get: correct answers and explanations removed. */
+/** Show slide → what phones get: correct answers, explanations and marking guides removed. */
 export function toStoredTestBlock(s: TestBlockShowSlide): StoredTestBlockSlide {
   return {
     id: s.id, type: 'testblock', ...testSettingsOf(s),
-    questions: s.questions.map(q => ({
-      id: q.id, question: q.question, options: q.options,
-      pick: Math.max(1, q.correctAnswers.length),
-      ...(q.imgUrl ? { imgUrl: q.imgUrl } : {}),
-    })),
+    questions: s.questions.map(q => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { correctAnswers, explanation, guide, ...rest } = q
+      return { ...rest, type: qTypeOf(q), pick: qTypeOf(q) === 'mcq' ? Math.max(1, correctAnswers.length) : 1 }
+    }),
   }
 }
 
@@ -299,8 +389,12 @@ export function testProblems(slides: AnyS[]): { slideId: string; message: string
     const qs = slides.slice(r.start + 1, r.end)
     if (qs.length === 0) { out.push({ slideId: r.headerId, message: 'Your self-paced test block has no questions yet.' }); continue }
     qs.forEach((q, i) => {
-      if (!(q.correctAnswers?.length > 0)) out.push({ slideId: q.id, message: `Question ${i + 1} in your self-paced test has no correct answer ticked.` })
-      else if ((q.options ?? []).filter((o: string) => String(o).trim()).length < 2) out.push({ slideId: q.id, message: `Question ${i + 1} in your self-paced test needs at least two options.` })
+      const filled = (q.options ?? []).filter((o: string) => String(o).trim()).length
+      const t = qTypeOf(q)
+      if (t === 'mcq' && !(q.correctAnswers?.length > 0)) out.push({ slideId: q.id, message: `Question ${i + 1} in your self-paced test has no correct answer ticked.` })
+      else if (t === 'mcq' && filled < 2) out.push({ slideId: q.id, message: `Question ${i + 1} in your self-paced test needs at least two options.` })
+      else if (t === 'ranking' && filled < 2) out.push({ slideId: q.id, message: `Question ${i + 1} in your self-paced test needs at least two items to rank.` })
+      else if (t === 'rating' && filled < 1) out.push({ slideId: q.id, message: `Question ${i + 1} in your self-paced test needs at least one item to rate.` })
     })
   }
   return out
@@ -348,7 +442,7 @@ export interface TestAnswerDoc {
   respondentName:   string
   respondentEmoji?: string
   round:            number
-  answers:          Record<string, number[]>
+  answers:          Record<string, TestAnswer>
   current:          number
   finished:         boolean
   finishedServer?:  { seconds: number; nanoseconds: number; toMillis?: () => number } | null
@@ -370,11 +464,47 @@ const tsMs = (t: AnyS): number | null => {
   return null
 }
 
-export const sameAnswer = (a: number[] | undefined, b: number[]) =>
-  !!a && a.length === b.length && [...a].sort((x, y) => x - y).every((v, i) => v === [...b].sort((x, y) => x - y)[i])
+export const sameAnswer = (a: TestAnswer | undefined, b: number[]) =>
+  Array.isArray(a) && a.length === b.length && [...a as number[]].sort((x, y) => x - y).every((v, i) => v === [...b].sort((x, y) => x - y)[i])
 
-export function countCorrect(answers: Record<string, number[]>, questions: TestQuestion[]): number {
-  return questions.reduce((n, q) => n + (q.correctAnswers.length && sameAnswer(answers[q.id], q.correctAnswers) ? 1 : 0), 0)
+/** Multiple-choice questions only — the ones that mark themselves. */
+export const autoMarked = <T extends { type?: string }>(questions: T[]) => questions.filter(q => qTypeOf(q) === 'mcq')
+
+export function countCorrect(answers: Record<string, TestAnswer>, questions: TestQuestion[]): number {
+  return autoMarked(questions).reduce((n, q) => n + (q.correctAnswers.length && sameAnswer(answers[q.id], q.correctAnswers) ? 1 : 0), 0)
+}
+
+export const wordCount = (t: string) => (t.trim() ? t.trim().split(/\s+/).length : 0)
+
+/** Has the person given an answer at all (`full` = completely, e.g. every item rated)? */
+export function answerState(
+  q: { type?: string; options: string[]; pick?: number }, a: TestAnswer | undefined,
+): 'none' | 'part' | 'full' {
+  const t = qTypeOf(q)
+  if (a === undefined || a === null) return 'none'
+  if (t === 'openended') return typeof a === 'string' && a.trim() ? 'full' : 'none'
+  if (t === 'wordcloud') return Array.isArray(a) && (a as string[]).some(w => String(w).trim()) ? 'full' : 'none'
+  if (!Array.isArray(a) || a.length === 0) return 'none'
+  const nums = a as number[]
+  if (t === 'rating') {
+    const rated = nums.filter(v => typeof v === 'number' && v >= 0).length
+    return rated === 0 ? 'none' : rated >= q.options.length ? 'full' : 'part'
+  }
+  if (t === 'ranking') return nums.length >= q.options.length ? 'full' : 'part'
+  return nums.length >= (q.pick ?? 1) ? 'full' : 'part'
+}
+export const hasAnswer = (q: { type?: string; options: string[]; pick?: number }, a: TestAnswer | undefined) => answerState(q, a) !== 'none'
+
+/** An answer as plain text, for results, exports and AI marking. */
+export function answerText(q: { type?: string; options: string[]; ratingMax?: number }, a: TestAnswer | undefined): string {
+  const t = qTypeOf(q)
+  if (!hasAnswer({ ...q, pick: 1 }, a)) return ''
+  if (t === 'openended') return String(a).trim()
+  if (t === 'wordcloud') return (a as string[]).map(w => String(w).trim()).filter(Boolean).join('; ')
+  const nums = a as number[]
+  if (t === 'rating') return q.options.map((o, i) => `${o}: ${nums[i] >= 0 ? `${nums[i]}/${q.ratingMax ?? 5}` : 'not rated'}`).join('; ')
+  if (t === 'ranking') return nums.map((k, i) => `${i + 1}. ${q.options[k] ?? ''}`).join('; ')
+  return [...nums].sort((x, y) => x - y).map(i => `${optionLabel(i, q.options.length)}. ${q.options[i] ?? ''}`).join(', ')
 }
 
 export interface TestResultRow {
@@ -386,7 +516,7 @@ export interface TestResultRow {
   /** Start → submit (or → end for those who ran out), minus pauses. */
   timeMs:   number
   status:   'submitted' | 'timeout'
-  answers:  Record<string, number[]>
+  answers:  Record<string, TestAnswer>
   place:    number
 }
 
@@ -409,7 +539,7 @@ export function rankTest(docs: TestAnswerDoc[], questions: TestQuestion[], state
         name: (d.respondentName || 'Anonymous').trim() || 'Anonymous',
         ...(d.respondentEmoji ? { emoji: d.respondentEmoji } : {}),
         correct: countCorrect(d.answers ?? {}, questions),
-        total: questions.length,
+        total: autoMarked(questions).length,
         timeMs: Math.min(timeMs, state.durationMs + 24 * 3600_000),
         status: (d.finished ? 'submitted' : 'timeout') as 'submitted' | 'timeout',
         answers: d.answers ?? {},
@@ -466,9 +596,12 @@ export function freshTestState(durationMs: number, round = 0): TestState {
   }
 }
 
-/** The steps the block plays after the test, in the host's chosen order. */
-export function afterSteps(order: TestAfterOrder, questionCount: number): ({ stage: 'leaderboard' } | { stage: 'review'; index: number })[] {
+/** The steps the block plays after the test, in the host's chosen order.
+ *  No multiple-choice questions means nothing to rank, so no leaderboard. */
+export function afterSteps(order: TestAfterOrder, questionCount: number, hasLeaderboard = true): ({ stage: 'leaderboard' } | { stage: 'review'; index: number })[] {
   const review = Array.from({ length: questionCount }, (_, index) => ({ stage: 'review' as const, index }))
-  const lb = [{ stage: 'leaderboard' as const }]
-  return order === 'review-lb' ? [...review, ...lb] : order === 'lb-only' ? lb : [...lb, ...review]
+  const lb = hasLeaderboard ? [{ stage: 'leaderboard' as const }] : []
+  if (order === 'review-only') return review
+  if (order === 'lb-only') return lb.length ? lb : review
+  return order === 'review-lb' ? [...review, ...lb] : [...lb, ...review]
 }

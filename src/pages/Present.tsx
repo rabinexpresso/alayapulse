@@ -12,7 +12,7 @@ import { cn, optionLabel, MAX_VIZ_OPTIONS } from '@/lib/utils'
 import { aggregateRanking, rankingOrder, type RankingResult } from '@/lib/ranking'
 import { Confetti, Fireworks, CountUp } from '@/components/Celebration'
 import { TestBlockView, type TestNav, type LeaderboardEntry } from '@/components/TestBlockShow'
-import { rankTest, type TestBlockShowSlide, type TestState, type TestAnswerDoc } from '@/lib/selfPacedTest'
+import { rankTest, qTypeOf, hasAnswer, type TestBlockShowSlide, type TestQuestion, type TestState, type TestAnswerDoc } from '@/lib/selfPacedTest'
 import {
   updateSessionState, endSession, subscribeToSlideResponses, subscribeToViewerCount, subscribeToViewers,
   fetchAllSessionResponses, getSessionByCode, publishQuizRanks, startTimer, clearTimer, resetSlideAndTimer, updateQuestionMeta,
@@ -671,13 +671,16 @@ export default function Present() {
                 code={code}
                 viewerCount={viewerCount}
                 navRef={testNavRef}
-                renderLeaderboard={(entries, onWin) => (
+                renderLeaderboard={(entries, onWin, note) => (
                   <LeaderboardSlideView
                     sessionCode={code}
                     deck={deck}
                     questionMeta={questionMetaRef.current}
-                    preset={{ entries, onWinnerRevealed: onWin, emptyText: 'Nobody answered the test.' }}
+                    preset={{ entries, onWinnerRevealed: onWin, emptyText: 'Nobody answered the test.', note }}
                   />
+                )}
+                renderAnswers={(q, sheets) => (
+                  <TestAnswersDisplay key={q.id} question={q} sheets={sheets} theme={(slide as TestBlockShowSlide).theme} />
                 )}
               />
             ) : (
@@ -3591,6 +3594,53 @@ function RankingResults({ items, result, theme }: {
   )
 }
 
+/** Everyone's answers to a self-paced test question the host marks, using the
+    same displays as live questions: word cloud, answer wall, average ratings,
+    overall ranking. */
+function TestAnswersDisplay({ question, sheets, theme }: { question: TestQuestion; sheets: TestAnswerDoc[]; theme?: string }) {
+  const [pinned, setPinned] = useState<Set<string>>(new Set())
+  const t = qTypeOf(question)
+  const given = sheets.map(d => ({ d, a: d.answers?.[question.id] })).filter(x => hasAnswer({ ...question, pick: 1 }, x.a))
+  if (given.length === 0) return <p className="m-auto text-xl opacity-50">Nobody answered this one.</p>
+
+  if (t === 'wordcloud') {
+    const freq = new Map<string, number>()
+    given.forEach(({ a }) => (a as string[]).forEach(w => {
+      const k = String(w).trim().toLowerCase()
+      if (k) freq.set(k, (freq.get(k) ?? 0) + 1)
+    }))
+    const words = [...freq].map(([text, count]) => ({ text, count })).sort((x, y) => y.count - x.count)
+    return <div className="min-h-0 flex-1 overflow-hidden"><WordCloudResults words={words} slideTheme={theme} /></div>
+  }
+  if (t === 'openended') {
+    const answers = given.map(({ d, a }) => ({ name: d.respondentName || 'Anonymous', text: String(a).trim() }))
+    const toggle = (k: string) => setPinned(prev => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n })
+    return (
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1 [scrollbar-width:thin]">
+        <OpenEndedResults answers={answers} pinnedKeys={pinned} onTogglePin={toggle} slideTheme={theme} />
+      </div>
+    )
+  }
+  if (t === 'rating') {
+    const n = question.options.length, max = question.ratingMax ?? 5
+    const sums = Array(n).fill(0), cnts = Array(n).fill(0)
+    const dist = Array.from({ length: n }, () => Array(max + 1).fill(0))
+    given.forEach(({ a }) => (a as number[]).forEach((v, i) => {
+      if (i < n && typeof v === 'number' && v >= 0 && v <= max) { sums[i] += v; cnts[i]++; dist[i][v]++ }
+    }))
+    return (
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <RatingResults
+          params={question.options} avgs={sums.map((x, i) => (cnts[i] ? x / cnts[i] : 0))} distributions={dist}
+          ratingMax={max} leftLabels={question.leftLabels} rightLabels={question.rightLabels} theme={theme}
+        />
+      </div>
+    )
+  }
+  const result = aggregateRanking(given.map(({ a }) => JSON.stringify(a)), question.options.length)
+  return <div className="min-h-0 flex-1 overflow-hidden"><RankingResults items={question.options} result={result} theme={theme} /></div>
+}
+
 function RatingResults({ params, avgs, distributions, ratingMax = 5, leftLabels = [], rightLabels = [], darkBg = false, theme }: {
   params:        string[]
   avgs:          number[]
@@ -3833,10 +3883,8 @@ function buildResultsSnapshot(
     tests.push({
       blockId:   t.id,
       timeLimit: t.timeLimit,
-      questions: t.questions.map(q => ({
-        id: q.id, question: q.question, options: q.options, correctAnswers: q.correctAnswers,
-        ...(q.explanation ? { explanation: q.explanation } : {}),
-      })),
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      questions: t.questions.map(({ imgUrl, ...q }) => ({ ...q, type: qTypeOf(q) })),
       participants: rankTest(sheets, t.questions, state).map(r => ({
         id: r.id, name: r.name, correct: r.correct, total: r.total,
         timeMs: Math.round(r.timeMs), status: r.status, place: r.place, answers: r.answers,
@@ -3962,7 +4010,7 @@ function LeaderboardSlideView({
   questionMeta: Record<string, { openedAt: number; duration: number | null }>
   slide?:       LeaderboardSlide
   /** A self-paced test passes its own ranked board and publishes results itself. */
-  preset?:      { entries: LeaderboardEntry[]; onWinnerRevealed: () => void; emptyText: string }
+  preset?:      { entries: LeaderboardEntry[]; onWinnerRevealed: () => void; emptyText: string; note?: string }
 }) {
   const [leaderboard, setLeaderboard] = useState<{ id?: string; name: string; score: number; emoji?: string; display?: string }[]>([])
   const [revealCount, setRevealCount] = useState(0)
@@ -4298,6 +4346,7 @@ function LeaderboardSlideView({
         </h1>
         <Trophy className={`${tc.titleTrophy} text-golden-sun drop-shadow-[0_0_18px_rgba(255,199,9,0.55)]`} />
       </motion.div>
+      {preset?.note && <p className="relative -mt-1 mb-4 text-center text-sm text-white/50">{preset.note}</p>}
 
       {!loaded ? null : leaderboard.length === 0 ? (
         <div className="relative flex flex-1 items-center justify-center">
