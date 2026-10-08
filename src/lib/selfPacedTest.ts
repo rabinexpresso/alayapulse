@@ -455,6 +455,9 @@ export interface TestAnswerDoc {
   score?:           number
   /** Set when the host restarted the timer after this person submitted. */
   reopened?:        boolean
+  /** Goes up with every write from the phone. The database rules refuse a
+   *  lower number, so an old copy stuck on a phone can't overwrite a newer one. */
+  rev?:             number
   submittedAt?:     unknown
 }
 

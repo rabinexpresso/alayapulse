@@ -3,7 +3,7 @@ import {
   collection, query, where, serverTimestamp, deleteField, increment, writeBatch,
   type Timestamp,
 } from 'firebase/firestore'
-import { db, auth } from './firebase'
+import { db, auth, app } from './firebase'
 import {
   toStoredTestBlock, testAnswerDocId,
   type StoredTestBlockSlide, type TestBlockShowSlide, type TestState, type TestAnswerDoc,
@@ -662,10 +662,52 @@ export async function saveTestAnswers(
   await setDoc(ref, { ...data, slideId: blockId, type: 'testblock', value: '', submittedAt: serverTimestamp() }, { merge: !replace })
 }
 
-/** A phone marks its sheet as submitted (server time = its finish time). */
-export async function submitTestAnswers(code: string, blockId: string, personId: string, round: number, pausedAtFinish: number): Promise<void> {
+/** A phone submits its sheet: the latest answers and "finished" in one write
+ *  (server time = its finish time). */
+export async function finishTestSheet(code: string, blockId: string, personId: string, data: Partial<TestAnswerDoc>): Promise<void> {
   const ref = doc(db, 'sessions', code.toUpperCase(), 'responses', testAnswerDocId(blockId, personId))
-  await setDoc(ref, { finished: true, finishedServer: serverTimestamp(), round, pausedAtFinish, reopened: false }, { merge: true })
+  await setDoc(ref, { ...data, slideId: blockId, type: 'testblock', value: '', finished: true, finishedServer: serverTimestamp(), submittedAt: serverTimestamp() }, { merge: true })
+}
+
+/* The same writes as a plain web request to the database (Firestore's REST
+   API). Used when the live connection seems stuck — a fresh request often
+   gets through when the long-lived connection has quietly died (common after
+   a phone switches network or apps). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function restValue(v: unknown): any {
+  if (v === null || v === undefined) return { nullValue: null }
+  if (typeof v === 'boolean') return { booleanValue: v }
+  if (typeof v === 'number') return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v }
+  if (typeof v === 'string') return { stringValue: v }
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(restValue) } }
+  return { mapValue: { fields: Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, restValue(x)])) } }
+}
+export async function writeTestSheetRest(
+  code: string, blockId: string, personId: string, data: Record<string, unknown>, finish: boolean,
+): Promise<void> {
+  const { projectId, apiKey } = app.options
+  const name = `projects/${projectId}/databases/(default)/documents/sessions/${code.toUpperCase()}/responses/${testAnswerDocId(blockId, personId)}`
+  const fields: Record<string, unknown> = { ...data, slideId: blockId, type: 'testblock', value: '', ...(finish ? { finished: true } : {}) }
+  const body = {
+    writes: [{
+      update: { name, fields: Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, restValue(v)])) },
+      updateMask: { fieldPaths: Object.keys(fields) },
+      updateTransforms: [
+        { fieldPath: 'submittedAt', setToServerValue: 'REQUEST_TIME' },
+        ...(finish ? [{ fieldPath: 'finishedServer', setToServerValue: 'REQUEST_TIME' }] : []),
+      ],
+    }],
+  }
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), 12000)
+  try {
+    const res = await fetch(`https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents:commit?key=${apiKey}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: ctrl.signal,
+    })
+    if (!res.ok) throw new Error(`Save failed (${res.status})`)
+  } finally {
+    clearTimeout(t)
+  }
 }
 
 /** Restart timer: anyone who already submitted is taken back to their answers
@@ -684,11 +726,14 @@ export async function reopenTestSheets(code: string, blockId: string, personIds:
 
 /** A phone follows its own sheet (to restore answers and receive its score). */
 export function subscribeToTestAnswers(
-  code: string, blockId: string, personId: string, cb: (d: TestAnswerDoc | null) => void,
+  code: string, blockId: string, personId: string,
+  /** `pending` = this copy includes the phone's own writes the database hasn't confirmed yet */
+  cb: (d: TestAnswerDoc | null, pending: boolean) => void,
 ): () => void {
   return onSnapshot(
     doc(db, 'sessions', code.toUpperCase(), 'responses', testAnswerDocId(blockId, personId)),
-    snap => cb(snap.exists() ? (snap.data() as TestAnswerDoc) : null),
+    { includeMetadataChanges: true },
+    snap => cb(snap.exists() ? (snap.data() as TestAnswerDoc) : null, snap.metadata.hasPendingWrites),
   )
 }
 

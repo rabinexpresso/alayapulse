@@ -10,7 +10,7 @@ import { AlayaMark } from '@/components/AlayaMark'
 import { cn, optionLabel, fitColumns } from '@/lib/utils'
 import { aggregateRanking, parseRanking, rankingOrder } from '@/lib/ranking'
 import { KindTag, KIND_INFO, TestResultSection, liveKind, testSheets, addTestPdf, type QuestionKind } from '@/components/TestResults'
-import { hasAnswer, isMarkable, qTypeOf, sameAnswer, TEST_QTYPE_LABEL } from '@/lib/selfPacedTest'
+import { hasAnswer } from '@/lib/selfPacedTest'
 import {
   listResults, deleteResults, isResponseCorrect, getStorageBackend, onAuthStateChanged, auth,
   browserListDecks, cloudListDecks,
@@ -282,37 +282,25 @@ export default function Results() {
         // Highest total first; ties broken alphabetically for a stable order.
         .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
 
-      // Self-paced test questions also appear in the question summary
-      ;(results.tests ?? []).forEach((t, ti) => {
-        t.questions.forEach((q, i) => {
-          const mcq = qTypeOf(q) === 'mcq'
-          const answered = t.participants.filter(p => hasAnswer({ ...q, pick: 1 }, p.answers[q.id]))
-          const right = mcq ? answered.filter(p => sameAnswer(p.answers[q.id], q.correctAnswers)).length : 0
-          summaryRows.push({
-            'Q#':             `${(results.tests?.length ?? 0) > 1 ? `Test ${ti + 1} ` : 'Test '}Q${i + 1}`,
-            'Question':       q.question,
-            'Type':           KIND_INFO.test.label,
-            'Format':         TYPE_LABELS[qTypeOf(q)] ?? TEST_QTYPE_LABEL[qTypeOf(q)],
-            'Correct Answer': mcq ? q.correctAnswers.slice().sort((a, b) => a - b).map(k => `${optionLabel(k, q.options.length)} — ${q.options[k] ?? ''}`).join('; ') : (isMarkable(q) ? `Marked by the host (${q.marks} marks)` : 'Not marked'),
-            'Responses':      answered.length,
-            '% Correct':      mcq && answered.length ? `${Math.round((right / answered.length) * 100)}%` : '',
-            'Overall Ranking': '',
-          })
-        })
-      })
-
-      const wb = XLSX.utils.book_new()
-      // Self-paced tests first: overview, every answer in full, per question
+      // Every tab, in order, with one line on what it's for — the first tab
+      // of the file ("How to read this") lists them all.
+      const tabs: { name: string; about: string; rows: Record<string, string | number>[] }[] = []
       ;(results.tests ?? []).forEach((t, ti) => {
         const suffix = (results.tests?.length ?? 0) > 1 ? ` ${ti + 1}` : ''
         const sheets = testSheets(t)
-        XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(sheets.results), sheets.results), `Test results${suffix}`)
-        XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(sheets.answers), sheets.answers), `Test answers${suffix}`)
-        XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(sheets.questions), sheets.questions), `Test questions${suffix}`)
-        if (sheets.toMark.length) XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(sheets.toMark), sheets.toMark), `To mark${suffix}`)
+        tabs.push({ name: `Test results${suffix}`, rows: sheets.results,
+          about: 'Self-paced test: one row per person — place, multiple-choice score and time. Each Q column shows their answer: ✓ right or ✗ wrong for multiple choice; written answers show a word count (the full text is in Test answers).' })
+        if (sheets.toMark.length) tabs.push({ name: `To mark${suffix}`, rows: sheets.toMark,
+          about: 'Every written answer that needs marking, with the marking guide and the marks available. Type each mark in the Mark column — or use the AI marking help on the Results page.' })
+        tabs.push({ name: `Test answers${suffix}`, rows: sheets.answers,
+          about: 'Every answer from every person, in full, with whether it was right (or needs marking) and the correct answer or marking guide next to it.' })
+        tabs.push({ name: `Test questions${suffix}`, rows: sheets.questions,
+          about: 'One row per test question: the correct answer, how many got it right, and a plain-English summary of what everyone answered.' })
       })
-      if (scorecardRows.length > 0) XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(scorecardRows), scorecardRows), 'Scorecard')
-      XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(summaryRows), summaryRows), 'Question summary')
+      if (scorecardRows.length > 0) tabs.push({ name: 'Scorecard', rows: scorecardRows,
+        about: 'Live questions (shown one at a time on the big screen): one row per person, one column per question.' })
+      if (summaryRows.length > 0) tabs.push({ name: 'Question summary', rows: summaryRows,
+        about: 'Live questions: one row per question, with the correct answer and how many got it right.' })
 
       // Only add the Leaderboard if this deck is a quiz with at least one
       // scoreable question — otherwise the tab is omitted entirely (no clutter).
@@ -327,8 +315,19 @@ export default function Results() {
           'Speed Points':    row.speedPts,
           'Total Points':    row.total,
         }))
-        XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(leaderboardRows), leaderboardRows), 'Live quiz leaderboard')
+        tabs.push({ name: 'Live quiz leaderboard', rows: leaderboardRows,
+          about: 'Live quiz points per person: points for right answers plus extra points for answering fast.' })
       }
+
+      const guide: Record<string, string>[] = [
+        ...tabs.map(t => ({ Tab: t.name, 'What it shows': t.about })),
+        { Tab: '', 'What it shows': '' },
+        { Tab: '✓ / ✗', 'What it shows': 'Right / wrong answer (multiple choice)' },
+        { Tab: '—', 'What it shows': 'Not answered' },
+      ]
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(guide), guide), 'How to read this')
+      tabs.forEach(t => XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(t.rows), t.rows), t.name))
 
       const safeTitle = deck.title.replace(/[^a-z0-9\-_ ]/gi, '').trim() || 'results'
       const date = new Date(results.conductedAt).toISOString().slice(0, 10)

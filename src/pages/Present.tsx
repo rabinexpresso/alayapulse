@@ -4086,7 +4086,7 @@ function LeaderboardSlideView({
       return () => clearTimeout(id)
     }
     // Time to read the place just revealed (none before the first podium place)
-    const read = revealCount === 0 ? 700 : nextRank === Math.min(total, 3) ? 600 : 4000
+    const read = revealCount === 0 ? 700 : nextRank === Math.min(total, 3) ? 600 : 2300
     const tease = nextRank === 1 ? 3200 : 1900
     const lead = setTimeout(() => setAnnounce(nextRank), read)
     const id = setTimeout(() => { setAnnounce(null); setRevealCount(c => c + 1) }, read + tease)

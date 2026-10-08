@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Check, X, Clock, Pause, ChevronLeft, ChevronRight, ClipboardCheck } from 'lucide-react'
+import { Check, X, Clock, Pause, ChevronLeft, ChevronRight, ClipboardCheck, WifiOff, Loader2 } from 'lucide-react'
 import { cn, optionLabel } from '@/lib/utils'
 import { Confetti, CountUp } from '@/components/Celebration'
-import { saveTestAnswers, submitTestAnswers, subscribeToTestAnswers } from '@/lib/session'
+import { saveTestAnswers, finishTestSheet, writeTestSheetRest, subscribeToTestAnswers } from '@/lib/session'
 import {
   remainingOf, formatClock, formatDuration, sameAnswer, answerState, answerText, qTypeOf, isMarkable, autoMarked,
   wordCount, OE_MAX_WORDS, OE_MAX_CHARS,
@@ -16,6 +16,17 @@ import {
    rescan carries on where it left off. Correct answers only arrive once
    the host's test has ended. Each question type has its own answer input;
    only multiple choice is scored here — the rest the host marks later.
+
+   Staying safe on a shaky connection:
+     • every answer is also kept in the phone's own storage, so a refresh or
+       rescan brings back anything the database hadn't received yet;
+     • a status line says whether answers are saved, saving, or waiting for
+       a connection;
+     • Submit waits at most ~8 s for the usual connection, then tries a plain
+       web request; if that fails too it says so and offers Try again.
+   Every write carries a revision number that only goes up, and the database
+   rules refuse a lower one — so an old copy stuck on the phone can never
+   overwrite a newer one when the connection comes back.
    ───────────────────────────────────────────────────────────────────────── */
 
 const tsMs = (t: unknown): number | null => {
@@ -25,6 +36,13 @@ const tsMs = (t: unknown): number | null => {
   if (typeof x.seconds === 'number') return x.seconds * 1000 + Math.round((x.nanoseconds ?? 0) / 1e6)
   return null
 }
+type Backup = { round: number; answers: Record<string, TestAnswer>; current: number; rev: number; unsynced: boolean; submitPending?: boolean }
+const STUCK_MS = 8000
+const withTimeout = <T,>(p: Promise<T>, ms: number) => new Promise<T>((resolve, reject) => {
+  const t = setTimeout(() => reject(new Error('timeout')), ms)
+  p.then(v => { clearTimeout(t); resolve(v) }, e => { clearTimeout(t); reject(e) })
+})
+
 const ordinal = (n: number) => {
   const t = n % 100
   if (t >= 11 && t <= 13) return `${n}th`
@@ -42,28 +60,76 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
   const qs = block.questions
   const round = state?.round ?? 0
   const [sheet, setSheet] = useState<TestAnswerDoc | null | undefined>(undefined)
+  const [sheetPending, setSheetPending] = useState(false)
   const [answers, setAnswers] = useState<Record<string, TestAnswer>>({})
   const [current, setCurrent] = useState(0)
   const [reviewing, setReviewing] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [note, setNote] = useState<string | null>(null)
   const [hideReopened, setHideReopened] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [submittedHere, setSubmittedHere] = useState(false)
+  const [online, setOnline] = useState(() => navigator.onLine)
+  const [, setTick] = useState(0)
+  const bump = () => setTick(t => t + 1)
   const [now, setNow] = useState(Date.now())
   const loadedRound = useRef<number | null>(null)
   const createdRound = useRef<number | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const latest = useRef({ answers, current })
   latest.current = { answers, current }
+  const rev = useRef(0)                        // last revision this phone wrote
+  const inflight = useRef(new Map<number, number>())   // revision → when it was sent
+  const resumeSubmit = useRef(false)
+
+  /* ── The phone's own copy ─────────────────────────────────────────── */
+  const backupKey = `alaya-test:${code}:${block.id}:${personId}`
+  const readBackup = (): Backup | null => {
+    try { const b = JSON.parse(localStorage.getItem(backupKey) || 'null') as Backup | null; return b && b.round === round ? b : null } catch { return null }
+  }
+  const writeBackup = (patch: Partial<Backup>) => {
+    try {
+      const prev = readBackup() ?? { round, answers: {}, current: 0, rev: 0, unsynced: false }
+      localStorage.setItem(backupKey, JSON.stringify({ ...prev, ...patch, round }))
+    } catch { /* private mode / storage full — the database copy still works */ }
+  }
+
+  /** Send fields to the sheet with the next revision number; track it until the database confirms. */
+  const send = (fields: Partial<TestAnswerDoc>, replace = false) => {
+    const r = ++rev.current
+    inflight.current.set(r, Date.now())
+    bump()
+    return saveTestAnswers(code, block.id, personId, { ...fields, rev: r }, replace)
+      .then(() => { if (r === rev.current) writeBackup({ unsynced: false, rev: r }) })
+      .catch(e => console.error(e))
+      .finally(() => { inflight.current.delete(r); bump() })
+  }
 
   // My own sheet
-  useEffect(() => subscribeToTestAnswers(code, block.id, personId, setSheet), [code, block.id, personId])
+  useEffect(() => subscribeToTestAnswers(code, block.id, personId, (d, pending) => { setSheet(d); setSheetPending(pending) }), [code, block.id, personId])
+  // Never write a lower revision than the database already has
+  useEffect(() => { if (typeof sheet?.rev === 'number') rev.current = Math.max(rev.current, sheet.rev) }, [sheet])
+  // The host restarted the clock after we submitted: back to the questions
+  useEffect(() => { if (sheet && !sheet.finished && sheet.reopened) setSubmittedHere(false) }, [sheet])
+  useEffect(() => { setSubmittedHere(false); setSubmitError(null) }, [round])
 
-  // Restore from the sheet once per round (a reload or rescan picks up here)
+  // Restore once per round (a reload or rescan picks up here). Answers the
+  // database never received come back from the phone's own copy and are sent.
   useEffect(() => {
     if (!sheet || sheet.round !== round || loadedRound.current === round) return
     loadedRound.current = round
-    setAnswers(sheet.answers ?? {})
-    setCurrent(Math.min(sheet.current ?? 0, Math.max(0, qs.length - 1)))
+    const b = readBackup()
+    if (b?.unsynced && !sheet.finished) {
+      rev.current = Math.max(rev.current, b.rev ?? 0)
+      setAnswers(b.answers ?? {})
+      setCurrent(Math.min(b.current ?? 0, Math.max(0, qs.length - 1)))
+      send({ answers: b.answers ?? {}, current: b.current ?? 0, round })
+      if (b.submitPending) resumeSubmit.current = true
+    } else {
+      setAnswers(sheet.answers ?? {})
+      setCurrent(Math.min(sheet.current ?? 0, Math.max(0, qs.length - 1)))
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sheet, round, qs.length])
 
   // Open a sheet as soon as the test is running
@@ -75,10 +141,12 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
     createdRound.current = round
     loadedRound.current = round
     setAnswers({}); setCurrent(0); setReviewing(false)
-    saveTestAnswers(code, block.id, personId, {
+    writeBackup({ answers: {}, current: 0, unsynced: false, submitPending: false })
+    send({
       respondentId: personId, respondentName: name || 'Anonymous', ...(emoji ? { respondentEmoji: emoji } : {}),
       round, answers: {}, current: 0, finished: false, finishedServer: null,
-    }, true).catch(console.error)
+    }, true)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, sheet, round, code, block.id, personId, name, emoji])
 
   // Clock
@@ -93,19 +161,21 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
   // essays don't flood the presenter with an update per keystroke.
   const pendingSince = useRef<number | null>(null)
   const save = (next: Record<string, TestAnswer>, cur: number, wait = 400) => {
+    writeBackup({ answers: next, current: cur, unsynced: true })
     if (saveTimer.current) clearTimeout(saveTimer.current)
     pendingSince.current ??= Date.now()
     const overdue = Date.now() - pendingSince.current > 6000
     saveTimer.current = setTimeout(() => {
       saveTimer.current = null
       pendingSince.current = null
-      saveTestAnswers(code, block.id, personId, { answers: next, current: cur, round }).catch(console.error)
+      send({ answers: next, current: cur, round })
     }, overdue ? 0 : wait)
+    bump()
   }
   const flush = async () => {
     if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null }
     pendingSince.current = null
-    await saveTestAnswers(code, block.id, personId, { answers: latest.current.answers, current: latest.current.current, round })
+    await send({ answers: latest.current.answers, current: latest.current.current, round })
   }
   // Phone locked or app switched mid-answer: save what's there now
   useEffect(() => {
@@ -115,9 +185,39 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Online / offline, as the phone reports it
+  useEffect(() => {
+    const on = () => setOnline(true), off = () => setOnline(false)
+    window.addEventListener('online', on); window.addEventListener('offline', off)
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
+  }, [])
+  // While something is waiting for the database, re-check every couple of seconds
+  useEffect(() => {
+    const id = window.setInterval(() => { if (inflight.current.size) bump() }, 2000)
+    return () => window.clearInterval(id)
+  }, [])
+
   const remaining = remainingOf(state, now)
-  const finished = !!(sheet && sheet.round === round && sheet.finished)
+  // "Submitted" only once the database has it — not the phone's hopeful local copy
+  const finished = !!(sheet && sheet.round === round && sheet.finished && !sheetPending) || submittedHere
   const timeUp = state?.status === 'running' && remaining <= 0
+  const oldestWrite = inflight.current.size ? Math.min(...inflight.current.values()) : null
+  const saveStatus: 'saved' | 'saving' | 'offline' =
+    !online || (oldestWrite !== null && Date.now() - oldestWrite > STUCK_MS) ? 'offline'
+    : oldestWrite !== null || saveTimer.current ? 'saving' : 'saved'
+
+  // Time's up (or the test ended) with answers still only on this phone: send
+  // them by plain web request, in case the usual connection is stuck.
+  useEffect(() => {
+    if (!(timeUp || state?.status === 'ended')) return
+    const b = readBackup()
+    if (!b?.unsynced || b.submitPending) return
+    const r = ++rev.current
+    writeTestSheetRest(code, block.id, personId, { answers: b.answers, current: b.current, round, rev: r }, false)
+      .then(() => writeBackup({ unsynced: false, rev: r }))
+      .catch(e => console.error(e))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeUp, state?.status])
 
   const stateOf = (qi: number) => answerState(qs[qi], answers[qs[qi].id])
   const answeredFully = (qi: number) => stateOf(qi) === 'full'
@@ -158,17 +258,54 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
 
   const submit = async () => {
     if (submitting) return
-    setSubmitting(true)
+    setSubmitting(true); setSubmitError(null)
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null }
+    pendingSince.current = null
+    const { answers: a, current: c } = latest.current
+    const fields = { answers: a, current: c, round, pausedAtFinish: state?.pausedTotalMs ?? 0, reopened: false }
+    writeBackup({ answers: a, current: c, unsynced: true, submitPending: true })
+    const done = () => writeBackup({ unsynced: false, submitPending: false })
+    // 1 · The usual connection, given about 8 seconds
+    const r1 = ++rev.current
+    inflight.current.set(r1, Date.now())
     try {
-      await flush()
-      await submitTestAnswers(code, block.id, personId, round, state?.pausedTotalMs ?? 0)
-    } catch (e) {
-      console.error(e)
-      setNote("Couldn't submit — check your connection and try again")
+      await withTimeout(finishTestSheet(code, block.id, personId, { ...fields, rev: r1 }), STUCK_MS)
+      setSubmittedHere(true)
+      done()
+    } catch (e1) {
+      console.warn('Submit: usual connection did not confirm —', e1)
+      // 2 · A plain web request, with a higher revision so the stuck copy can't override it later
+      try {
+        const r2 = ++rev.current
+        await writeTestSheetRest(code, block.id, personId, {
+          ...fields, rev: r2, respondentId: personId, respondentName: name || 'Anonymous', ...(emoji ? { respondentEmoji: emoji } : {}),
+        }, true)
+        setSubmittedHere(true)
+        done()
+      } catch (e2) {
+        console.error('Submit: web request failed too —', e2)
+        setSubmitError(navigator.onLine
+          ? "Couldn't reach the server. Your answers are safe on this phone — tap Try again."
+          : "You're offline. Your answers are safe on this phone — reconnect to Wi-Fi or mobile data, then tap Try again.")
+      }
     } finally {
+      inflight.current.delete(r1)
       setSubmitting(false)
     }
   }
+  // Back online after a failed submit: try again by itself
+  useEffect(() => {
+    if (online && submitError && !submitting) submit()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online])
+  // Reopened after a reload with a submit still pending: finish it
+  useEffect(() => {
+    if (resumeSubmit.current && state?.status === 'running' && !finished && loadedRound.current === round) {
+      resumeSubmit.current = false
+      submit()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.status, finished, answers])
 
   /* ── Screens ───────────────────────────────────────────────────────── */
 
@@ -247,6 +384,7 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
           <Clock className="size-4" /> {formatClock(remaining)}
         </span>
       </div>
+      <SaveStatus status={saveStatus} />
       {/* Numbered boxes — tap to jump */}
       <div className="mt-3 flex flex-wrap gap-1.5">
         {qs.map((x, i) => (
@@ -282,10 +420,16 @@ export function TestRunner({ code, block, state, personId, name, emoji }: {
             </div>
           )}
           <p className="mt-4 text-sm text-midnight-sky-500">Once you submit you can't change your answers.{hasAuto ? ' If two people get the same score, the faster finish ranks higher.' : ''}</p>
+          {submitError && (
+            <div className="mt-4 flex items-start gap-2.5 rounded-2xl border border-hot-pink/30 bg-hot-pink/[0.06] p-4">
+              <WifiOff className="mt-0.5 size-4 shrink-0 text-hot-pink" />
+              <p className="text-sm leading-snug text-midnight-sky-800">{submitError}</p>
+            </div>
+          )}
           <div className="mt-auto flex gap-2.5 pt-6">
             <button onClick={() => setReviewing(false)} className="flex-1 rounded-xl border border-midnight-sky-200 py-3.5 text-sm font-medium text-midnight-sky-700">Go back</button>
             <button onClick={submit} disabled={submitting || timeUp} className="flex-1 rounded-xl bg-hot-pink py-3.5 text-sm font-semibold text-white shadow-[0_0_20px_-4px] shadow-hot-pink/40 disabled:opacity-50">
-              {submitting ? 'Submitting…' : 'Submit test'}
+              {submitting ? 'Submitting…' : submitError ? 'Try again' : 'Submit test'}
             </button>
           </div>
         </div>
@@ -543,6 +687,17 @@ function Rules({ block }: { block: StoredTestBlockSlide }) {
         </li>
       ))}
     </ul>
+  )
+}
+
+/** "All answers saved" / "Saving…" / "No connection — kept on this phone" */
+function SaveStatus({ status }: { status: 'saved' | 'saving' | 'offline' }) {
+  return (
+    <p className={cn('mt-1 flex items-center gap-1.5 text-xs', status === 'offline' ? 'font-medium text-[#a15c00]' : 'text-midnight-sky-400')}>
+      {status === 'saved' && <><Check className="size-3.5 text-fresh-green" /> All answers saved</>}
+      {status === 'saving' && <><Loader2 className="size-3.5 animate-spin" /> Saving…</>}
+      {status === 'offline' && <><WifiOff className="size-3.5" /> No connection — your answers are kept on this phone</>}
+    </p>
   )
 }
 

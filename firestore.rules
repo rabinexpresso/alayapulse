@@ -34,7 +34,12 @@ service cloud.firestore {
       // Subcollections stay open — unauthenticated audience members and
       // browser-mode presenters both need full access here.
       match /responses/{responseId} {
-        allow read, write: if true;
+        allow read, create, delete: if true;
+        // Self-paced test sheets carry a revision number that only goes up,
+        // so an older copy still queued on a phone can't overwrite a newer one.
+        allow update: if !('rev' in resource.data)
+          || !('rev' in request.resource.data)
+          || request.resource.data.rev >= resource.data.rev;
       }
       match /viewers/{viewerId} {
         allow read, write: if true;

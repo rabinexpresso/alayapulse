@@ -97,32 +97,56 @@ export function answerVerdict(got: TestAnswer | undefined, q: TestResultQuestion
   return { ok: false, note: parts.join(' · ') }
 }
 
-/** The result column for any type: ✓/✗ for multiple choice, otherwise whether it needs marking. */
+/** The result column for any type, in plain words. */
 function resultLabel(q: TestResultQuestion, a: TestAnswer | undefined): string {
-  if (isMcq(q)) { const v = answerVerdict(a, q); return v.ok ? '✓' : `✗ ${v.note}` }
+  if (isMcq(q)) {
+    const g = picks(a)
+    if (!g.length) return 'Not answered'
+    if (sameAnswer(g, q.correctAnswers)) return '✓ Right'
+    const hits = g.filter(x => q.correctAnswers.includes(x)).length
+    return q.correctAnswers.length > 1 && hits > 0 ? `✗ Partly right (${hits} of ${q.correctAnswers.length})` : '✗ Wrong'
+  }
   if (!given(q, a)) return 'Not answered'
-  return isMarkable(q) ? `To mark (${marksLabel(q)})` : 'Collected (not marked)'
+  return isMarkable(q) ? `To mark (${marksLabel(q)})` : 'Not marked (just collected)'
 }
 
-/** One line summing up how the room answered a non-multiple-choice question. */
-function roomSummary(q: TestResultQuestion, ps: TestResultParticipant[]): string {
+const people = (n: number) => `${n} ${n === 1 ? 'person' : 'people'}`
+
+/** One plain sentence on what everyone answered, for any question type. */
+function answersShow(q: TestResultQuestion, ps: TestResultParticipant[]): string {
   const t = qTypeOf(q)
   const answers = ps.map(p => p.answers[q.id]).filter(a => given(q, a))
-  if (!answers.length) return ''
+  if (!answers.length) return 'Nobody answered'
+  if (t === 'mcq') {
+    const wrong = new Map<string, number>()
+    answers.forEach(a => { if (!sameAnswer(a, q.correctAnswers)) { const k = full(picks(a), q); wrong.set(k, (wrong.get(k) ?? 0) + 1) } })
+    const top = [...wrong.entries()].sort((x, y) => y[1] - x[1])[0]
+    return top ? `Most common wrong answer: ${top[0]} (${people(top[1])})` : 'Everyone who answered got it right'
+  }
+  if (t === 'openended') return isMarkable(q) ? 'Written answers: read and mark them in the To mark tab' : 'Written answers: see the Test answers tab'
+  if (t === 'wordcloud') return `Answers given, most common first: ${topWords(q, ps).slice(0, 10).map(([w, n]) => `${w} (${people(n)})`).join(', ')}`
   if (t === 'rating') {
     const max = q.ratingMax ?? 5
-    return q.options.map((o, i) => {
+    return `Average rating out of ${max}: ` + q.options.map((o, i) => {
       const vs = answers.map(a => (a as number[])[i]).filter(v => typeof v === 'number' && v >= 0)
-      return `${o}: ${vs.length ? (vs.reduce((x, y) => x + y, 0) / vs.length).toFixed(1) : '–'}/${max}`
-    }).join('; ')
+      return `${o} ${vs.length ? (vs.reduce((x, y) => x + y, 0) / vs.length).toFixed(1) : '–'}`
+    }).join(', ')
   }
-  if (t === 'ranking') {
-    const r = aggregateRanking(answers.map(a => JSON.stringify(a)), q.options.length)
-    return rankingOrder(r, q.options.length).map((k, i) => `${i + 1}. ${q.options[k]}`).join('; ')
-  }
-  if (t === 'wordcloud') return topWords(q, ps).slice(0, 8).map(([w, n]) => `${w} (${n})`).join(', ')
-  return ''
+  const r = aggregateRanking(answers.map(a => JSON.stringify(a)), q.options.length)
+  const ord = ['1st', '2nd', '3rd']
+  return `Everyone's rankings combined: ` + rankingOrder(r, q.options.length).map((k, i) => `${ord[i] ?? `${i + 1}th`} ${q.options[k]}`).join(', ')
 }
+
+/** A short version of a non-multiple-choice answer for the one-row-per-person overview. */
+function shortAnswer(q: TestResultQuestion, a: TestAnswer | undefined): string {
+  if (!given(q, a)) return '—'
+  const t = qTypeOf(q)
+  if (t === 'openended') { const n = String(a).trim().split(/\s+/).length; return `✎ ${n} word${n !== 1 ? 's' : ''}` }
+  if (t === 'wordcloud') return (a as string[]).map(w => String(w).trim()).filter(Boolean).join(', ')
+  if (t === 'ranking') return (a as number[]).map(k => q.options[k]).join(' › ')
+  return (a as number[]).map(v => (v >= 0 ? String(v) : '–')).join(' · ') + ` (out of ${q.ratingMax ?? 5})`
+}
+
 function topWords(q: TestResultQuestion, ps: TestResultParticipant[]): [string, number][] {
   const freq = new Map<string, number>()
   ps.forEach(p => { const a = p.answers[q.id]; if (Array.isArray(a)) (a as string[]).forEach(w => { const k = String(w).trim().toLowerCase(); if (k) freq.set(k, (freq.get(k) ?? 0) + 1) }) })
@@ -435,6 +459,7 @@ function toMarkRows(test: TestResult): Record<string, string | number>[] {
         Question: q.question.replace(/\s+/g, ' '),
         Type: TEST_QTYPE_LABEL[qTypeOf(q)],
         'Their answer': answerText(q, p.answers[q.id]),
+        Words: qTypeOf(q) === 'openended' ? String(p.answers[q.id]).trim().split(/\s+/).length : '',
         'Marking guide': q.guide ?? '',
         'Marks available': q.marks ?? 0,
         Mark: '',
@@ -506,20 +531,20 @@ export function testSheets(test: TestResult): { results: Row[]; answers: Row[]; 
   const mixed = auto > 0 && auto < qs.length
   const qCol = (i: number) => `Q${i + 1}`
   const scoreCol = mixed ? 'Multiple-choice score' : 'Score'
-  const correctRow: Row = { ...(auto ? { Place: '' } : {}), Name: 'Correct answer', ...(auto ? { [scoreCol]: '' } : {}), 'Time taken': '', Seconds: '', Status: '' }
+  const correctRow: Row = { ...(auto ? { Place: '' } : {}), Name: '✓ Correct answer', ...(auto ? { [scoreCol]: '' } : {}), 'Time taken': '', 'Time (seconds)': '', Status: '' }
   qs.forEach((q, i) => {
-    correctRow[qCol(i)] = isMcq(q) ? letters(q.correctAnswers, q.options.length) : `(${TEST_QTYPE_LABEL[qTypeOf(q)]}${isMarkable(q) ? ` · ${marksLabel(q)}` : ''})`
+    correctRow[qCol(i)] = isMcq(q) ? letters(q.correctAnswers, q.options.length) : (isMarkable(q) ? `To mark · ${marksLabel(q)}` : 'Not marked')
   })
   const results: Row[] = [correctRow, ...test.participants.map(p => {
     const row: Row = {
       ...(auto ? { Place: p.place } : {}), Name: p.name, ...(auto ? { [scoreCol]: `${p.correct}/${p.total}` } : {}),
-      'Time taken': formatDuration(p.timeMs), Seconds: Math.round(p.timeMs / 1000), Status: statusLabel(p),
+      'Time taken': formatDuration(p.timeMs), 'Time (seconds)': Math.round(p.timeMs / 1000), Status: statusLabel(p),
     }
     qs.forEach((q, i) => {
       const got = p.answers[q.id]
       row[qCol(i)] = isMcq(q)
-        ? `${picks(got).length ? letters(picks(got), q.options.length) : '—'} ${answerVerdict(got, q).ok ? '✓' : '✗'}`
-        : (answerText(q, got) || '—')
+        ? (picks(got).length ? `${letters(picks(got), q.options.length)} ${answerVerdict(got, q).ok ? '✓' : '✗'}` : '—')
+        : shortAnswer(q, got)
     })
     return row
   })]
@@ -530,44 +555,30 @@ export function testSheets(test: TestResult): { results: Row[]; answers: Row[]; 
       const got = p.answers[q.id]
       answers.push({
         Name: p.name,
-        Question: `Q${i + 1} ${q.question.replace(/\s+/g, ' ').slice(0, 120)}`,
+        'Q#': `Q${i + 1}`,
+        Question: q.question.replace(/\s+/g, ' '),
         Type: TEST_QTYPE_LABEL[qTypeOf(q)],
-        'Their answer': (isMcq(q) ? (picks(got).length ? full(picks(got), q) : '') : answerText(q, got)) || 'Not answered',
-        'Correct answer / marking guide': isMcq(q) ? full(q.correctAnswers, q) : (q.guide ?? ''),
+        'Their answer': (isMcq(q) ? (picks(got).length ? full(picks(got), q) : '') : answerText(q, got)) || '—',
         Result: resultLabel(q, got),
+        'Correct answer / marking guide': isMcq(q) ? full(q.correctAnswers, q) : (q.guide ?? ''),
       })
     })
   }
 
   const questions: Row[] = qs.map((q, i) => {
-    if (!isMcq(q)) {
-      const answered = test.participants.filter(p => given(q, p.answers[q.id]))
-      return {
-        'Q#': i + 1, Question: q.question, Type: TEST_QTYPE_LABEL[qTypeOf(q)], Answered: answered.length,
-        'Correct answer': '', Correct: '', '% Correct': '', 'Most common wrong answer': '',
-        'How the room answered': roomSummary(q, test.participants),
-        'Marks available': isMarkable(q) ? q.marks ?? 0 : 'Not marked',
-        'Marking guide / explanation': q.guide ?? '',
-      }
-    }
-    const answered = test.participants.filter(p => picks(p.answers[q.id]).length > 0)
-    const right = answered.filter(p => sameAnswer(p.answers[q.id], q.correctAnswers)).length
-    // Most common wrong answer (as a set of letters)
-    const wrong = new Map<string, number>()
-    answered.forEach(p => { if (!sameAnswer(p.answers[q.id], q.correctAnswers)) { const k = letters(picks(p.answers[q.id]), q.options.length); wrong.set(k, (wrong.get(k) ?? 0) + 1) } })
-    const top = [...wrong.entries()].sort((a, b) => b[1] - a[1])[0]
+    const answered = test.participants.filter(p => given(q, p.answers[q.id]))
+    const mcq = isMcq(q)
+    const right = mcq ? answered.filter(p => sameAnswer(p.answers[q.id], q.correctAnswers)).length : 0
     return {
-      'Q#': i + 1,
+      'Q#': `Q${i + 1}`,
       Question: q.question,
-      Type: TEST_QTYPE_LABEL.mcq,
-      Answered: answered.length,
-      'Correct answer': full(q.correctAnswers, q),
-      Correct: right,
-      '% Correct': answered.length ? `${Math.round((right / answered.length) * 100)}%` : '',
-      'Most common wrong answer': top ? `${top[0]} (${top[1]})` : '',
-      'How the room answered': '',
-      'Marks available': 1,
-      'Marking guide / explanation': q.explanation ?? '',
+      Type: TEST_QTYPE_LABEL[qTypeOf(q)],
+      'People who answered': answered.length,
+      'Correct answer': mcq ? full(q.correctAnswers, q) : (isMarkable(q) ? 'You mark it' : 'Not marked'),
+      'Got it right': mcq ? (answered.length ? `${right} of ${answered.length} (${Math.round((right / answered.length) * 100)}%)` : '—') : '',
+      'What the answers show': answersShow(q, test.participants),
+      'Marks available': mcq ? 1 : (isMarkable(q) ? q.marks ?? 0 : 'Not marked'),
+      'Explanation / marking guide': mcq ? (q.explanation ?? '') : (q.guide ?? ''),
     }
   })
   return { results, answers, questions, toMark: toMarkRows(test) }
@@ -643,12 +654,12 @@ export function addTestPdf(doc: any, autoTable: any, test: TestResult, title: st
       const answered = ps.filter(p => given(q, p.answers[q.id]))
       doc.setTextColor(110)
       doc.text(`${TEST_QTYPE_LABEL[qTypeOf(q)]} · ${isMarkable(q) ? marksLabel(q) : 'not marked'} · ${answered.length} of ${ps.length} answered`, margin, y)
-      const summary = roomSummary(q, ps)
+      const summary = answersShow(q, ps)
       autoTable(doc, {
         startY: y + 6,
         head: [['Name', 'Answer']],
         body: [
-          ...(summary ? [['Whole room', summary]] : []),
+          ...(summary ? [['Everyone', summary]] : []),
           ...answered.map(p => [p.name, answerText(q, p.answers[q.id])]),
         ],
         theme: 'striped', headStyles: { fillColor: [0, 0, 121] }, styles: { fontSize: 9, cellPadding: 4, overflow: 'linebreak' },
