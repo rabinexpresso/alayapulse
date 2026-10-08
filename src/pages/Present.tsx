@@ -680,7 +680,7 @@ export default function Present() {
                   />
                 )}
                 renderAnswers={(q, sheets) => (
-                  <TestAnswersDisplay key={q.id} question={q} sheets={sheets} theme={(slide as TestBlockShowSlide).theme} />
+                  <TestAnswersDisplay key={q.id} question={q} sheets={sheets} theme={q.theme ?? (slide as TestBlockShowSlide).theme ?? 'navy'} />
                 )}
               />
             ) : (

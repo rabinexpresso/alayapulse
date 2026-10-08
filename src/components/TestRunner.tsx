@@ -6,7 +6,7 @@ import { Confetti, CountUp } from '@/components/Celebration'
 import { saveTestAnswers, submitTestAnswers, subscribeToTestAnswers } from '@/lib/session'
 import {
   remainingOf, formatClock, formatDuration, sameAnswer, answerState, answerText, qTypeOf, isMarkable, autoMarked,
-  wordCount, OE_MAX_WORDS,
+  wordCount, OE_MAX_WORDS, OE_MAX_CHARS,
   type StoredTestBlockSlide, type StoredTestQuestion, type TestState, type TestAnswerDoc, type TestAnswer,
 } from '@/lib/selfPacedTest'
 
@@ -562,15 +562,15 @@ function OpenAnswer({ value, onChange }: { q: StoredTestQuestion; value: string;
         placeholder="Type your answer…"
         onChange={e => {
           let v = e.target.value
-          const over = wordCount(v) > limit
-          if (over) v = v.trim().split(/\s+/).slice(0, limit).join(' ')
+          const over = wordCount(v) > limit || v.length > OE_MAX_CHARS
+          if (wordCount(v) > limit) v = v.trim().split(/\s+/).slice(0, limit).join(' ')
           setHit(over)
-          onChange(v.slice(0, limit * 25))
+          onChange(v.slice(0, OE_MAX_CHARS))
         }}
         className="w-full resize-none rounded-2xl border-2 border-midnight-sky-100 bg-white px-4 py-3.5 text-base leading-relaxed text-midnight-sky-900 outline-none transition placeholder:text-midnight-sky-400 focus:border-sky-blue"
       />
       <p className={cn('mt-1 text-right text-xs tabular-nums', hit || n >= limit ? 'font-semibold text-hot-pink' : 'text-midnight-sky-400')}>
-        {hit ? 'Word limit reached · ' : ''}{n.toLocaleString()} / {limit.toLocaleString()} words
+        {hit ? 'Limit reached · ' : ''}{n.toLocaleString()} / {limit.toLocaleString()} words
       </p>
     </div>
   )

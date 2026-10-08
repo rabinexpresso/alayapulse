@@ -337,7 +337,7 @@ function withLeaderboard(list: Slide[]): Slide[] {
 }
 
 /** Lets the question editor know it's editing a test question. */
-const TestQuestionCtx = createContext<{ index: number; count: number } | null>(null)
+const TestQuestionCtx = createContext<{ index: number; count: number; testTheme?: string } | null>(null)
 
 /** Where `afterId` really points when inserting: a collapsed block's header
  *  means "after the whole block", an end marker means "after the block". */
@@ -2247,7 +2247,7 @@ export default function Create() {
             (() => {
               const r = testRanges(slides).find(x => x.memberIds.includes(selectedSlide.id))
               return (
-                <TestQuestionCtx.Provider value={r ? { index: r.memberIds.indexOf(selectedSlide.id), count: r.memberIds.length } : null}>
+                <TestQuestionCtx.Provider value={r ? { index: r.memberIds.indexOf(selectedSlide.id), count: r.memberIds.length, testTheme: (slides[r.start] as TestHeaderSlide).theme } : null}>
                   <SlideEditor slide={selectedSlide} onUpdate={updateSlide} onSplitHtml={splitHtmlSlide} onPushHistory={pushHistory} />
                 </TestQuestionCtx.Provider>
               )
@@ -3710,6 +3710,8 @@ function SlideEditor({ slide, onUpdate, onSplitHtml, onPushHistory }: {
   onSplitHtml?: (id: string, count: number) => void
   onPushHistory?: () => void
 }) {
+  // A test question with no colour of its own previews in the test's colour
+  const testCtx = useContext(TestQuestionCtx)
   if (slide.type === 'pdf') {
     if (!slide.imgUrl) {
       return (
@@ -3856,7 +3858,9 @@ function SlideEditor({ slide, onUpdate, onSplitHtml, onPushHistory }: {
         <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-midnight-sky-500">
           Slide preview
         </p>
-        <SlidePreviewCard slide={slide as QuestionSlide} />
+        <SlidePreviewCard slide={testCtx
+          ? { ...(slide as QuestionSlide), theme: TEST_THEMES.some(t => t.id === (slide as QuestionSlide).theme) ? (slide as QuestionSlide).theme : (testCtx.testTheme ?? 'navy') }
+          : slide as QuestionSlide} />
       </div>
     </div>
   )
@@ -3955,7 +3959,11 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
   onPushHistory?: () => void
 }) {
   const qInfo = QTYPES.find(q => q.type === slide.type)!
-  const inTest = useContext(TestQuestionCtx) !== null
+  const testCtx = useContext(TestQuestionCtx)
+  const inTest = testCtx !== null
+  // In a test, no colour of its own means "same as the test"
+  const ownTestTheme = TEST_THEMES.some(t => t.id === slide.theme) ? slide.theme : undefined
+  const shownTheme = inTest ? (ownTestTheme ?? testCtx?.testTheme ?? 'navy') : (slide.theme ?? 'navy')
 
   const PLACEHOLDERS: Record<QType, string> = {
     mcq:       'e.g. What is your biggest leadership challenge right now?',
@@ -4122,7 +4130,44 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
               )}
             </div>
 
-            {/* Slide background theme (a test question uses the test's colour instead) */}
+            {/* In a test: this question's colour for its answer review on the big screen */}
+            {inTest && (
+              <div className="mt-3 border-t border-midnight-sky-100 pt-3">
+                <label className="mb-2 block text-xs font-semibold text-midnight-sky-700">
+                  Big-screen colour
+                  <span className="ml-1.5 font-normal text-midnight-sky-500">for this question’s answer review after the test</span>
+                </label>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    onClick={() => onUpdate({ theme: undefined })}
+                    className={cn('flex flex-col items-center gap-1 transition-all', !ownTestTheme ? 'opacity-100' : 'opacity-60 hover:opacity-90')}
+                  >
+                    <span
+                      className={cn('flex size-6 items-center justify-center rounded-full ring-offset-1', !ownTestTheme ? 'ring-2 ring-midnight-sky-700' : '')}
+                      style={{ backgroundColor: testTheme(testCtx?.testTheme).bg, border: testCtx?.testTheme === 'white' ? '1px solid rgba(0,0,0,0.12)' : undefined }}
+                    >
+                      <ClipboardCheck className="size-3" style={{ color: testTheme(testCtx?.testTheme).fg }} />
+                    </span>
+                    <span className="text-[9px] font-medium text-midnight-sky-700">Same as test</span>
+                  </button>
+                  {TEST_THEMES.map(t => (
+                    <button
+                      key={t.id}
+                      onClick={() => onUpdate({ theme: t.id })}
+                      className={cn('flex flex-col items-center gap-1 transition-all', ownTestTheme === t.id ? 'opacity-100' : 'opacity-60 hover:opacity-90')}
+                    >
+                      <span
+                        className={cn('size-6 rounded-full ring-offset-1', ownTestTheme === t.id ? 'ring-2 ring-midnight-sky-700' : '')}
+                        style={{ backgroundColor: t.bg, border: t.id === 'white' ? '1px solid rgba(0,0,0,0.12)' : undefined }}
+                      />
+                      <span className="text-[9px] font-medium text-midnight-sky-700">{t.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Slide background theme */}
             <div className={cn('mt-3 border-t border-midnight-sky-100 pt-3', inTest && 'hidden')}>
               <label className="mb-2 block text-xs font-semibold text-midnight-sky-700">
                 Slide background
@@ -4161,9 +4206,9 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
             </p>
             <div
               className="overflow-hidden rounded-2xl p-5 shadow-[0_8px_32px_-8px_rgba(0,0,121,0.25)] transition-colors duration-300"
-              style={{ backgroundColor: contentColors(slide.theme ?? 'navy').bg }}
+              style={{ backgroundColor: contentColors(shownTheme).bg }}
             >
-              <SlidePreviewCard slide={slide} />
+              <SlidePreviewCard slide={inTest ? { ...slide, theme: shownTheme } : slide} />
             </div>
           </div>
         )}

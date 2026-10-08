@@ -338,7 +338,10 @@ export function TestBlockView({
   }
 
   return (
-    <div className="relative h-full w-full bg-(--bg) text-(--fg)" style={themeVars(step?.stage === 'leaderboard' ? 'navy' : slide.theme)}>
+    <div
+      className="relative h-full w-full bg-(--bg) text-(--fg) transition-colors duration-500"
+      style={themeVars(step?.stage === 'leaderboard' ? 'navy' : step?.stage === 'review' ? (questions[step.index]?.theme ?? slide.theme) : slide.theme)}
+    >
       {body}
 
       {/* Little "can't do that yet" note */}

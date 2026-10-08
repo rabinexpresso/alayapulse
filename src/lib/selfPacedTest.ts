@@ -56,8 +56,11 @@ export const TEST_QTYPE_LABEL: Record<TestQType, string> = {
 /** Marks a question gets when it first goes into a test (the host can change
  *  them, or choose "Not marked" = 0). Rating is usually opinion, so unmarked. */
 export const DEFAULT_MARKS: Partial<Record<TestQType, number>> = { openended: 5, wordcloud: 1, ranking: 1 }
-/** Open-ended answers in a test: up to this many words (about 4 A4 pages). */
+/** Open-ended answers in a test: up to this many words (about 4 A4 pages)… */
 export const OE_MAX_WORDS = 2000
+/** …and never more than this many characters, whatever the word lengths —
+ *  room for 2,000 long words, and well inside Excel's ~32,000 per cell. */
+export const OE_MAX_CHARS = 20000
 
 /** One answer on a sheet, by question type:
  *   multiple choice → option indexes picked
@@ -107,6 +110,8 @@ export interface TestQuestion extends TestQuestionSettings {
   explanation?:   string
   /** What a good answer includes. Never sent to phones. */
   guide?:         string
+  /** Big-screen colour for this question's answer review (else the test's). */
+  theme?:         string
 }
 
 /** Collapsed block in a running show. */
@@ -325,6 +330,7 @@ function toTestQuestion(q: AnyS): TestQuestion {
     id: q.id, type, question: q.question ?? '', options,
     correctAnswers: type === 'mcq' && Array.isArray(q.correctAnswers) ? q.correctAnswers : [],
     ...(q.imgUrl ? { imgUrl: String(q.imgUrl) } : {}),
+    ...(TEST_THEMES.some(t => t.id === q.theme) ? { theme: q.theme } : {}),
   }
   if (type === 'mcq') {
     return { ...base, ...(typeof q.explanation === 'string' && q.explanation.trim() ? { explanation: q.explanation.trim() } : {}) }
@@ -354,6 +360,7 @@ export function expandTestBlocks(slides: AnyS[]): AnyS[] {
       ...(q.correctAnswers?.length ? { correctAnswers: q.correctAnswers } : {}),
       ...(q.explanation ? { explanation: q.explanation } : {}),
       ...(q.imgUrl ? { imgUrl: q.imgUrl } : {}),
+      ...(q.theme ? { theme: q.theme } : {}),
       ...(q.marks ? { marks: q.marks } : {}),
       ...(q.guide ? { markingGuide: q.guide } : {}),
       ...(q.maxEntries ? { wcMaxSubmissions: q.maxEntries } : {}),
@@ -372,7 +379,7 @@ export function toStoredTestBlock(s: TestBlockShowSlide): StoredTestBlockSlide {
     id: s.id, type: 'testblock', ...testSettingsOf(s),
     questions: s.questions.map(q => {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { correctAnswers, explanation, guide, ...rest } = q
+      const { correctAnswers, explanation, guide, theme, ...rest } = q
       return { ...rest, type: qTypeOf(q), pick: qTypeOf(q) === 'mcq' ? Math.max(1, correctAnswers.length) : 1 }
     }),
   }
