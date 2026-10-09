@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Check, X, Clock, Pause, ChevronLeft, ChevronRight, ClipboardCheck, WifiOff, Loader2 } from 'lucide-react'
-import { cn, optionLabel } from '@/lib/utils'
+import { cn, optionLabel, useAutoGrow } from '@/lib/utils'
 import { Confetti, CountUp } from '@/components/Celebration'
 import { saveTestAnswers, finishTestSheet, writeTestSheetRest, subscribeToTestAnswers } from '@/lib/session'
 import {
@@ -728,12 +728,15 @@ function OpenAnswer({ value, onChange }: { q: StoredTestQuestion; value: string;
   const limit = OE_MAX_WORDS
   const [hit, setHit] = useState(false)
   const n = wordCount(value)
+  const box = useRef<HTMLTextAreaElement>(null)
+  useAutoGrow(box, value)
   return (
     <div className="mt-4">
       <textarea
+        ref={box}
         value={value}
         rows={8}
-        style={{ fieldSizing: 'content', minHeight: '12rem' } as React.CSSProperties}
+        style={{ minHeight: '12rem' }}
         placeholder="Type your answer…"
         onChange={e => {
           let v = e.target.value

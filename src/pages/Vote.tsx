@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Check, Send, LogOut, Clock } from 'lucide-react'
-import { cn, optionLabel } from '@/lib/utils'
+import { cn, optionLabel, useAutoGrow } from '@/lib/utils'
 import { Confetti, CountUp } from '@/components/Celebration'
 import { TestRunner } from '@/components/TestRunner'
 import type { StoredTestBlockSlide } from '@/lib/selfPacedTest'
@@ -57,6 +57,7 @@ export default function Vote() {
   const [wcWords,       setWcWords]       = useSharedStored<Record<string, string[]>>(stored('wc-words'), {})
   // Open-ended multi-submit: how many responses each person has sent per slide
   const [oeSubmissions, setOeSubmissions] = useSharedStored<Record<string, number>>(stored('oe'), {})
+  const [oeTexts,       setOeTexts]       = useSharedStored<Record<string, string[]>>(stored('oe-texts'), {})
   const [quizScore,       setQuizScore]       = useState(0)
   const [lastQuizResult,  setLastQuizResult]  = useState<{
     isCorrect: boolean
@@ -315,6 +316,7 @@ export default function Vote() {
         const newCount = (oeSubmissions[roundKey] ?? 0) + 1
         const updated  = { ...oeSubmissions, [roundKey]: newCount }
         setOeSubmissions(updated)
+        setOeTexts({ ...oeTexts, [roundKey]: [...(oeTexts[roundKey] ?? []), value] })
         if (newCount >= maxSubs) markSubmitted(roundKey)
       } else {
         // All other types: lock after one submission
@@ -574,9 +576,11 @@ export default function Vote() {
                 )}
                 {slideData.type === 'openended' && (
                   <OpenEndedQuestion
+                    key={roundKey}
                     submitting={submitting}
                     submissionsUsed={oeSubmissions[roundKey] ?? 0}
                     maxSubmissions={(slideData as { oeMaxSubmissions?: number }).oeMaxSubmissions ?? 1}
+                    sentTexts={oeTexts[roundKey] ?? []}
                     onSubmit={text => handleSubmit(text)}
                   />
                 )}
@@ -1190,29 +1194,57 @@ function WordCloudQuestion({
    3. Open-ended — textarea + submit
    ───────────────────────────────────────────────────────────────────────── */
 
+const ORDINAL = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth']
+
+/** Open-ended, one question at a time. When the host allows several answers,
+ *  each gets its own numbered box: sent ones stay listed above, the boxes
+ *  still to come show below, so nobody crams every answer into the first. */
 function OpenEndedQuestion({
-  submitting, onSubmit, submissionsUsed, maxSubmissions,
+  submitting, onSubmit, submissionsUsed, maxSubmissions, sentTexts,
 }: {
   submitting:      boolean
   onSubmit:        (text: string) => void
   submissionsUsed: number
   maxSubmissions:  number
+  sentTexts:       string[]   // what this person already sent here, in order
 }) {
-  const [text,        setText]        = useState('')
-  const [recentlySent, setRecentlySent] = useState(false)
+  const [text, setText] = useState('')
+  const box = useRef<HTMLTextAreaElement>(null)
+  useAutoGrow(box, text)
   const MAX = 1000
+  const multi   = maxSubmissions > 1
   const allUsed = submissionsUsed >= maxSubmissions
+  const now     = submissionsUsed + 1   // the answer being written
+
+  // Empty the box only once the answer has really gone — a failed send keeps the text
+  const prevUsed = useRef(submissionsUsed)
+  useEffect(() => {
+    const grew = submissionsUsed > prevUsed.current
+    prevUsed.current = submissionsUsed
+    if (!grew) return
+    setText('')
+    if (submissionsUsed < maxSubmissions) box.current?.focus()
+  }, [submissionsUsed, maxSubmissions])
 
   const handleSubmit = () => {
     const trimmed = text.trim()
     if (!trimmed || submitting || allUsed) return
     onSubmit(trimmed)
-    setText('')
-    if (maxSubmissions > 1) {
-      setRecentlySent(true)
-      setTimeout(() => setRecentlySent(false), 2500)
-    }
   }
+
+  const sentCard = (i: number) => (
+    <motion.div
+      key={i}
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="w-full rounded-2xl border border-midnight-sky-100 bg-midnight-sky-50/70 px-4 py-3 text-left"
+    >
+      <p className="flex items-center gap-1.5 text-xs font-semibold text-[#178a3a]">
+        <Check className="size-3.5" strokeWidth={3} /> Answer {i + 1} sent
+      </p>
+      {sentTexts[i] && <p className="mt-1 line-clamp-3 whitespace-pre-wrap break-words text-sm text-midnight-sky-600">{sentTexts[i]}</p>}
+    </motion.div>
+  )
 
   if (allUsed) {
     return (
@@ -1227,70 +1259,50 @@ function OpenEndedQuestion({
         </motion.div>
         <div>
           <p className="text-lg font-semibold text-midnight-sky-900">
-            {maxSubmissions > 1 ? 'All responses submitted!' : 'Response recorded!'}
+            {multi ? `All ${maxSubmissions} answers sent!` : 'Response recorded!'}
           </p>
           <p className="mt-1 font-light text-midnight-sky-500">Waiting for the next question…</p>
         </div>
+        {multi && sentTexts.length > 0 && (
+          <div className="flex w-full flex-col gap-2">{sentTexts.map((_, i) => sentCard(i))}</div>
+        )}
       </div>
     )
   }
 
   return (
-    <div className="flex flex-1 flex-col gap-4">
-      {/* Progress indicator — only shown when multi-submit is enabled */}
-      {maxSubmissions > 1 && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <p className="whitespace-nowrap text-sm font-medium text-midnight-sky-700">
-            {submissionsUsed === 0
-              ? `You can submit up to ${maxSubmissions} responses`
-              : `${submissionsUsed} of ${maxSubmissions} responses submitted`}
-          </p>
-          <div className="flex gap-1">
-            {Array.from({ length: maxSubmissions }, (_, i) => (
-              <span
-                key={i}
-                className={cn(
-                  'h-2 w-5 rounded-full transition-all',
-                  i < submissionsUsed ? 'bg-hot-pink' : 'bg-midnight-sky-200',
-                )}
-              />
-            ))}
-          </div>
+    <div className="flex flex-1 flex-col gap-3">
+      {multi && (
+        <div className="rounded-2xl border border-sky-blue/30 bg-sky-blue/10 px-4 py-3 text-sm leading-snug text-midnight-sky-800">
+          <strong className="font-semibold">You can give up to {maxSubmissions} answers.</strong> Put one answer in each box — when you send it, the next box opens.
         </div>
       )}
 
-      {/* Success toast for multi-submit */}
-      <AnimatePresence>
-        {recentlySent && (
-          <motion.div
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            className="flex items-center gap-2 rounded-xl bg-hot-pink/10 px-4 py-2.5 text-sm font-medium text-hot-pink"
-          >
-            <Check className="size-4 shrink-0" strokeWidth={2.5} />
-            Response sent! {maxSubmissions - submissionsUsed} more to go.
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Answers already sent */}
+      {multi && Array.from({ length: submissionsUsed }, (_, i) => sentCard(i))}
 
-      <div className="relative">
-        <textarea
-          value={text}
-          onChange={e => setText(e.target.value.slice(0, MAX))}
-          onKeyDown={e => e.key === 'Enter' && e.metaKey && handleSubmit()}
-          placeholder="Share your thoughts…"
-          rows={5}
-          disabled={submitting}
-          className={cn(
-            'w-full resize-none rounded-2xl border-2 border-midnight-sky-200 bg-white px-4 py-3.5 pb-7 text-base text-midnight-sky-900 placeholder:text-midnight-sky-400',
-            'outline-none transition-all focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/15',
-            'disabled:opacity-50',
-          )}
-        />
-        <span className="absolute bottom-3 right-4 text-xs text-midnight-sky-400">
-          {text.length}/{MAX}
-        </span>
+      {/* The answer being written now */}
+      <div>
+        {multi && <p className="mb-1.5 text-sm font-semibold text-midnight-sky-900">Answer {now} of {maxSubmissions}</p>}
+        <div className="relative">
+          <textarea
+            ref={box}
+            value={text}
+            onChange={e => setText(e.target.value.slice(0, MAX))}
+            onKeyDown={e => e.key === 'Enter' && e.metaKey && handleSubmit()}
+            placeholder={multi ? `Type your ${ORDINAL[submissionsUsed] ?? 'next'} answer…` : 'Share your thoughts…'}
+            rows={multi ? 4 : 5}
+            disabled={submitting}
+            className={cn(
+              'w-full resize-none overflow-hidden rounded-2xl border-2 border-midnight-sky-200 bg-white px-4 py-3.5 pb-7 text-base text-midnight-sky-900 placeholder:text-midnight-sky-400',
+              'outline-none transition-[border-color,box-shadow] focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/15',
+              'disabled:opacity-50',
+            )}
+          />
+          <span className="absolute bottom-3 right-4 text-xs text-midnight-sky-400">
+            {text.length}/{MAX}
+          </span>
+        </div>
       </div>
 
       <AnimatePresence>
@@ -1300,7 +1312,7 @@ function OpenEndedQuestion({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 8 }}
           >
-            <SubmitButton onClick={handleSubmit} label="Submit answer" loading={submitting} />
+            <SubmitButton onClick={handleSubmit} label={multi ? `Send answer ${now} of ${maxSubmissions}` : 'Submit answer'} loading={submitting} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -1310,6 +1322,13 @@ function OpenEndedQuestion({
           <LoadingDots color="pink" />
         </div>
       )}
+
+      {/* The boxes still to come */}
+      {multi && Array.from({ length: maxSubmissions - now }, (_, k) => now + k + 1).map(i => (
+        <div key={i} className="rounded-2xl border-2 border-dashed border-midnight-sky-200 px-4 py-3.5 text-sm text-midnight-sky-400">
+          <span className="font-semibold text-midnight-sky-500">Answer {i}</span> · opens after you send answer {i - 1}
+        </div>
+      ))}
     </div>
   )
 }

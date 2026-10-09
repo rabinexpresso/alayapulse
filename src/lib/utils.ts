@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
+import { useLayoutEffect, type RefObject } from 'react'
 
 /**
  * Merge Tailwind classes intelligently — later classes override earlier
@@ -8,6 +9,20 @@ import { twMerge } from 'tailwind-merge'
  */
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
+}
+
+/**
+ * Make a textarea grow with its text, so the whole answer stays in view.
+ * Done in script because iPhones don't support CSS `field-sizing` yet.
+ * Its starting height comes from `rows` / `min-height`.
+ */
+export function useAutoGrow(ref: RefObject<HTMLTextAreaElement | null>, value: string) {
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`
+  }, [ref, value])
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
