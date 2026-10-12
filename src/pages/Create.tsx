@@ -18,14 +18,14 @@ import {
   Video, Type, List, Quote, Users, BarChart2, PieChart,
   X, Table2, Check, Undo2, Redo2, Trophy, ImageIcon,
   ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, Clock,
-  Share2, Link2, ListOrdered, ClipboardCheck, ListChecks, ChevronRight,
+  Share2, Link2, ListOrdered, ClipboardCheck, ListChecks, ChevronRight, ClipboardList,
 } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
 import { PersistentHtmlIframe } from '@/components/PersistentHtmlIframe'
 import { cn, optionLabel, MAX_MCQ_OPTIONS, MAX_VIZ_OPTIONS } from '@/lib/utils'
 import { injectSlideNavigation } from '@/lib/importFile'
 import {
-  DEFAULT_TEST_SETTINGS, AFTER_ORDER_LABEL, TEST_THEMES, testTheme, isTestable, OE_MAX_WORDS,
+  DEFAULT_TEST_SETTINGS, DEFAULT_SURVEY_SETTINGS, AFTER_ORDER_LABEL, TEST_THEMES, testTheme, isTestable, isSurvey, OE_MAX_WORDS,
   normalizeTestBlocks, collapseTestBlocks, expandTestBlocks, testRanges, testMembership, testProblems,
   type TestHeaderSlide, type TestEndSlide, type TestAfterOrder, type TestScoreTiming,
 } from '@/lib/selfPacedTest'
@@ -258,6 +258,12 @@ interface QuestionSlide {
   marks?: number
   /** In a self-paced test (not MCQ): what a good answer includes. Never sent to phones. */
   markingGuide?: string
+  /** In a survey: false = optional (must be answered otherwise). */
+  required?: boolean
+  /** In a survey (MCQ): people can tick several options… */
+  pickMany?: boolean
+  /** …up to this many (any number when missing). */
+  pickMax?: number
 }
 type ContentTemplate = 'heading' | 'bullets' | 'quote'
 interface ContentSlide {
@@ -336,8 +342,13 @@ function withLeaderboard(list: Slide[]): Slide[] {
   return [...list, { id: uid(), type: 'leaderboard' } as LeaderboardSlide]
 }
 
-/** Lets the question editor know it's editing a test question. */
-const TestQuestionCtx = createContext<{ index: number; count: number; testTheme?: string } | null>(null)
+/** Lets the question editor know it's editing a test (or survey) question. */
+const TestQuestionCtx = createContext<{ index: number; count: number; testTheme?: string; survey?: boolean } | null>(null)
+
+/** The kind of block a slide list's header is: a self-paced test or a survey. */
+type BlockKind = 'test' | 'survey'
+const blockKind = (h: unknown): BlockKind => (isSurvey(h as { kind?: string }) ? 'survey' : 'test')
+const BLOCK_NAME: Record<BlockKind, string> = { test: 'self-paced test', survey: 'survey' }
 
 /** Where `afterId` really points when inserting: a collapsed block's header
  *  means "after the whole block", an end marker means "after the block". */
@@ -414,6 +425,12 @@ function parseCsvQuestions(csvText: string): CsvParseResult {
 
   const ci = (name: string) => headers.indexOf(name)
   const VALID_TYPES = ['mcq', 'wordcloud', 'openended', 'rating', 'ranking']
+  // Survey-friendly names: checkboxes = multiple choice with several ticks;
+  // short / long text answers are open-ended (the box grows as people type)
+  const ALIASES: Record<string, string> = {
+    checkboxes: 'mcq', checkbox: 'mcq', shortanswer: 'openended', 'short answer': 'openended', 'short-answer': 'openended',
+    paragraph: 'openended', 'open ended': 'openended', 'open-ended': 'openended', 'word cloud': 'wordcloud', multiplechoice: 'mcq', 'multiple choice': 'mcq',
+  }
 
   // Option columns come from the header rather than a fixed list, so a sheet can
   // carry as many as it needs: option_a…option_z, or option_1…option_100 for
@@ -428,12 +445,13 @@ function parseCsvQuestions(csvText: string): CsvParseResult {
     const vals = parseCsvRow(lines[i]).map(v => v.trim())
     const get = (name: string) => vals[ci(name)] ?? ''
 
-    const type = get('type').toLowerCase()
+    const rawType = get('type').toLowerCase().trim()
+    const type = ALIASES[rawType] ?? rawType
     const question = get('question')
     if (!type && !question) continue
 
     if (!VALID_TYPES.includes(type)) {
-      errors.push({ row: i + 1, message: `Row ${i + 1}: unknown type "${get('type')}" — must be mcq, wordcloud, openended, rating, or ranking.` })
+      errors.push({ row: i + 1, message: `Row ${i + 1}: unknown type "${get('type')}" — must be mcq, checkboxes, wordcloud, openended, rating, or ranking.` })
       continue
     }
     if (!question) {
@@ -452,6 +470,9 @@ function parseCsvQuestions(csvText: string): CsvParseResult {
       // did nothing until the presenter reset the votes — then it started a
       // countdown on a slide that has no time limit in the editor.
       ...(type === 'mcq' ? { timer: (!isNaN(timerVal) && timerVal > 0) ? timerVal : 30 } : {}),
+      // Surveys: several ticks allowed, and questions that don't have to be answered
+      ...(rawType.startsWith('checkbox') ? { pickMany: true } : {}),
+      ...(/^(no|n|false|optional|0)$/i.test(get('required').trim()) ? { required: false } : {}),
     }
 
     /** Non-blank option cells in header order, capped at `max`. */
@@ -781,7 +802,7 @@ export default function Create() {
   // Self-paced test notes: "block added", "moved out of the block", …
   const [testToast, setTestToast] = useState<string | null>(null)
   // CSV import window: where the questions go
-  const [csvModal, setCsvModal] = useState<{ dest: 'live' | 'test' | 'ask'; headerId?: string } | null>(null)
+  const [csvModal, setCsvModal] = useState<{ dest: 'live' | BlockKind | 'ask'; headerId?: string } | null>(null)
 
   /* ── Undo / Redo history ─────────────────────────────────────────────── */
   type HistorySnap = { slides: Slide[]; selectedId: string | null }
@@ -1157,7 +1178,7 @@ export default function Create() {
 
   /* ── CSV import ──────────────────────────────────────────────────────── */
 
-  const importCsvSlides = useCallback((newSlides: QuestionSlide[], dest: 'live' | 'test' = 'live', headerId?: string) => {
+  const importCsvSlides = useCallback((newSlides: QuestionSlide[], dest: 'live' | BlockKind = 'live', headerId?: string) => {
     pushHistory()
     if (dest === 'live') {
       setSlides(prev => [...prev, ...newSlides])
@@ -1165,14 +1186,15 @@ export default function Create() {
       setCsvImportToast({ count: newSlides.length })
       return
     }
-    // Into a test: every question goes inside the block (anything else right after it)
+    // Into a test or survey: every question goes inside the block (anything else right after it)
     const intoTest = newSlides.filter(isTestable)
     const outside  = newSlides.filter(q => !isTestable(q))
     setSlides(prev => {
-      const block = testRanges(prev).find(r => r.headerId === headerId) ?? testRanges(prev)[0]
+      const ranges = testRanges(prev).filter(r => blockKind(prev[r.start]) === dest)
+      const block = ranges.find(r => r.headerId === headerId) ?? ranges[0]
       if (!block) {
-        // No test yet: start one at the end of the deck
-        const header: TestHeaderSlide = { id: uid(), type: 'testblock', ...DEFAULT_TEST_SETTINGS }
+        // None yet: start one at the end of the deck
+        const header: TestHeaderSlide = { id: uid(), type: 'testblock', ...(dest === 'survey' ? DEFAULT_SURVEY_SETTINGS : DEFAULT_TEST_SETTINGS) }
         const end: TestEndSlide = { id: uid(), type: 'testend', blockId: header.id }
         return [...prev, header, ...intoTest, end, ...outside]
       }
@@ -1181,7 +1203,7 @@ export default function Create() {
     if (intoTest[0]) setSelectedId(intoTest[0].id)
     setCsvImportToast({
       count: intoTest.length,
-      message: `${intoTest.length} question${intoTest.length !== 1 ? 's' : ''} added to the self-paced test`
+      message: `${intoTest.length} question${intoTest.length !== 1 ? 's' : ''} added to the ${BLOCK_NAME[dest]}`
         + (outside.length ? ` · ${outside.length} other slide${outside.length !== 1 ? 's' : ''} added after the block` : ''),
     })
   }, [pushHistory])
@@ -1211,7 +1233,7 @@ export default function Create() {
       const r = testRanges(slidesRef.current).find(x => x.headerId === id)
       setSlides(prev => prev.filter(s => s.id !== id && !(s.type === 'testend' && (s as TestEndSlide).blockId === id)))
       setSelectedId(r?.memberIds[0] ?? null)
-      if (r?.memberIds.length) setTestToast(`Test block removed — its ${r.memberIds.length} question${r.memberIds.length !== 1 ? 's are' : ' is'} now live questions`)
+      if (r?.memberIds.length) setTestToast(`${blockKind(target) === 'survey' ? 'Survey' : 'Test'} block removed — its ${r.memberIds.length} question${r.memberIds.length !== 1 ? 's are' : ' is'} now live questions`)
       return
     }
     setSlides(prev => {
@@ -1312,8 +1334,8 @@ export default function Create() {
     setSlides(fixed as Slide[])
     if (movedOut.length) {
       setTestToast(movedOut.length === 1
-        ? 'Only questions can go in a self-paced test — that slide was placed just after the block'
-        : `Only questions can go in a self-paced test — ${movedOut.length} slides were placed just after the block`)
+        ? 'Only questions can go in a self-paced test or survey — that slide was placed just after the block'
+        : `Only questions can go in a self-paced test or survey — ${movedOut.length} slides were placed just after the block`)
     }
   }, [slides])
 
@@ -1326,9 +1348,9 @@ export default function Create() {
 
   /* ── Self-paced test blocks ─────────────────────────────────────────── */
 
-  const addTestBlock = useCallback((afterId?: string) => {
+  const addTestBlock = useCallback((afterId?: string, kind: BlockKind = 'test') => {
     pushHistory()
-    const header: TestHeaderSlide = { id: uid(), type: 'testblock', ...DEFAULT_TEST_SETTINGS }
+    const header: TestHeaderSlide = { id: uid(), type: 'testblock', ...(kind === 'survey' ? DEFAULT_SURVEY_SETTINGS : DEFAULT_TEST_SETTINGS) }
     const end: TestEndSlide = { id: uid(), type: 'testend', blockId: header.id }
     setSlides(prev => {
       // Never inside another block — after it instead
@@ -1341,8 +1363,11 @@ export default function Create() {
     })
     setSelectedId(header.id)
     setAddMenu(undefined)
-    setTestToast('Self-paced test block added. It scores itself: no need to turn on Live quiz.')
+    setTestToast(kind === 'survey'
+      ? 'Survey added. Give it a title, then add questions — or import a CSV.'
+      : 'Self-paced test block added. It scores itself: no need to turn on Live quiz.')
   }, [pushHistory])
+  const addSurveyBlock = useCallback((afterId?: string) => addTestBlock(afterId, 'survey'), [addTestBlock])
 
   const addTestQuestion = useCallback((headerId: string, type: QType = 'mcq') => {
     pushHistory()
@@ -2083,7 +2108,8 @@ export default function Create() {
         {csvModal && (
           <CsvImportModal
             destination={csvModal.dest}
-            hasTest={slides.some(s => s.type === 'testblock')}
+            hasTest={slides.some(s => s.type === 'testblock' && blockKind(s) === 'test')}
+            hasSurvey={slides.some(s => s.type === 'testblock' && blockKind(s) === 'survey')}
             onClose={() => setCsvModal(null)}
             onImport={(list, dest) => { importCsvSlides(list, dest, csvModal.headerId); setCsvModal(null) }}
           />
@@ -2218,36 +2244,39 @@ export default function Create() {
           onAddCanvas={requestCanvas}
           onAddLeaderboard={addLeaderboard}
           onAddTest={addTestBlock}
+          onAddSurvey={addSurveyBlock}
           onAddTestQuestion={addTestQuestion}
-          onImportCsvToTest={headerId => setCsvModal({ dest: 'test', headerId })}
+          onImportCsvToTest={headerId => setCsvModal({ dest: blockKind(slides.find(x => x.id === headerId)), headerId })}
           onToggleTestCollapsed={toggleTestCollapsed}
         />
 
         {/* Right: editor */}
         <div className="scrollbar-panel flex flex-1 flex-col overflow-auto" style={{ background: '#f8f7f5' }}>
-          {selectedSlide && (selectedSlide.type === 'testblock' || selectedSlide.type === 'testend') ? (
-            <TestBlockEditor
-              header={(selectedSlide.type === 'testend'
-                ? slides.find(s => s.id === (selectedSlide as TestEndSlide).blockId)
-                : selectedSlide) as TestHeaderSlide}
-              slides={slides}
-              focusAfter={selectedSlide.type === 'testend'}
-              onUpdate={patch => {
+          {selectedSlide && (selectedSlide.type === 'testblock' || selectedSlide.type === 'testend') ? (() => {
+            const header = (selectedSlide.type === 'testend'
+              ? slides.find(s => s.id === (selectedSlide as TestEndSlide).blockId)
+              : selectedSlide) as TestHeaderSlide
+            const props = {
+              header,
+              slides,
+              focusAfter: selectedSlide.type === 'testend',
+              onUpdate: (patch: Partial<TestHeaderSlide>) => {
                 pushHistory()
                 const hid = selectedSlide.type === 'testend' ? (selectedSlide as TestEndSlide).blockId : selectedSlide.id
                 updateSlide(hid, patch)
-              }}
-              onSelect={setSelectedId}
-              onAddQuestion={addTestQuestion}
-              onImportCsv={headerId => setCsvModal({ dest: 'test', headerId })}
-              onMoveIn={moveIntoTest}
-              onDelete={deleteSlide}
-            />
-          ) : selectedSlide ? (
+              },
+              onSelect: setSelectedId,
+              onAddQuestion: addTestQuestion,
+              onImportCsv: (headerId: string) => setCsvModal({ dest: blockKind(header), headerId }),
+              onMoveIn: moveIntoTest,
+              onDelete: deleteSlide,
+            }
+            return blockKind(header) === 'survey' ? <SurveyBlockEditor key={header?.id} {...props} /> : <TestBlockEditor {...props} />
+          })() : selectedSlide ? (
             (() => {
               const r = testRanges(slides).find(x => x.memberIds.includes(selectedSlide.id))
               return (
-                <TestQuestionCtx.Provider value={r ? { index: r.memberIds.indexOf(selectedSlide.id), count: r.memberIds.length, testTheme: (slides[r.start] as TestHeaderSlide).theme } : null}>
+                <TestQuestionCtx.Provider value={r ? { index: r.memberIds.indexOf(selectedSlide.id), count: r.memberIds.length, testTheme: (slides[r.start] as TestHeaderSlide).theme, survey: blockKind(slides[r.start]) === 'survey' } : null}>
                   <SlideEditor slide={selectedSlide} onUpdate={updateSlide} onSplitHtml={splitHtmlSlide} onPushHistory={pushHistory} />
                 </TestQuestionCtx.Provider>
               )
@@ -2265,16 +2294,17 @@ export default function Create() {
    CSV Import Modal
    ───────────────────────────────────────────────────────────────────────── */
 
-function CsvImportModal({ onClose, onImport, destination = 'live', hasTest = false }: {
+function CsvImportModal({ onClose, onImport, destination = 'live', hasTest = false, hasSurvey = false }: {
   onClose: () => void
-  onImport: (slides: QuestionSlide[], dest: 'live' | 'test') => void
+  onImport: (slides: QuestionSlide[], dest: 'live' | BlockKind) => void
   /** 'ask' — let the host choose (nothing picked until they do) */
-  destination?: 'live' | 'test' | 'ask'
-  /** The deck already has a self-paced test block */
+  destination?: 'live' | BlockKind | 'ask'
+  /** The deck already has a self-paced test block / a survey */
   hasTest?: boolean
+  hasSurvey?: boolean
 }) {
   const [parseResult, setParseResult] = useState<CsvParseResult | null>(null)
-  const [dest, setDest] = useState<'live' | 'test' | null>(destination === 'ask' ? null : destination)
+  const [dest, setDest] = useState<'live' | BlockKind | null>(destination === 'ask' ? null : destination)
   const [dragOver, setDragOver]       = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -2284,12 +2314,13 @@ function CsvImportModal({ onClose, onImport, destination = 'live', hasTest = fal
     setParseResult(parseCsvQuestions(text))
   }
 
-  const TYPE_LABEL:  Record<string, string> = { mcq: 'MCQ', wordcloud: 'Word Cloud', openended: 'Open Ended', rating: 'Rating' }
+  const TYPE_LABEL:  Record<string, string> = { mcq: 'MCQ', wordcloud: 'Word Cloud', openended: 'Open Ended', rating: 'Rating', ranking: 'Ranking' }
   const TYPE_COLOUR: Record<string, string> = {
     mcq:       'bg-sky-blue/15 text-sky-blue',
     wordcloud: 'bg-fresh-green/15 text-fresh-green',
     openended: 'bg-golden-sun/15 text-golden-sun',
     rating:    'bg-hot-pink/15 text-hot-pink',
+    ranking:   'bg-sky-blue/15 text-sky-blue',
   }
 
   return (
@@ -2305,7 +2336,7 @@ function CsvImportModal({ onClose, onImport, destination = 'live', hasTest = fal
         {/* Header */}
         <div className="flex items-center justify-between border-b border-midnight-sky-100 px-5 py-4">
           <h2 className="text-sm font-semibold text-midnight-sky-800">
-            {destination === 'test' ? 'Import questions into your self-paced test' : 'Import questions in CSV'}
+            {destination === 'test' ? 'Import questions into your self-paced test' : destination === 'survey' ? 'Import questions into your survey' : 'Import questions in CSV'}
           </h2>
           <button onClick={onClose} className="rounded-lg p-1 text-midnight-sky-400 transition hover:bg-midnight-sky-100 hover:text-midnight-sky-700">
             <X className="size-4" />
@@ -2377,6 +2408,7 @@ function CsvImportModal({ onClose, onImport, destination = 'live', hasTest = fal
                   {([
                     ['test', hasTest ? 'Into the self-paced test block' : 'Into a new self-paced test block', 'Everyone answers at their own pace; multiple choice is marked automatically'],
                     ['live', 'As live questions', 'You show them one at a time'],
+                    ['survey', hasSurvey ? 'Into the survey' : 'Into a new survey', 'Feedback form — no marks, anonymous by default'],
                   ] as const).map(([v, title, sub]) => (
                     <button
                       key={v}
@@ -2390,13 +2422,28 @@ function CsvImportModal({ onClose, onImport, destination = 'live', hasTest = fal
                         {dest === v && <span className="size-1.5 rounded-full bg-sky-blue" />}
                       </span>
                       <span>
-                        <span className="block text-xs font-medium text-midnight-sky-800">{title}</span>
+                        <span className="block text-xs font-medium text-midnight-sky-800">
+                          {title}
+                          {v === 'survey' && <span className="ml-1.5 rounded bg-hot-pink px-1 py-px text-[9px] font-bold text-white">New</span>}
+                        </span>
                         <span className="block text-[11px] text-midnight-sky-500">{sub}</span>
                       </span>
                     </button>
                   ))}
                 </div>
               )}
+              {parseResult.slides.length > 0 && dest === 'survey' && (() => {
+                const optional = parseResult.slides.filter(q => q.required === false).length
+                const ticks = parseResult.slides.filter(q => q.pickMany).length
+                const answers = parseResult.slides.filter(q => q.correctAnswers?.length).length
+                return (
+                  <div className="flex flex-col gap-1.5 rounded-xl border border-hot-pink/25 bg-hot-pink/[0.04] px-3.5 py-3 text-[11px] leading-snug">
+                    <p className="text-fresh-green"><Check className="mr-1 inline size-3" />{parseResult.slides.length} question{parseResult.slides.length !== 1 ? 's' : ''} go into the survey</p>
+                    <p className="text-midnight-sky-600">{parseResult.slides.length - optional} must be answered{optional ? ` · ${optional} optional` : ''}{ticks ? ` · ${ticks} let people tick several answers` : ''}</p>
+                    {answers > 0 && <p className="text-midnight-sky-500">Correct answers in the file are ignored — a survey isn’t marked</p>}
+                  </div>
+                )
+              })()}
               {parseResult.slides.length > 0 && dest === 'test' && (() => {
                 const mcqs = parseResult.slides.filter(q => q.type === 'mcq')
                 const others = parseResult.slides.length - mcqs.length
@@ -2430,9 +2477,12 @@ function CsvImportModal({ onClose, onImport, destination = 'live', hasTest = fal
                     <div key={s.id} className="flex items-start gap-2.5 rounded-lg px-2.5 py-2 hover:bg-midnight-sky-50">
                       <span className="mt-0.5 w-5 shrink-0 text-right text-[11px] font-medium text-midnight-sky-400">{i + 1}</span>
                       <span className={cn('mt-0.5 shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide', TYPE_COLOUR[s.type])}>
-                        {TYPE_LABEL[s.type]}
+                        {s.pickMany ? 'Checkboxes' : TYPE_LABEL[s.type]}
                       </span>
-                      <span className="text-[11px] leading-snug text-midnight-sky-700 line-clamp-2">{s.question}</span>
+                      <span className="text-[11px] leading-snug text-midnight-sky-700 line-clamp-2">
+                        {s.question}
+                        {dest === 'survey' && s.required === false && <span className="ml-1 text-midnight-sky-400">(optional)</span>}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -2472,7 +2522,9 @@ function CsvImportModal({ onClose, onImport, destination = 'live', hasTest = fal
                 ? 'Choose where these go'
                 : dest === 'test'
                   ? `Add ${parseResult.slides.length} to self-paced test`
-                  : `Add ${parseResult.slides.length} as live question${parseResult.slides.length !== 1 ? 's' : ''}`}
+                  : dest === 'survey'
+                    ? `Add ${parseResult.slides.length} to survey`
+                    : `Add ${parseResult.slides.length} as live question${parseResult.slides.length !== 1 ? 's' : ''}`}
           </button>
         </div>
       </motion.div>
@@ -2492,7 +2544,7 @@ function CsvImportModal({ onClose, onImport, destination = 'live', hasTest = fal
 function SlidePanel({
   slides, selectedId, isImporting, addMenuAfter,
   onSelect, onDelete, onDuplicate, onDragEnd, onImport, onOpenSorter, onSetAddMenu, onAddQuestion, onAddContent, onAddCanvas, onAddLeaderboard, onOpenCsv,
-  onAddTest, onAddTestQuestion, onImportCsvToTest, onToggleTestCollapsed,
+  onAddTest, onAddSurvey, onAddTestQuestion, onImportCsvToTest, onToggleTestCollapsed,
 }: {
   slides: Slide[]
   selectedId: string | null
@@ -2511,6 +2563,7 @@ function SlidePanel({
   onAddLeaderboard: (afterId?: string) => void
   onOpenCsv: () => void
   onAddTest: (afterId?: string) => void
+  onAddSurvey: (afterId?: string) => void
   onAddTestQuestion: (headerId: string) => void
   onImportCsvToTest: (headerId: string) => void
   onToggleTestCollapsed: (headerId: string) => void
@@ -2681,13 +2734,22 @@ function SlidePanel({
                   Leaderboard
                 </button>
               </div>
-              <button
-                onClick={() => onAddTest()}
-                className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-xl border border-golden-sun/40 bg-golden-sun/10 px-2 py-2.5 text-[9px] font-semibold text-golden-sun transition-all hover:bg-golden-sun/20"
-              >
-                <ClipboardCheck className="size-3" />
-                Self-paced test
-              </button>
+              <div className="mt-1.5 flex flex-col gap-1.5">
+                <button
+                  onClick={() => onAddTest()}
+                  className="flex items-center justify-center gap-1 rounded-xl border border-golden-sun/40 bg-golden-sun/10 px-1 py-2.5 text-[9px] font-semibold text-golden-sun transition-all hover:bg-golden-sun/20"
+                >
+                  <ClipboardCheck className="size-3 shrink-0" />
+                  Self-paced test
+                </button>
+                <button
+                  onClick={() => onAddSurvey()}
+                  className="flex items-center justify-center gap-1 rounded-xl border border-hot-pink/50 bg-hot-pink/15 px-1 py-2.5 text-[9px] font-semibold text-[#ff5c9a] transition-all hover:bg-hot-pink/25"
+                >
+                  <ClipboardList className="size-3 shrink-0" />
+                  Survey
+                </button>
+              </div>
             </div>
           </div>
         ) : (
@@ -2706,19 +2768,23 @@ function SlidePanel({
             }
             const visible = slides.filter(s => !folded(s))
             let n = 0
-            const addBetween = (afterId: string, testMode = false) => (
+            const addBetween = (afterId: string, blockMode?: BlockKind) => (
               <AddBetweenButton
                 isOpen={addMenuAfter === afterId}
-                testMode={testMode}
+                blockMode={blockMode}
                 onToggle={() => onSetAddMenu(addMenuAfter === afterId ? undefined : afterId)}
                 onAdd={(type) => onAddQuestion(type, afterId)}
                 onAddContent={(template) => onAddContent(template, afterId)}
                 onAddCanvas={() => onAddCanvas(afterId)}
                 onAddLeaderboard={() => onAddLeaderboard(afterId)}
                 onAddTest={() => onAddTest(afterId)}
+                onAddSurvey={() => onAddSurvey(afterId)}
               />
             )
-            const FRAME = 'mx-0.5 border-golden-sun/70 bg-golden-sun/[0.06]'
+            // Gold frame for a self-paced test, pink for a survey
+            const frameOf = (h: TestHeaderSlide | undefined) => blockKind(h) === 'survey'
+              ? 'mx-0.5 border-hot-pink/70 bg-hot-pink/[0.07]'
+              : 'mx-0.5 border-golden-sun/70 bg-golden-sun/[0.06]'
             return (
               <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
                 <SortableContext items={visible.filter(s => s.type !== 'testend').map(s => s.id)} strategy={verticalListSortingStrategy}>
@@ -2730,7 +2796,7 @@ function SlidePanel({
                         n++
                         return (
                           <div key={h.id} data-slide-id={h.id}>
-                            <div className={cn(FRAME, 'mt-1 border-2 px-1 pt-1', h.collapsed ? 'mb-0.5 rounded-xl pb-1' : 'rounded-t-xl border-b-0')}>
+                            <div className={cn(frameOf(h), 'mt-1 border-2 px-1 pt-1', h.collapsed ? 'mb-0.5 rounded-xl pb-1' : 'rounded-t-xl border-b-0')}>
                               <TestHeaderCard
                                 header={h}
                                 number={n}
@@ -2741,7 +2807,7 @@ function SlidePanel({
                                 onDelete={() => onDelete(h.id)}
                                 onDuplicate={() => onDuplicate(h.id)}
                               />
-                              {!h.collapsed && addBetween(h.id, true)}
+                              {!h.collapsed && addBetween(h.id, blockKind(h))}
                             </div>
                             {h.collapsed && addBetween(h.id)}
                           </div>
@@ -2752,8 +2818,9 @@ function SlidePanel({
                         const h = headers.get(e.blockId)
                         return (
                           <div key={e.id} data-slide-id={e.id}>
-                            <div className={cn(FRAME, 'mb-0.5 rounded-b-xl border-2 border-t-0 px-1.5 pb-1.5')}>
+                            <div className={cn(frameOf(h), 'mb-0.5 rounded-b-xl border-2 border-t-0 px-1.5 pb-1.5')}>
                               <TestEndRows
+                                survey={blockKind(h) === 'survey'}
                                 order={h?.afterOrder ?? 'lb-review'}
                                 isSelected={selectedId === e.id}
                                 onSelect={() => onSelect(e.id)}
@@ -2766,13 +2833,14 @@ function SlidePanel({
                         )
                       }
                       const inTest = memberOf.has(slide.id)
+                      const blockHeader = inTest ? headers.get(memberOf.get(slide.id)!) : undefined
                       if (!inTest) n++
                       const own = (slide as QuestionSlide).theme
                       const shown = inTest && !TEST_THEMES.some(t => t.id === own)
                         ? { ...slide, theme: headers.get(memberOf.get(slide.id)!)?.theme ?? 'navy' } as Slide
                         : slide
                       return (
-                        <div key={slide.id} data-slide-id={slide.id} className={inTest ? cn(FRAME, 'border-x-2 px-0.5') : undefined}>
+                        <div key={slide.id} data-slide-id={slide.id} className={inTest ? cn(frameOf(blockHeader), 'border-x-2 px-0.5') : undefined}>
                           <SlideThumbnail
                             slide={shown}
                             label={inTest ? `Q${qNo.get(slide.id)}` : String(n)}
@@ -2781,7 +2849,7 @@ function SlidePanel({
                             onDelete={() => onDelete(slide.id)}
                             onDuplicate={() => onDuplicate(slide.id)}
                           />
-                          {addBetween(slide.id, inTest)}
+                          {addBetween(slide.id, inTest ? blockKind(blockHeader) : undefined)}
                         </div>
                       )
                     })}
@@ -2865,13 +2933,22 @@ function SlidePanel({
                       Leaderboard
                     </button>
                   </div>
-                  <button
-                    onClick={() => onAddTest(selectedId ?? undefined)}
-                    className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-golden-sun/30 bg-golden-sun/10 px-2 py-1 text-[10px] font-semibold text-golden-sun transition-all hover:bg-golden-sun/20"
-                  >
-                    <ClipboardCheck className="size-3" />
-                    Self-paced test
-                  </button>
+                  <div className="flex flex-col gap-1">
+                    <button
+                      onClick={() => onAddTest(selectedId ?? undefined)}
+                      className="flex items-center justify-center gap-1 rounded-lg border border-golden-sun/30 bg-golden-sun/10 px-1 py-1 text-[10px] font-semibold text-golden-sun transition-all hover:bg-golden-sun/20"
+                    >
+                      <ClipboardCheck className="size-3 shrink-0" />
+                      Self-paced test
+                    </button>
+                    <button
+                      onClick={() => onAddSurvey(selectedId ?? undefined)}
+                      className="flex items-center justify-center gap-1 rounded-lg border border-hot-pink/40 bg-hot-pink/15 px-1 py-1 text-[10px] font-semibold text-[#ff5c9a] transition-all hover:bg-hot-pink/25"
+                    >
+                      <ClipboardList className="size-3 shrink-0" />
+                      Survey
+                    </button>
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -3098,6 +3175,14 @@ function renderThumbContent(slide: Slide): ReactNode {
       <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-midnight-sky-900">
         <Trophy className="size-4 text-hot-pink/60" />
         <span className="text-[8px] font-medium text-white/35">Live quiz leaderboard</span>
+      </div>
+    )
+  }
+  if (slide.type === 'testblock' && blockKind(slide) === 'survey') {
+    return (
+      <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-hot-pink">
+        <ClipboardList className="size-4 text-white/80" />
+        <span className="text-[8px] font-semibold text-white">Survey</span>
       </div>
     )
   }
@@ -3378,7 +3463,7 @@ function SlideSorter({
 }
 
 function AddBetweenButton({
-  isOpen, onToggle, onAdd, onAddContent, onAddCanvas, onAddLeaderboard, onAddTest, testMode = false,
+  isOpen, onToggle, onAdd, onAddContent, onAddCanvas, onAddLeaderboard, onAddTest, onAddSurvey, blockMode,
 }: {
   isOpen: boolean
   onToggle: () => void
@@ -3387,9 +3472,11 @@ function AddBetweenButton({
   onAddCanvas: () => void
   onAddLeaderboard: () => void
   onAddTest: () => void
-  /** Inside a test block: only questions can go here */
-  testMode?: boolean
+  onAddSurvey: () => void
+  /** Inside a test or survey block: only questions can go here */
+  blockMode?: BlockKind
 }) {
+  const survey = blockMode === 'survey'
   return (
     <div className="px-2">
       <button
@@ -3416,21 +3503,26 @@ function AddBetweenButton({
             transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
             className="mb-1 mt-0.5 rounded-xl border border-white/15 bg-midnight-sky-800 p-1.5 shadow-xl"
           >
-            {testMode ? (
+            {blockMode ? (
               <>
-                <p className="mb-1 px-1 text-[8px] font-semibold uppercase tracking-wider text-golden-sun/80">Add to the test</p>
+                <p className={cn('mb-1 px-1 text-[8px] font-semibold uppercase tracking-wider', survey ? 'text-[#ff5c9a]' : 'text-golden-sun/80')}>
+                  {survey ? 'Add to the survey' : 'Add to the test'}
+                </p>
                 <div className="grid grid-cols-2 gap-1">
                   {QTYPES.map(q => (
                     <button
                       key={q.type}
                       onClick={() => onAdd(q.type)}
-                      className="flex items-center justify-center rounded-lg bg-golden-sun/10 px-1 py-1.5 text-[9px] font-medium text-golden-sun transition-all hover:bg-golden-sun/25"
+                      className={cn('flex items-center justify-center rounded-lg px-1 py-1.5 text-[9px] font-medium transition-all',
+                        survey ? 'bg-hot-pink/15 text-[#ff7aae] hover:bg-hot-pink/30' : 'bg-golden-sun/10 text-golden-sun hover:bg-golden-sun/25')}
                     >
                       {q.label}
                     </button>
                   ))}
                 </div>
-                <p className="mt-1 px-1 text-center text-[8px] leading-snug text-white/35">Multiple choice marks itself; you mark the others afterwards</p>
+                <p className="mt-1 px-1 text-center text-[8px] leading-snug text-white/35">
+                  {survey ? 'Nothing is marked — you choose which questions must be answered' : 'Multiple choice marks itself; you mark the others afterwards'}
+                </p>
               </>
             ) : (<>
             <p className="mb-1 px-1 text-[8px] font-semibold uppercase tracking-wider text-white/25">Question</p>
@@ -3472,13 +3564,22 @@ function AddBetweenButton({
                   Leaderboard
                 </button>
               </div>
-              <button
-                onClick={onAddTest}
-                className="mt-1 flex w-full items-center justify-center gap-1 rounded-lg bg-golden-sun/10 px-1 py-1.5 text-[9px] font-semibold text-golden-sun transition-all hover:bg-golden-sun/20"
-              >
-                <ClipboardCheck className="size-2.5" />
-                Self-paced test
-              </button>
+              <div className="mt-1 flex flex-col gap-1">
+                <button
+                  onClick={onAddTest}
+                  className="flex items-center justify-center gap-1 rounded-lg bg-golden-sun/10 px-1 py-1.5 text-[9px] font-semibold text-golden-sun transition-all hover:bg-golden-sun/20"
+                >
+                  <ClipboardCheck className="size-2.5 shrink-0" />
+                  Self-paced test
+                </button>
+                <button
+                  onClick={onAddSurvey}
+                  className="flex items-center justify-center gap-1 rounded-lg bg-hot-pink/15 px-1 py-1.5 text-[9px] font-semibold text-[#ff5c9a] transition-all hover:bg-hot-pink/25"
+                >
+                  <ClipboardList className="size-2.5 shrink-0" />
+                  Survey
+                </button>
+              </div>
             </div>
             </>)}
           </motion.div>
@@ -3965,6 +4066,7 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
   const qInfo = QTYPES.find(q => q.type === slide.type)!
   const testCtx = useContext(TestQuestionCtx)
   const inTest = testCtx !== null
+  const inSurvey = !!testCtx?.survey
   // In a test, no colour of its own means "same as the test"
   const ownTestTheme = TEST_THEMES.some(t => t.id === slide.theme) ? slide.theme : undefined
   const shownTheme = inTest ? (ownTestTheme ?? testCtx?.testTheme ?? 'navy') : (slide.theme ?? 'navy')
@@ -4027,6 +4129,24 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
               />
             </div>
 
+            {/* In a survey: must people answer it? */}
+            {inSurvey && (
+              <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-hot-pink/25 bg-hot-pink/[0.04] px-3.5 py-2.5">
+                <span className="mr-1 text-xs font-semibold text-midnight-sky-700">Answer needed?</span>
+                {([[true, 'Must answer'], [false, 'Optional']] as const).map(([v, l]) => (
+                  <button
+                    key={l}
+                    onClick={() => onUpdate({ required: v ? undefined : false })}
+                    className={cn('rounded-lg border px-3 py-1 text-xs transition',
+                      (slide.required !== false) === v ? 'border-hot-pink bg-hot-pink/10 font-semibold text-hot-pink' : 'border-midnight-sky-200 bg-white text-midnight-sky-500 hover:border-midnight-sky-400')}
+                  >
+                    {l}
+                  </button>
+                ))}
+                <span className="text-[11px] text-midnight-sky-500">{slide.required !== false ? 'People can’t submit until it’s answered (shown with a red *)' : 'People can skip it'}</span>
+              </div>
+            )}
+
             {/* Type-specific fields */}
             {slide.type === 'mcq' && <MCQEditor slide={slide} onUpdate={onUpdate} onPushHistory={onPushHistory} />}
             {slide.type === 'rating' && <RatingEditor slide={slide} onUpdate={onUpdate} onPushHistory={onPushHistory} />}
@@ -4034,7 +4154,7 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
             {slide.type === 'openended' && inTest && (
               <div className="mb-4 flex items-start gap-2.5 rounded-xl bg-midnight-sky-50 p-4">
                 <div className="mt-0.5 size-1.5 shrink-0 rounded-full bg-golden-sun" />
-                <p className="text-sm text-midnight-sky-500">Each person writes one answer on their phone — up to {OE_MAX_WORDS.toLocaleString()} words (about 4 A4 pages). You mark it afterwards.</p>
+                <p className="text-sm text-midnight-sky-500">Each person writes one answer on their phone — up to {OE_MAX_WORDS.toLocaleString()} words (about 4 A4 pages); the box grows as they type.{inSurvey ? '' : ' You mark it afterwards.'}</p>
               </div>
             )}
             {slide.type === 'openended' && !inTest && (
@@ -4075,7 +4195,7 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
                   <div className="mt-0.5 size-1.5 shrink-0 rounded-full bg-fresh-green" />
                   <p className="text-sm text-midnight-sky-500">
                     {inTest
-                      ? <>Each person can give up to <strong>{slide.wcMaxSubmissions ?? 3}</strong> short answers. Everyone’s answers become a word cloud in the answer review.</>
+                      ? <>Each person can give up to <strong>{slide.wcMaxSubmissions ?? 3}</strong> short answers. Everyone’s answers become a word cloud in the {inSurvey ? 'results' : 'answer review'}.</>
                       : <>Each person can submit up to <strong>{slide.wcMaxSubmissions ?? 3}</strong> words or short phrases (max 3 words each). Results appear as a live word cloud.</>}
                   </p>
                 </div>
@@ -4104,7 +4224,7 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
               </div>
             )}
 
-            {inTest && slide.type !== 'mcq' && <TestMarking slide={slide} onUpdate={onUpdate} />}
+            {inTest && !inSurvey && slide.type !== 'mcq' && <TestMarking slide={slide} onUpdate={onUpdate} />}
 
             {/* Slide image + layout */}
             <div className="mt-3 border-t border-midnight-sky-100 pt-3">
@@ -4139,7 +4259,7 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
               <div className="mt-3 border-t border-midnight-sky-100 pt-3">
                 <label className="mb-2 block text-xs font-semibold text-midnight-sky-700">
                   Theme
-                  <span className="ml-1.5 font-normal text-midnight-sky-500">how this question looks on the big screen in the answer review</span>
+                  <span className="ml-1.5 font-normal text-midnight-sky-500">how this question looks on the big screen in the {inSurvey ? 'survey results' : 'answer review'}</span>
                 </label>
                 <div className="flex flex-wrap gap-3">
                   <button
@@ -4152,7 +4272,7 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
                     >
                       <ClipboardCheck className="size-3" style={{ color: testTheme(testCtx?.testTheme).fg }} />
                     </span>
-                    <span className="text-[9px] font-medium text-midnight-sky-700">Same as test</span>
+                    <span className="text-[9px] font-medium text-midnight-sky-700">Same as {inSurvey ? 'survey' : 'test'}</span>
                   </button>
                   {TEST_THEMES.map(t => (
                     <button
@@ -4231,7 +4351,9 @@ function MCQEditor({ slide, onUpdate, onPushHistory }: {
   onUpdate: (patch: Partial<QuestionSlide>) => void
   onPushHistory?: () => void
 }) {
-  const inTest = useContext(TestQuestionCtx) !== null
+  const testCtx  = useContext(TestQuestionCtx)
+  const inTest   = testCtx !== null
+  const inSurvey = !!testCtx?.survey
   const [mode,      setMode]      = useState<'single' | 'paste'>('single')
   const [pasteText, setPasteText] = useState('')
 
@@ -4373,8 +4495,8 @@ function MCQEditor({ slide, onUpdate, onPushHistory }: {
               style={{ fieldSizing: 'content' } as React.CSSProperties}
               className="flex-1 resize-none overflow-hidden rounded-xl border border-midnight-sky-200 bg-white px-3 py-2 text-sm leading-snug text-midnight-sky-900 placeholder:text-midnight-sky-400 outline-none transition-all focus:border-hot-pink focus:ring-2 focus:ring-hot-pink/15"
             />
-            {/* Correct-answer tick — always visible, turns solid green when marked */}
-            <button
+            {/* Correct-answer tick — always visible, turns solid green when marked (not in a survey) */}
+            {!inSurvey && <button
               onClick={() => {
                 const cur = slide.correctAnswers ?? []
                 onUpdate({ correctAnswers: isCorrect ? cur.filter(x => x !== i) : [...cur, i] })
@@ -4388,7 +4510,7 @@ function MCQEditor({ slide, onUpdate, onPushHistory }: {
               )}
             >
               <Check className="size-3.5" />
-            </button>
+            </button>}
             {slide.options.length > 2 && (
               <button
                 onClick={() => removeOption(i)}
@@ -4401,7 +4523,7 @@ function MCQEditor({ slide, onUpdate, onPushHistory }: {
           </div>
         )
       })}
-      {mode === 'single' && (slide.correctAnswers ?? []).length > 0 && (
+      {mode === 'single' && !inSurvey && (slide.correctAnswers ?? []).length > 0 && (
         <p className="mt-1 text-[11px] font-medium text-fresh-green">
           {[...slide.correctAnswers!].sort((a, b) => a - b).map(i => optionLabel(i, total)).join(', ')} marked correct — {inTest ? 'revealed to everyone when the test ends.' : 'press Reveal Answer on the results screen.'}
         </p>
@@ -4414,6 +4536,43 @@ function MCQEditor({ slide, onUpdate, onPushHistory }: {
           <Plus className="size-3.5" />
           Add option
         </button>
+      )}
+
+      {/* In a survey: one answer, or tick several */}
+      {inSurvey && (
+        <div className="mt-5 border-t border-midnight-sky-100 pt-5">
+          <label className="mb-2.5 block text-sm font-medium text-midnight-sky-700">People can pick</label>
+          <div className="flex flex-wrap gap-2">
+            {([[false, 'One answer'], [true, 'Several answers']] as const).map(([v, l]) => (
+              <button
+                key={l}
+                onClick={() => onUpdate(v ? { pickMany: true } : { pickMany: undefined, pickMax: undefined })}
+                className={cn('rounded-xl border px-3 py-2 text-sm transition-all',
+                  !!slide.pickMany === v ? 'border-hot-pink bg-hot-pink/10 font-medium text-hot-pink' : 'border-midnight-sky-200 text-midnight-sky-500 hover:border-midnight-sky-400 hover:text-midnight-sky-700')}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
+          {slide.pickMany && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-xs font-medium text-midnight-sky-600">Limit</span>
+              {[0, 2, 3, 4, 5].filter(n => n === 0 || n < total).map(n => (
+                <button
+                  key={n}
+                  onClick={() => onUpdate({ pickMax: n || undefined })}
+                  className={cn('rounded-lg px-3 py-1 text-xs font-semibold transition-all',
+                    (slide.pickMax ?? 0) === n ? 'bg-midnight-sky-900 text-white' : 'bg-midnight-sky-100 text-midnight-sky-600 hover:bg-midnight-sky-200')}
+                >
+                  {n === 0 ? 'Any number' : `Up to ${n}`}
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="mt-2 text-[11px] text-midnight-sky-500">
+            {slide.pickMany ? 'Square tick boxes on the phone — “Tick all that apply”. Results show a bar per option.' : 'Round buttons on the phone — one choice. Results show a pie chart.'}
+          </p>
+        </div>
       )}
 
       {/* Results display type — bar, pie, or donut (not for test questions:
@@ -4487,7 +4646,7 @@ function MCQEditor({ slide, onUpdate, onPushHistory }: {
       </div>}
 
       {/* Explanation — optional teaching text shown on big screen after reveal */}
-      <div className="mt-5 border-t border-midnight-sky-100 pt-5">
+      <div className={cn('mt-5 border-t border-midnight-sky-100 pt-5', inSurvey && 'hidden')}>
         <label className="mb-2 block text-sm font-medium text-midnight-sky-700">
           Explanation
           <span className="ml-1.5 font-light text-midnight-sky-500">
@@ -6596,6 +6755,14 @@ const TIME_PRESETS = [5, 10, 15, 20, 30, 45, 60]
 function TestQuestionChip() {
   const ctx = useContext(TestQuestionCtx)
   if (!ctx) return null
+  if (ctx.survey) {
+    return (
+      <div className="mb-3 ml-2 inline-flex items-center gap-1.5 rounded-full bg-hot-pink/10 px-3 py-1.5 text-xs font-semibold text-hot-pink">
+        <ClipboardList className="size-3.5" />
+        Survey · question {ctx.index + 1} of {ctx.count}
+      </div>
+    )
+  }
   return (
     <div className="mb-3 ml-2 inline-flex items-center gap-1.5 rounded-full bg-golden-sun/15 px-3 py-1.5 text-xs font-semibold text-[#a07800]">
       <ClipboardCheck className="size-3.5" />
@@ -6618,6 +6785,7 @@ function TestHeaderCard({
   onDuplicate: () => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: header.id })
+  const survey = blockKind(header) === 'survey'
   return (
     <div
       ref={setNodeRef}
@@ -6632,43 +6800,44 @@ function TestHeaderCard({
         onKeyDown={e => { if (e.key === 'Enter') onSelect() }}
         {...listeners}
         className={cn(
-          'flex w-full cursor-grab items-start gap-1.5 rounded-lg bg-golden-sun px-2 py-2 text-left text-[#1a1640] transition active:cursor-grabbing',
-          isSelected ? 'ring-2 ring-hot-pink ring-offset-1 ring-offset-[#14142b]' : 'hover:brightness-105',
+          'flex w-full cursor-grab items-start gap-1.5 rounded-lg px-2 py-2 text-left transition active:cursor-grabbing',
+          survey ? 'bg-hot-pink text-white' : 'bg-golden-sun text-[#1a1640]',
+          isSelected ? (survey ? 'ring-2 ring-white ring-offset-1 ring-offset-[#14142b]' : 'ring-2 ring-hot-pink ring-offset-1 ring-offset-[#14142b]') : 'hover:brightness-105',
         )}
       >
         <button
           onPointerDown={e => e.stopPropagation()}
           onClick={e => { e.stopPropagation(); onToggle() }}
-          title={header.collapsed ? 'Show the test questions' : 'Fold the test into one card'}
+          title={header.collapsed ? `Show the ${survey ? 'survey' : 'test'} questions` : `Fold the ${survey ? 'survey' : 'test'} into one card`}
           className="mt-px shrink-0 rounded p-0.5 transition hover:bg-black/10"
         >
           {header.collapsed ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
         </button>
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-1 text-[10px] font-bold leading-tight">
-            <span className="text-[#1a1640]/55">{number}</span>
-            <ClipboardCheck className="size-3 shrink-0" />
-            <span className="truncate">Self-paced test block</span>
+            <span className={survey ? 'text-white/60' : 'text-[#1a1640]/55'}>{number}</span>
+            {survey ? <ClipboardList className="size-3 shrink-0" /> : <ClipboardCheck className="size-3 shrink-0" />}
+            <span className="truncate">{survey ? (header.title?.trim() || 'Survey') : 'Self-paced test block'}</span>
           </p>
           <p className="mt-0.5 text-[9px] font-medium leading-tight">
-            {questionCount} question{questionCount !== 1 ? 's' : ''} · {header.timeLimit} min
+            {questionCount} question{questionCount !== 1 ? 's' : ''} · {survey ? (header.askNames ? 'names recorded' : 'anonymous') : `${header.timeLimit} min`}
           </p>
-          {header.collapsed && (
+          {header.collapsed && !survey && (
             <p className="mt-0.5 text-[9px] leading-tight text-[#1a1640]/70">Then {AFTER_ORDER_LABEL[header.afterOrder ?? 'lb-review'].toLowerCase()}</p>
           )}
         </div>
       </div>
       <button
         onClick={e => { e.stopPropagation(); onDuplicate() }}
-        title="Duplicate the whole test"
-        className="absolute bottom-1 right-6 rounded-md p-0.5 text-[#1a1640]/40 opacity-0 transition group-hover:opacity-100 hover:!text-[#1a1640]"
+        title={survey ? 'Duplicate the whole survey' : 'Duplicate the whole test'}
+        className={cn('absolute bottom-1 right-6 rounded-md p-0.5 opacity-0 transition group-hover:opacity-100', survey ? 'text-white/50 hover:!text-white' : 'text-[#1a1640]/40 hover:!text-[#1a1640]')}
       >
         <Copy className="size-3" />
       </button>
       <button
         onClick={e => { e.stopPropagation(); onDelete() }}
-        title="Remove the test block (its questions stay as live questions)"
-        className="absolute bottom-1 right-1 rounded-md p-0.5 text-[#1a1640]/40 opacity-0 transition group-hover:opacity-100 hover:!text-red-700"
+        title={survey ? 'Remove the survey block (its questions stay as live questions)' : 'Remove the test block (its questions stay as live questions)'}
+        className={cn('absolute bottom-1 right-1 rounded-md p-0.5 opacity-0 transition group-hover:opacity-100', survey ? 'text-white/50 hover:!text-white' : 'text-[#1a1640]/40 hover:!text-red-700')}
       >
         <Trash2 className="size-3" />
       </button>
@@ -6677,13 +6846,41 @@ function TestHeaderCard({
 }
 
 /** Bottom of a block: add/import buttons and the after-test stages. */
-function TestEndRows({ order, isSelected, onSelect, onAddQuestion, onImportCsv }: {
+function TestEndRows({ order, isSelected, onSelect, onAddQuestion, onImportCsv, survey = false }: {
   order: TestAfterOrder
   isSelected: boolean
   onSelect: () => void
   onAddQuestion: () => void
   onImportCsv: () => void
+  survey?: boolean
 }) {
+  if (survey) {
+    return (
+      <div className="flex flex-col gap-1 pt-0.5">
+        <div className="flex gap-1">
+          <button
+            onClick={onAddQuestion}
+            className="flex flex-1 items-center justify-center gap-1 rounded-md border border-dashed border-hot-pink/60 py-1 text-[9px] font-medium text-[#ff7aae] transition hover:bg-hot-pink/15"
+          >
+            <Plus className="size-2.5" /> Add question
+          </button>
+          <button
+            onClick={onImportCsv}
+            className="flex flex-1 items-center justify-center gap-1 rounded-md bg-hot-pink py-1 text-[9px] font-semibold text-white transition hover:brightness-105"
+          >
+            <Upload className="size-2.5" /> Import CSV
+          </button>
+        </div>
+        <button
+          onClick={onSelect}
+          title="Survey settings"
+          className={cn('flex items-center gap-1.5 rounded-md border border-dashed px-2 py-1 text-left text-[9px] text-[#ff7aae] transition hover:bg-hot-pink/15', isSelected ? 'border-white/70' : 'border-hot-pink/40')}
+        >
+          <ClipboardList className="size-3" /> End of survey · results in Results
+        </button>
+      </div>
+    )
+  }
   const stages: { key: string; icon: ReactNode; label: string }[] =
     order === 'review-lb' ? [{ key: 'r', icon: <ListChecks className="size-3" />, label: 'Answer review' }, { key: 'l', icon: <Trophy className="size-3" />, label: 'Leaderboard' }]
     : order === 'lb-only'  ? [{ key: 'l', icon: <Trophy className="size-3" />, label: 'Leaderboard' }]
@@ -6975,6 +7172,256 @@ function TestBlockEditor({
 
         <button onClick={() => onDelete(header.id)} className="self-start rounded-xl px-3 py-2 text-xs font-medium text-red-500 transition hover:bg-red-50">
           Remove test block (its questions stay as live questions)
+        </button>
+      </motion.div>
+    </div>
+  )
+}
+
+/* ── Survey: its settings page ──────────────────────────────────────────── */
+
+/** ms → the value a datetime-local box wants ("2026-10-20T17:00"), in local time. */
+const toLocalInput = (ms?: number) => {
+  if (!ms) return ''
+  const d = new Date(ms)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+/** The survey's settings page — opens when its pink header (or end) is clicked. */
+function SurveyBlockEditor({
+  header, slides, onUpdate, onSelect, onAddQuestion, onImportCsv, onMoveIn, onDelete,
+}: {
+  header: TestHeaderSlide | undefined
+  slides: Slide[]
+  focusAfter: boolean
+  onUpdate: (patch: Partial<TestHeaderSlide>) => void
+  onSelect: (id: string) => void
+  onAddQuestion: (headerId: string, type?: QType) => void
+  onImportCsv: (headerId: string) => void
+  onMoveIn: (headerId: string, ids: string[]) => void
+  onDelete: (id: string) => void
+}) {
+  const [picking, setPicking] = useState(false)
+  const [picked, setPicked] = useState<string[]>([])
+  const [adding, setAdding] = useState(false)
+  const [dateOpen, setDateOpen] = useState(!!header?.closeAt)
+  if (!header) return null
+
+  const range = testRanges(slides).find(r => r.headerId === header.id)
+  const questions = (range ? slides.slice(range.start + 1, range.end) : []) as QuestionSlide[]
+  const inAnyBlock = testMembership(slides)
+  const outsideQs = slides.filter(x => isTestable(x) && !inAnyBlock.has(x.id)) as QuestionSlide[]
+  const problems = testProblems(slides).filter(pb => pb.slideId === header.id || questions.some(q => q.id === pb.slideId))
+  const optional = questions.filter(q => q.required === false).length
+
+  const card = 'rounded-2xl bg-white p-5 shadow-[0_2px_16px_-2px_rgba(0,0,121,0.09)]'
+  const choice = (on: boolean) => cn(
+    'rounded-xl border px-3 py-2 text-sm transition-all',
+    on ? 'border-hot-pink bg-hot-pink/10 font-medium text-hot-pink' : 'border-midnight-sky-200 text-midnight-sky-500 hover:border-midnight-sky-400 hover:text-midnight-sky-700',
+  )
+  const typeLabel = (q: QuestionSlide) => q.type === 'mcq' && q.pickMany ? 'Checkboxes' : QTYPES.find(t => t.type === q.type)?.label
+
+  return (
+    <div className="max-w-3xl px-5 py-4">
+      <motion.div key={header.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }} className="flex flex-col gap-4">
+
+        {/* What it is + its title */}
+        <div className="overflow-hidden rounded-2xl bg-white shadow-[0_2px_16px_-2px_rgba(0,0,121,0.09)]">
+          <div className="h-[3px] w-full bg-hot-pink" />
+          <div className="p-5">
+            <div className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-hot-pink/10 px-3 py-1.5 text-xs font-bold text-hot-pink">
+              <ClipboardList className="size-3.5" />
+              Survey
+            </div>
+            <p className="text-sm leading-relaxed text-midnight-sky-600">
+              Everyone gets all the questions on their phone at once, like a Google Form. Nothing is marked or timed.
+              It opens when your show reaches it and stays open — people can also answer after the show at the survey link — until you close it.
+            </p>
+            <label className="mb-1.5 mt-4 block text-xs font-semibold text-midnight-sky-700">
+              Survey title <span className="font-normal text-midnight-sky-500">shown at the top of the form</span>
+            </label>
+            <input
+              value={header.title ?? ''}
+              onChange={e => onUpdate({ title: e.target.value })}
+              maxLength={120}
+              placeholder="Workshop feedback"
+              className="w-full rounded-xl border border-midnight-sky-200 bg-white px-3.5 py-2.5 text-base text-midnight-sky-900 placeholder:text-midnight-sky-400 focus:border-hot-pink focus:outline-none focus:ring-2 focus:ring-hot-pink/15"
+            />
+          </div>
+        </div>
+
+        {problems.length > 0 && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-3">
+            {problems.map((pb, i) => (
+              <button key={i} onClick={() => pb.slideId !== header.id && onSelect(pb.slideId)} className="block text-left text-sm text-amber-800 hover:underline">
+                {pb.message}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Questions */}
+        <div className={card}>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <p className="text-sm font-semibold text-midnight-sky-800">Questions ({questions.length})</p>
+            <div className="flex-1" />
+            <button onClick={() => setAdding(v => !v)} className={cn('flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-medium transition', adding ? 'border-midnight-sky-400 text-midnight-sky-800' : 'border-midnight-sky-200 text-midnight-sky-700 hover:border-midnight-sky-400')}>
+              <Plus className="size-3.5" /> Add question
+            </button>
+            <button onClick={() => onImportCsv(header.id)} className="flex items-center gap-1.5 rounded-xl bg-hot-pink px-3 py-1.5 text-xs font-semibold text-white transition hover:brightness-105">
+              <Upload className="size-3.5" /> Import CSV
+            </button>
+            {outsideQs.length > 0 && (
+              <button onClick={() => { setPicking(v => !v); setPicked([]) }} className="flex items-center gap-1.5 rounded-xl border border-midnight-sky-200 px-3 py-1.5 text-xs font-medium text-midnight-sky-700 transition hover:border-midnight-sky-400">
+                <ListChecks className="size-3.5" /> Add existing questions
+              </button>
+            )}
+          </div>
+
+          {adding && (
+            <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-xl border border-midnight-sky-150 bg-midnight-sky-50 p-2.5">
+              <span className="mr-1 text-xs font-medium text-midnight-sky-600">Add a:</span>
+              {QTYPES.map(t => (
+                <button key={t.type} onClick={() => { onAddQuestion(header.id, t.type); setAdding(false) }} className="flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-1.5 text-xs font-medium text-midnight-sky-700 shadow-sm transition hover:text-midnight-sky-900">
+                  {t.icon}{t.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {picking && (
+            <div className="mb-3 rounded-xl border border-midnight-sky-150 bg-midnight-sky-50 p-3">
+              <p className="mb-2 text-xs font-medium text-midnight-sky-700">Tick the questions to move into this survey</p>
+              <div className="flex max-h-56 flex-col gap-1 overflow-y-auto">
+                {outsideQs.map(q => (
+                  <label key={q.id} className="flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-xs text-midnight-sky-700 hover:bg-white">
+                    <input
+                      type="checkbox"
+                      checked={picked.includes(q.id)}
+                      onChange={e => setPicked(prev => e.target.checked ? [...prev, q.id] : prev.filter(x => x !== q.id))}
+                      className="mt-0.5"
+                    />
+                    <span className="line-clamp-2">{q.question || 'Untitled question'}</span>
+                    <span className="ml-auto shrink-0 text-[10px] text-midnight-sky-400">{typeLabel(q)}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="mt-2 flex justify-end gap-2">
+                <button onClick={() => setPicking(false)} className="rounded-lg px-3 py-1.5 text-xs text-midnight-sky-500 hover:bg-white">Cancel</button>
+                <button
+                  onClick={() => { onMoveIn(header.id, picked); setPicking(false); setPicked([]) }}
+                  disabled={picked.length === 0}
+                  className="rounded-lg bg-hot-pink px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+                >
+                  Move {picked.length || ''} into the survey
+                </button>
+              </div>
+            </div>
+          )}
+
+          {questions.length === 0 ? (
+            <p className="rounded-xl bg-midnight-sky-50 px-4 py-6 text-center text-sm text-midnight-sky-500">
+              No questions yet — add them one by one (any question type), or import a CSV of questions.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {questions.map((q, i) => (
+                <button key={q.id} onClick={() => onSelect(q.id)} className="flex items-start gap-3 rounded-lg px-2 py-1.5 text-left transition hover:bg-midnight-sky-50">
+                  <span className="w-7 shrink-0 pt-px text-xs font-semibold text-hot-pink">Q{i + 1}</span>
+                  <span className="min-w-0 flex-1 truncate text-sm text-midnight-sky-800">{q.question || <span className="italic text-midnight-sky-400">Untitled question</span>}</span>
+                  <span className="shrink-0 text-xs text-midnight-sky-500">
+                    {typeLabel(q)} · {q.required === false ? 'optional' : <span className="text-hot-pink">must answer</span>}
+                  </span>
+                </button>
+              ))}
+              <p className="mt-2 px-2 text-xs text-midnight-sky-500">
+                {questions.length - optional} must be answered{optional ? `, ${optional} optional` : ''} — change it on each question.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Settings */}
+        <div className={card}>
+          <p className="mb-3 text-sm font-semibold text-midnight-sky-800">Settings</p>
+
+          <p className="mb-2 text-sm font-medium text-midnight-sky-700">Who’s answering</p>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => onUpdate({ askNames: undefined })} className={choice(!header.askNames)}>Anonymous</button>
+            <button onClick={() => onUpdate({ askNames: true })} className={choice(!!header.askNames)}>Ask for names</button>
+          </div>
+          <p className="mt-1.5 text-xs text-midnight-sky-500">
+            {header.askNames
+              ? 'Each person types their name at the top of the form; it’s recorded with their answers.'
+              : 'No names are recorded — not even the name people joined the session with. Each phone or computer can answer once.'}
+          </p>
+
+          <p className="mb-2 mt-5 text-sm font-medium text-midnight-sky-700">Open for answers</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => { setDateOpen(false); onUpdate({ closeAt: undefined }) }} className={choice(!dateOpen)}>Until I close it</button>
+            <button onClick={() => setDateOpen(true)} className={choice(dateOpen)}>Until a date…</button>
+            {dateOpen && (
+              <input
+                type="datetime-local"
+                value={toLocalInput(header.closeAt)}
+                onChange={e => { const ms = e.target.value ? new Date(e.target.value).getTime() : NaN; onUpdate({ closeAt: Number.isFinite(ms) ? ms : undefined }) }}
+                className="rounded-xl border border-midnight-sky-200 bg-white px-3 py-1.5 text-sm text-midnight-sky-800 focus:border-hot-pink focus:outline-none"
+              />
+            )}
+          </div>
+          <p className="mt-1.5 text-xs text-midnight-sky-500">
+            {dateOpen && header.closeAt
+              ? `Stops taking answers on ${new Date(header.closeAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}. You can still close or reopen it any time.`
+              : 'It opens when your show reaches it. Close it from the big screen or the Results page whenever you’re done.'}
+          </p>
+
+          <p className="mb-2 mt-5 text-sm font-medium text-midnight-sky-700">
+            Theme <span className="font-light text-midnight-sky-500">how the survey looks on the big screen</span>
+          </p>
+          <div className="flex flex-wrap gap-3">
+            {TEST_THEMES.map(t => {
+              const on = (header.theme ?? 'navy') === t.id
+              return (
+                <button key={t.id} onClick={() => onUpdate({ theme: t.id })} className={cn('flex flex-col items-center gap-1 transition-all', on ? 'opacity-100' : 'opacity-60 hover:opacity-90')}>
+                  <span
+                    className={cn('size-6 rounded-full ring-offset-1', on ? 'ring-2 ring-midnight-sky-700' : '')}
+                    style={{ backgroundColor: t.bg, border: t.id === 'white' ? '1px solid rgba(0,0,0,0.12)' : undefined }}
+                  />
+                  <span className="text-[9px] font-medium text-midnight-sky-700">{t.label}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Big-screen preview, in the chosen theme */}
+        <div className={card}>
+          <p className="mb-2 text-sm font-semibold text-midnight-sky-800">What everyone sees on the big screen</p>
+          {(() => {
+            const th = testTheme(header.theme)
+            return (
+              <div className="flex items-center gap-6 rounded-xl px-6 py-5 transition-colors duration-300" style={{ backgroundColor: th.bg, color: th.fg, border: th.id === 'white' ? '1px solid rgba(0,0,121,0.1)' : undefined }}>
+                <div className="min-w-0 flex-1">
+                  <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.2em]" style={{ color: th.accent }}>
+                    <ClipboardList className="size-3" /> Survey
+                  </p>
+                  <p className="mt-1.5 truncate text-xl font-extrabold tracking-tight">{header.title?.trim() || 'Survey'}</p>
+                  <p className="mt-1 text-xs" style={{ opacity: 0.75 }}>{questions.length} question{questions.length !== 1 ? 's' : ''} · {header.askNames ? 'names are recorded' : 'anonymous'}</p>
+                  <p className="mt-2 text-xs" style={{ opacity: 0.85 }}>Already joined? It’s on your phone now. Not joined? Scan the code.</p>
+                </div>
+                <div className="flex shrink-0 flex-col items-center gap-1.5">
+                  <div className="flex size-16 items-center justify-center rounded-lg bg-white text-[8px] font-semibold text-midnight-sky-900">QR code</div>
+                  <span className="text-[10px]" style={{ opacity: 0.7 }}>0 responses</span>
+                </div>
+              </div>
+            )
+          })()}
+          <p className="mt-2 text-xs text-midnight-sky-500">Results are in Results after the session — Summary and Individual tabs, Print, Excel, Word and a copy-to-Gemini summary. On the big screen, “Show results” steps through each question.</p>
+        </div>
+
+        <button onClick={() => onDelete(header.id)} className="self-start rounded-xl px-3 py-2 text-xs font-medium text-red-500 transition hover:bg-red-50">
+          Remove survey block (its questions stay as live questions)
         </button>
       </motion.div>
     </div>

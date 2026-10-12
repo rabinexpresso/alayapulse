@@ -32,12 +32,55 @@ export interface TestSettings {
   rules?:      string
   /** Big-screen colour theme (TEST_THEMES id); navy when missing. */
   theme?:      string
+  /** A survey: the same block, but nothing is marked or timed (see below). */
+  kind?:       'survey'
+  /** Survey: the title people see on their phone. */
+  title?:      string
+  /** Survey: record each person's name (anonymous when missing). */
+  askNames?:   boolean
+  /** Survey: stops taking answers at this time (ms); open until closed by hand when missing. */
+  closeAt?:    number
 }
 
 export const DEFAULT_TEST_SETTINGS: TestSettings = {
   timeLimit:   15,
   scoreTiming: 'end',
   afterOrder:  'lb-review',
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Survey — a block like the test (all questions on the phone at once), but
+   for feedback: nothing is marked or timed, answers are anonymous unless the
+   host asks for names, each question can be "must answer" or optional, and
+   a link lets people answer after the show until the host closes it.
+   Its blocks are `testblock` slides with `kind: 'survey'`, so the editor's
+   block handling (drag, fold, duplicate, import) works for both.
+   ───────────────────────────────────────────────────────────────────────── */
+
+export const DEFAULT_SURVEY_SETTINGS: TestSettings = { ...DEFAULT_TEST_SETTINGS, kind: 'survey', title: '' }
+
+/** A survey block (header, show slide or the phones' copy). */
+export const isSurvey = (s: { kind?: string } | undefined | null) => s?.kind === 'survey'
+
+/** Live state of a survey — session doc field `surveys.<blockId>`. */
+export interface SurveyState {
+  status:    'open' | 'closed'
+  openedAt:  number
+  closedAt?: number
+}
+
+/** Taking answers right now? Closed by hand, or past its closing time, means no. */
+export const surveyOpen = (state: SurveyState | undefined, block: { closeAt?: number }, now = Date.now()) =>
+  state?.status === 'open' && !(block.closeAt && now >= block.closeAt)
+
+/** Where people answer later: the session code, plus the block when a deck has more than one survey. */
+export const surveyPath = (code: string, blockId: string, onlySurvey: boolean) =>
+  `/s/${code.toUpperCase()}${onlySurvey ? '' : `/${blockId}`}`
+
+/** "about 3 minutes" for the phone's intro line. */
+export function surveyMinutes(questions: { type?: string }[]): number {
+  const secs = questions.reduce((n, q) => n + (qTypeOf(q) === 'openended' ? 45 : qTypeOf(q) === 'mcq' ? 10 : 20), 0)
+  return Math.max(1, Math.round(secs / 60))
 }
 
 export const AFTER_ORDER_LABEL: Record<TestAfterOrder, string> = {
@@ -97,6 +140,12 @@ interface TestQuestionSettings {
   ratingMax?:   5 | 10
   leftLabels?:  string[]
   rightLabels?: string[]
+  /** Survey: must be answered before submitting. */
+  required?:    boolean
+  /** Survey multiple choice: people can tick several options… */
+  multi?:       boolean
+  /** …up to this many (any number when missing). */
+  maxPicks?:    number
 }
 
 /** A question as the presenter sees it (with the answer). */
@@ -155,6 +204,12 @@ export function testSettingsOf(s: AnyS): TestSettings {
     afterOrder:  ['review-lb', 'lb-only', 'review-only'].includes(s?.afterOrder) ? s.afterOrder : 'lb-review',
     ...(typeof s?.rules === 'string' && s.rules.trim() ? { rules: s.rules.trim() } : {}),
     ...(TEST_THEMES.some(t => t.id === s?.theme) && s.theme !== 'navy' ? { theme: s.theme } : {}),
+    ...(isSurvey(s) ? {
+      kind: 'survey' as const,
+      title: typeof s.title === 'string' ? s.title.trim() : '',
+      ...(s.askNames ? { askNames: true } : {}),
+      ...(Number(s.closeAt) > 0 ? { closeAt: Number(s.closeAt) } : {}),
+    } : {}),
   }
 }
 
@@ -285,8 +340,10 @@ export function normalizeTestBlocks(slides: AnyS[]): { slides: AnyS[]; movedOut:
     if (!fixed) break
   }
 
-  // Questions new to a test get default marks (undefined = never set; 0 = "Not marked")
+  // Questions new to a test get default marks (undefined = never set; 0 = "Not marked").
+  // A survey isn't marked.
   for (const r of testRanges(list)) {
+    if (isSurvey(list[r.start])) continue
     for (let k = r.start + 1; k < r.end; k++) {
       const q = list[k]
       const d = DEFAULT_MARKS[qTypeOf(q)]
@@ -314,7 +371,7 @@ export function collapseTestBlocks(slides: AnyS[]): AnyS[] {
       id: s.id,
       type: 'testblock',
       ...testSettingsOf(s),
-      questions: members.filter(isTestable).map(toTestQuestion),
+      questions: members.filter(isTestable).map(q => isSurvey(s) ? toSurveyQuestion(q) : toTestQuestion(q)),
     }
     out.push({ ...block, _members: members, _header: s, ...(end > i ? { _end: slides[end] } : {}) })
     if (end > i) i = end
@@ -349,6 +406,21 @@ function toTestQuestion(q: AnyS): TestQuestion {
   }
 }
 
+/** An editor question slide → the survey's copy of it: no answers or marks;
+ *  "must answer" unless the host made it optional; multiple choice can let
+ *  people tick several options. */
+function toSurveyQuestion(q: AnyS): TestQuestion {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { marks, guide, explanation, ...base } = toTestQuestion({ ...q, marks: 0, markingGuide: '', explanation: '' })
+  const max = Math.round(Number(q.pickMax))
+  return {
+    ...base,
+    correctAnswers: [],
+    required: q.required !== false,
+    ...(base.type === 'mcq' && q.pickMany ? { multi: true, ...(max > 1 ? { maxPicks: max } : {}) } : {}),
+  }
+}
+
 /** Show slides coming back from a show → editor slides again. */
 export function expandTestBlocks(slides: AnyS[]): AnyS[] {
   const out: AnyS[] = []
@@ -367,6 +439,8 @@ export function expandTestBlocks(slides: AnyS[]): AnyS[] {
       ...(q.ratingMax === 10 ? { ratingMax: 10 } : {}),
       ...(q.leftLabels ? { leftLabels: q.leftLabels } : {}),
       ...(q.rightLabels ? { rightLabels: q.rightLabels } : {}),
+      ...(q.required === false ? { required: false } : {}),
+      ...(q.multi ? { pickMany: true, ...(q.maxPicks ? { pickMax: q.maxPicks } : {}) } : {}),
     }))
     out.push(header, ...members, s._end ?? { id: `${s.id}-end`, type: 'testend', blockId: s.id })
   }
@@ -389,15 +463,17 @@ export function toStoredTestBlock(s: TestBlockShowSlide): StoredTestBlockSlide {
 export function testProblems(slides: AnyS[]): { slideId: string; message: string }[] {
   const out: { slideId: string; message: string }[] = []
   for (const r of testRanges(slides)) {
+    const survey = isSurvey(slides[r.start])
+    const where = survey ? 'your survey' : 'your self-paced test'
     const qs = slides.slice(r.start + 1, r.end)
-    if (qs.length === 0) { out.push({ slideId: r.headerId, message: 'Your self-paced test block has no questions yet.' }); continue }
+    if (qs.length === 0) { out.push({ slideId: r.headerId, message: survey ? 'Your survey has no questions yet.' : 'Your self-paced test block has no questions yet.' }); continue }
     qs.forEach((q, i) => {
       const filled = (q.options ?? []).filter((o: string) => String(o).trim()).length
       const t = qTypeOf(q)
-      if (t === 'mcq' && !(q.correctAnswers?.length > 0)) out.push({ slideId: q.id, message: `Question ${i + 1} in your self-paced test has no correct answer ticked.` })
-      else if (t === 'mcq' && filled < 2) out.push({ slideId: q.id, message: `Question ${i + 1} in your self-paced test needs at least two options.` })
-      else if (t === 'ranking' && filled < 2) out.push({ slideId: q.id, message: `Question ${i + 1} in your self-paced test needs at least two items to rank.` })
-      else if (t === 'rating' && filled < 1) out.push({ slideId: q.id, message: `Question ${i + 1} in your self-paced test needs at least one item to rate.` })
+      if (t === 'mcq' && !survey && !(q.correctAnswers?.length > 0)) out.push({ slideId: q.id, message: `Question ${i + 1} in ${where} has no correct answer ticked.` })
+      else if (t === 'mcq' && filled < 2) out.push({ slideId: q.id, message: `Question ${i + 1} in ${where} needs at least two options.` })
+      else if (t === 'ranking' && filled < 2) out.push({ slideId: q.id, message: `Question ${i + 1} in ${where} needs at least two items to rank.` })
+      else if (t === 'rating' && filled < 1) out.push({ slideId: q.id, message: `Question ${i + 1} in ${where} needs at least one item to rate.` })
     })
   }
   return out
@@ -564,6 +640,21 @@ export function rankTest(docs: TestAnswerDoc[], questions: TestQuestion[], state
       ? prev.place : i + 1
   })
   return rows
+}
+
+/** Survey answer sheets → saved results rows (everyone who submitted), oldest first. */
+export function surveyParticipants(sheets: TestAnswerDoc[]): {
+  id: string; name: string; correct: number; total: number; timeMs: number; status: 'submitted'; place: number
+  answers: Record<string, TestAnswer>; submittedAt: number
+}[] {
+  return sheets
+    .filter(d => d.finished)
+    .map(d => ({
+      id: d.respondentId, name: (d.respondentName || 'Anonymous').trim() || 'Anonymous',
+      correct: 0, total: 0, timeMs: 0, status: 'submitted' as const, place: 0,
+      answers: d.answers ?? {}, submittedAt: tsMs(d.finishedServer) ?? tsMs(d.submittedAt) ?? Date.now(),
+    }))
+    .sort((a, b) => a.submittedAt - b.submittedAt)
 }
 
 /** "9 min 12 s", "48 s" */

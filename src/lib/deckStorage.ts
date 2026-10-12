@@ -94,6 +94,10 @@ export interface TestResultQuestion {
   ratingMax?:     5 | 10
   leftLabels?:    string[]
   rightLabels?:   string[]
+  /** Survey: must be answered / multiple choice that takes several ticks. */
+  required?:      boolean
+  multi?:         boolean
+  maxPicks?:      number
 }
 export interface TestResultParticipant {
   id:      string
@@ -106,12 +110,19 @@ export interface TestResultParticipant {
   place:   number
   /** question id → their answer (shape depends on the question type) */
   answers: Record<string, TestAnswer>
+  /** Survey: when they sent it (unix ms). */
+  submittedAt?: number
 }
 export interface TestResult {
   blockId:      string
   timeLimit:    number
   questions:    TestResultQuestion[]
   participants: TestResultParticipant[]
+  /** A survey (feedback, not marked) rather than a self-paced test. */
+  kind?:        'survey'
+  title?:       string
+  /** Survey: names were recorded with the answers. */
+  askNames?:    boolean
 }
 
 export interface DeckResults {

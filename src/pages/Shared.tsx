@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   BarChart2, Cloud, MessageSquare, Star, Trophy, FileText, ListOrdered,
-  Check, LogIn, Copy, AlertCircle, Users,
+  Check, LogIn, Copy, AlertCircle, Users, ClipboardList,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -28,6 +28,7 @@ const SLIDE_CONFIG: Record<string, {
   leaderboard: { Icon: Trophy,       label: 'Leaderboard',  color: 'text-golden-sun'   },
   html:        { Icon: FileText,     label: 'HTML',         color: 'text-midnight-sky-400' },
   testblock:   { Icon: Trophy,       label: 'Self-paced test', color: 'text-golden-sun' },
+  survey:      { Icon: ClipboardList, label: 'Survey',      color: 'text-hot-pink'     },
 }
 
 const CHIP_COLORS: Record<string, string> = {
@@ -40,6 +41,7 @@ const CHIP_COLORS: Record<string, string> = {
   leaderboard: 'bg-golden-sun/10 text-golden-sun',
   html:        'bg-midnight-sky-100 text-midnight-sky-600',
   testblock:   'bg-golden-sun/15 text-[#a07800]',
+  survey:      'bg-hot-pink/10 text-hot-pink',
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -162,8 +164,10 @@ export default function Shared() {
   const slides = (shared.slides as any[]).filter(s => s?.type !== 'testend')
 
   // Unique interactive types for the chips row
-  const INTERACTIVE = new Set(['mcq', 'wordcloud', 'openended', 'rating', 'ranking', 'html', 'testblock'])
-  const typeSet = [...new Set(slides.map((s: any) => s.type as string).filter(t => INTERACTIVE.has(t)))]
+  const INTERACTIVE = new Set(['mcq', 'wordcloud', 'openended', 'rating', 'ranking', 'html', 'testblock', 'survey'])
+  // A survey is a block too — label it as one
+  const kindOf = (s: any) => (s?.type === 'testblock' && s.kind === 'survey' ? 'survey' : s?.type) as string
+  const typeSet = [...new Set(slides.map(kindOf).filter(t => INTERACTIVE.has(t)))]
 
   /* ── Preview page ─────────────────────────────────────────────────────── */
   return (
@@ -211,7 +215,7 @@ export default function Shared() {
           {/* Slide preview list */}
           <div className="overflow-hidden rounded-2xl border border-midnight-sky-100 bg-midnight-sky-50/50">
             {slides.map((slide: any, i: number) => {
-              const cfg  = SLIDE_CONFIG[slide.type as string]
+              const cfg  = SLIDE_CONFIG[kindOf(slide)]
               const Icon = cfg?.Icon ?? FileText
               const text = getSlideText(slide)
               const displayText = text || (slide.type === 'html' ? `Slide ${i + 1}` : (cfg?.label ?? slide.type))
@@ -233,9 +237,9 @@ export default function Shared() {
                   </div>
                   <span className={cn(
                     'shrink-0 rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide',
-                    CHIP_COLORS[slide.type as string] ?? 'bg-midnight-sky-100 text-midnight-sky-500',
+                    CHIP_COLORS[kindOf(slide)] ?? 'bg-midnight-sky-100 text-midnight-sky-500',
                   )}>
-                    {SLIDE_CONFIG[slide.type as string]?.label ?? slide.type}
+                    {SLIDE_CONFIG[kindOf(slide)]?.label ?? slide.type}
                   </span>
                 </div>
               )

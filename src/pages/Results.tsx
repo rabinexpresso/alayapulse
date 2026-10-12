@@ -10,9 +10,12 @@ import { AlayaMark } from '@/components/AlayaMark'
 import { cn, optionLabel, fitColumns } from '@/lib/utils'
 import { aggregateRanking, parseRanking, rankingOrder } from '@/lib/ranking'
 import { KindTag, KIND_INFO, TestResultSection, liveKind, testSheets, addTestPdf, type QuestionKind } from '@/components/TestResults'
-import { hasAnswer } from '@/lib/selfPacedTest'
+import { SurveyResultSection } from '@/components/SurveyResults'
+import { hasAnswer, surveyParticipants } from '@/lib/selfPacedTest'
+import { fetchSurveySheets } from '@/lib/session'
+import { surveySheets, addSurveyPdf } from '@/lib/surveyReport'
 import {
-  listResults, deleteResults, isResponseCorrect, getStorageBackend, onAuthStateChanged, auth,
+  listResults, saveResults, deleteResults, isResponseCorrect, getStorageBackend, onAuthStateChanged, auth,
   browserListDecks, cloudListDecks,
   type Deck, type DeckResults, type ResultQuestion, type ResultResponse,
   type StorageBackend,
@@ -102,6 +105,37 @@ export default function Results() {
     return () => { cancelled = true }
   }, [deckId, backend])
 
+  /* Surveys keep taking answers after the show (through the survey link), so
+     the selected session's surveys are refreshed from the live session, and
+     the saved copy updated when there are new answers. */
+  const shownId = sessionsList ? (sessionsList.find(x => x.id === selectedId) ?? sessionsList[0])?.id : undefined
+  useEffect(() => {
+    const r = sessionsList?.find(x => x.id === shownId)
+    const surveys = (r?.tests ?? []).filter(t => t.kind === 'survey')
+    if (!r || !surveys.length || !deckId) return
+    let cancelled = false
+    Promise.all(surveys.map(t => fetchSurveySheets(r.sessionCode, t.blockId).then(surveyParticipants).catch(() => null)))
+      .then(fresh => {
+        if (cancelled) return
+        let changed = false
+        const tests = (r.tests ?? []).map(t => {
+          const k = surveys.indexOf(t)
+          const live = k >= 0 ? fresh[k] : null
+          if (!live) return t
+          const same = live.length === t.participants.length && live.every((p, i) => p.id === t.participants[i]?.id)
+          if (same) return t
+          changed = true
+          return { ...t, participants: live }
+        })
+        if (!changed) return
+        const updated = { ...r, tests }
+        setSessionsList(list => list?.map(x => (x.id === r.id ? updated : x)))
+        saveResults(backend ?? 'browser', deckId, updated).catch(e => console.warn('Could not update the saved survey answers:', e))
+      })
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownId, deckId, sessionsList?.length])
+
   /* ── Loading state ───────────────────────────────────────────────── */
   if (sessionsList === undefined) {
     return (
@@ -150,6 +184,8 @@ export default function Results() {
 
   /* ── Real results ────────────────────────────────────────────────── */
   const deckTitle    = deck?.title ?? 'Untitled session'
+  const testsOnly    = (results.tests ?? []).filter(t => t.kind !== 'survey')
+  const surveysOnly  = (results.tests ?? []).filter(t => t.kind === 'survey')
   // Self-paced test answers count as responses too
   const testAnswers = (results.tests ?? []).reduce((n, t) =>
     n + t.participants.reduce((m, p) => m + t.questions.filter(q => hasAnswer({ ...q, pick: 1 }, p.answers[q.id])).length, 0), 0)
@@ -285,8 +321,18 @@ export default function Results() {
       // Every tab, in order, with one line on what it's for — the first tab
       // of the file ("How to read this") lists them all.
       const tabs: { name: string; about: string; rows: Record<string, string | number>[] }[] = []
-      ;(results.tests ?? []).forEach((t, ti) => {
-        const suffix = (results.tests?.length ?? 0) > 1 ? ` ${ti + 1}` : ''
+      const surveyList = (results.tests ?? []).filter(t => t.kind === 'survey')
+      surveyList.forEach((t, si) => {
+        const suffix = surveyList.length > 1 ? ` ${si + 1}` : ''
+        const sheets = surveySheets(t)
+        tabs.push({ name: `Survey responses${suffix}`, rows: sheets.responses.length ? sheets.responses : [{ Submitted: 'No responses yet' }],
+          about: `Survey "${t.title || 'Survey'}": one row per person who answered${t.askNames ? '' : ' (anonymous)'}, one column per question — the same layout as a Google Forms sheet.` })
+        tabs.push({ name: `Survey summary${suffix}`, rows: sheets.summary,
+          about: 'Survey: each question, with how many people picked each option (and the %), or the average rating, or the combined ranking.' })
+      })
+      const testList = (results.tests ?? []).filter(t => t.kind !== 'survey')
+      testList.forEach((t, ti) => {
+        const suffix = testList.length > 1 ? ` ${ti + 1}` : ''
         const sheets = testSheets(t)
         tabs.push({ name: `Test results${suffix}`, rows: sheets.results,
           about: 'Self-paced test: one row per person — place, multiple-choice score and time. Each Q column shows their answer: ✓ right or ✗ wrong for multiple choice; written answers show a word count (the full text is in Test answers).' })
@@ -545,9 +591,16 @@ export default function Results() {
       </section>
 
       {/* Self-paced tests */}
-      {(results.tests?.length ?? 0) > 0 && (
+      {testsOnly.length > 0 && (
         <section className="mx-auto max-w-6xl space-y-4 px-6 pb-8">
-          {results.tests!.map((t, i) => <TestResultSection key={t.blockId} test={t} index={i} title={`${deckTitle}${(results.tests?.length ?? 0) > 1 ? ` test ${i + 1}` : ''}`} />)}
+          {testsOnly.map((t, i) => <TestResultSection key={t.blockId} test={t} index={i} title={`${deckTitle}${testsOnly.length > 1 ? ` test ${i + 1}` : ''}`} />)}
+        </section>
+      )}
+
+      {/* Surveys */}
+      {surveysOnly.length > 0 && (
+        <section className="mx-auto max-w-6xl space-y-4 px-6 pb-8">
+          {surveysOnly.map(t => <SurveyResultSection key={t.blockId} survey={t} deckTitle={deckTitle} sessionCode={results.sessionCode} conductedAt={results.conductedAt} />)}
         </section>
       )}
 
@@ -1261,8 +1314,10 @@ function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckRes
     doc.text('Note: ' + r.trimNote, margin, y, { maxWidth: pageW - margin * 2 })
   }
 
-  // Self-paced tests first
-  ;(r.tests ?? []).forEach((t, i) => addTestPdf(doc, autoTable, t, (r.tests?.length ?? 0) > 1 ? `Self-paced test ${i + 1}` : 'Self-paced test'))
+  // Self-paced tests first, then surveys
+  const pdfTests = (r.tests ?? []).filter(t => t.kind !== 'survey')
+  pdfTests.forEach((t, i) => addTestPdf(doc, autoTable, t, pdfTests.length > 1 ? `Self-paced test ${i + 1}` : 'Self-paced test'))
+  ;(r.tests ?? []).filter(t => t.kind === 'survey').forEach(t => addSurveyPdf(doc, autoTable, t))
 
   // Then live quiz questions, then polls (deck order within each)
   const ordered = r.questions

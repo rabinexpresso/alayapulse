@@ -6,7 +6,7 @@ import {
 import { db, auth, app } from './firebase'
 import {
   toStoredTestBlock, testAnswerDocId,
-  type StoredTestBlockSlide, type TestBlockShowSlide, type TestState, type TestAnswerDoc,
+  type StoredTestBlockSlide, type TestBlockShowSlide, type TestState, type TestAnswerDoc, type SurveyState,
 } from './selfPacedTest'
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -159,6 +159,8 @@ export interface Session {
   quizRanks?:     QuizRanks
   /** Self-paced test blocks' live state, keyed by block id. */
   tests?:         Record<string, TestState>
+  /** Surveys' open / closed state, keyed by block id. */
+  surveys?:       Record<string, SurveyState>
 }
 
 export interface Response {
@@ -735,6 +737,24 @@ export function subscribeToTestAnswers(
     { includeMetadataChanges: true },
     snap => cb(snap.exists() ? (snap.data() as TestAnswerDoc) : null, snap.metadata.hasPendingWrites),
   )
+}
+
+/* ── Surveys — open / closed state at surveys.<blockId>; each answer is a
+      sheet in responses (id blockId__surveyId), written once on submit. ── */
+
+/** Open (or reopen) a survey, or close it. */
+export async function setSurveyOpen(code: string, blockId: string, open: boolean): Promise<void> {
+  const state: SurveyState = open ? { status: 'open', openedAt: Date.now() } : { status: 'closed', openedAt: Date.now(), closedAt: Date.now() }
+  await updateDoc(doc(db, 'sessions', code.toUpperCase()), open
+    ? { [`surveys.${blockId}`]: state }
+    : { [`surveys.${blockId}.status`]: 'closed', [`surveys.${blockId}.closedAt`]: Date.now() })
+}
+
+/** Every submitted answer to a survey, straight from the session (includes
+ *  answers sent after the show, through the survey link). */
+export async function fetchSurveySheets(code: string, blockId: string): Promise<TestAnswerDoc[]> {
+  const snap = await getDocs(query(collection(db, 'sessions', code.toUpperCase(), 'responses'), where('slideId', '==', blockId)))
+  return snap.docs.map(d => d.data() as TestAnswerDoc).filter(d => d.type === 'testblock' && d.finished)
 }
 
 /** Presenter writes a score onto someone's sheet (when scores show on submit). */

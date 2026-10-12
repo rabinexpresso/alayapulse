@@ -12,6 +12,7 @@ const Vote    = lazy(() => import('@/pages/Vote'))
 const Results = lazy(() => import('@/pages/Results'))
 const Shared  = lazy(() => import('@/pages/Shared'))
 const Guide   = lazy(() => import('@/pages/Guide'))
+const Survey  = lazy(() => import('@/pages/Survey'))
 
 // Minimal branded spinner shown while a page chunk downloads (<100ms on fast wifi)
 function PageLoader() {
@@ -38,6 +39,8 @@ function App() {
           <Route path="/results/:deckId"     element={<Results />} />
           <Route path="/shared/:shareId"    element={<Shared />} />
           <Route path="/guide"              element={<Guide />} />
+          <Route path="/s/:code"            element={<Survey />} />
+          <Route path="/s/:code/:blockId"   element={<Survey />} />
         </Routes>
       </Suspense>
     </BrowserRouter>

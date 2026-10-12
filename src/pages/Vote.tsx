@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Check, Send, LogOut, Clock } from 'lucide-react'
+import { Check, Send, LogOut, Clock, ClipboardList } from 'lucide-react'
 import { cn, optionLabel, useAutoGrow } from '@/lib/utils'
 import { Confetti, CountUp } from '@/components/Celebration'
 import { TestRunner } from '@/components/TestRunner'
-import type { StoredTestBlockSlide } from '@/lib/selfPacedTest'
+import { SurveyRunner } from '@/components/SurveyRunner'
+import { isSurvey, surveyOpen, surveyPath, type StoredTestBlockSlide } from '@/lib/selfPacedTest'
 import {
   subscribeToSession, submitResponse, joinAsViewer, sendReaction, getViewerId,
   type Session, type QType, type ReactionType,
@@ -58,6 +59,8 @@ export default function Vote() {
   // Open-ended multi-submit: how many responses each person has sent per slide
   const [oeSubmissions, setOeSubmissions] = useSharedStored<Record<string, number>>(stored('oe'), {})
   const [oeTexts,       setOeTexts]       = useSharedStored<Record<string, string[]>>(stored('oe-texts'), {})
+  // A survey opened from the "still open" bar while the show has moved on
+  const [surveyView,      setSurveyView]      = useState<string | null>(null)
   const [quizScore,       setQuizScore]       = useState(0)
   const [lastQuizResult,  setLastQuizResult]  = useState<{
     isCorrect: boolean
@@ -113,7 +116,8 @@ export default function Vote() {
     if (session === undefined) return  // Still loading
 
     // Quiz or self-paced test with no name: wait until the gate screen is submitted
-    const needsName = !!session?.isQuiz || !!session?.slides?.some(x => x.type === 'testblock')
+    // (a survey asks for a name itself, only when it records names)
+    const needsName = !!session?.isQuiz || !!session?.slides?.some(x => x.type === 'testblock' && !isSurvey(x as StoredTestBlockSlide))
     if (needsName && !quizName) return
 
     // Non-quiz (anonymous OK) or quiz name just entered
@@ -176,12 +180,19 @@ export default function Vote() {
   }
 
   // ── Session ended ──────────────────────────────────────────────────────
+  // Surveys still taking answers that this device hasn't answered
+  const openSurveys = session.slides
+    .filter(x => x.type === 'testblock' && isSurvey(x as StoredTestBlockSlide))
+    .map(x => x as StoredTestBlockSlide)
+    .filter(b => surveyOpen(session.surveys?.[b.id], b) && !surveyAnswered(sessionCode!, b.id))
+  const onlySurvey = session.slides.filter(x => x.type === 'testblock' && isSurvey(x as StoredTestBlockSlide)).length === 1
+
   if (session.status === 'ended') {
-    return <WrapState session={session} attendeeName={attendeeName} />
+    return <WrapState session={session} attendeeName={attendeeName} surveyHref={openSurveys[0] ? surveyPath(sessionCode!, openSurveys[0].id, onlySurvey) : undefined} />
   }
 
   // ── Name gate — a live quiz or a self-paced test needs a name ──────────
-  const hasTest = session.slides.some(x => x.type === 'testblock')
+  const hasTest = session.slides.some(x => x.type === 'testblock' && !isSurvey(x as StoredTestBlockSlide))
   if ((session.isQuiz || hasTest) && !attendeeName && !quizName) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center bg-white px-5">
@@ -462,6 +473,19 @@ export default function Vote() {
         )}
       </AnimatePresence>
 
+      {/* A survey is still open but the show has moved on */}
+      {!surveyView && openSurveys.filter(b => b.id !== slideId).slice(0, 1).map(b => (
+        <button
+          key={b.id}
+          onClick={() => setSurveyView(b.id)}
+          className="mx-5 mb-1 flex items-center gap-2.5 rounded-2xl border border-hot-pink/30 bg-hot-pink/[0.06] px-4 py-2.5 text-left"
+        >
+          <ClipboardList className="size-4 shrink-0 text-hot-pink" />
+          <span className="min-w-0 flex-1 truncate text-sm text-midnight-sky-800"><span className="font-semibold">Survey open</span> · {b.title || 'Survey'}</span>
+          <span className="shrink-0 text-sm font-semibold text-hot-pink">Answer →</span>
+        </button>
+      ))}
+
       {/* Content */}
       <div className="flex flex-1 flex-col overflow-y-auto px-5 pb-8 pt-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
         <AnimatePresence mode="wait">
@@ -473,7 +497,22 @@ export default function Vote() {
             transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
             className="flex flex-1 flex-col"
           >
-            {slideData?.type === 'testblock' ? (
+            {surveyView && session.slides.some(x => x.id === surveyView) ? (
+              <SurveyRunner
+                code={sessionCode!}
+                block={session.slides.find(x => x.id === surveyView) as StoredTestBlockSlide}
+                state={session.surveys?.[surveyView]}
+                defaultName={quizName || attendeeName}
+                onBack={() => setSurveyView(null)}
+              />
+            ) : slideData?.type === 'testblock' && isSurvey(slideData as StoredTestBlockSlide) ? (
+              <SurveyRunner
+                code={sessionCode!}
+                block={slideData as StoredTestBlockSlide}
+                state={session.surveys?.[slideData.id]}
+                defaultName={quizName || attendeeName}
+              />
+            ) : slideData?.type === 'testblock' ? (
               <TestRunner
                 code={sessionCode!}
                 block={slideData as StoredTestBlockSlide}
@@ -621,7 +660,7 @@ export default function Vote() {
       {/* ── Reaction bar — always visible, no pill housing (hidden while a
           self-paced test is being answered: it would cover the options) ── */}
       <div className={cn('pointer-events-none fixed inset-x-0 bottom-0 z-20 flex justify-center pb-4',
-        slideData?.type === 'testblock' && ['running', 'paused'].includes(session.tests?.[slideData.id]?.status ?? '') && 'hidden')}>
+        (surveyView || (slideData?.type === 'testblock' && (isSurvey(slideData as StoredTestBlockSlide) || ['running', 'paused'].includes(session.tests?.[slideData.id]?.status ?? '')))) && 'hidden')}>
         <div className="pointer-events-auto flex items-center gap-3">
           {REACTION_CONFIG.map(r => (
             <motion.button
@@ -638,6 +677,11 @@ export default function Vote() {
       </div>
     </main>
   )
+}
+
+/** This device already sent its answers to that survey. */
+function surveyAnswered(code: string, blockId: string): boolean {
+  try { return !!JSON.parse(localStorage.getItem(`alaya-survey:${code.toUpperCase()}:${blockId}`) || 'null')?.submitted } catch { return false }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -773,7 +817,7 @@ function SubmittedState() {
    Wrap state — full-page dark screen shown when the session has ended
    ───────────────────────────────────────────────────────────────────────── */
 
-function WrapState({ session: _session, attendeeName }: { session: Session; attendeeName?: string }) {
+function WrapState({ session: _session, attendeeName, surveyHref }: { session: Session; attendeeName?: string; surveyHref?: string }) {
   return (
     <motion.main
       initial={{ opacity: 0 }}
@@ -829,7 +873,16 @@ function WrapState({ session: _session, attendeeName }: { session: Session; atte
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.52, ease: [0.16, 1, 0.3, 1] }}
+          className="flex flex-col items-center gap-3"
         >
+          {surveyHref && (
+            <Link
+              to={surveyHref}
+              className="inline-flex items-center gap-2 rounded-2xl bg-hot-pink px-6 py-3 text-sm font-semibold text-white shadow-[0_0_24px_-6px] shadow-hot-pink/60"
+            >
+              <ClipboardList className="size-4" /> The survey is still open — answer it
+            </Link>
+          )}
           <Link
             to="/join"
             className="inline-flex items-center rounded-2xl border border-white/18 bg-white/8 px-6 py-3 text-sm font-medium text-white/85 backdrop-blur-sm transition hover:bg-white/14 hover:text-white"

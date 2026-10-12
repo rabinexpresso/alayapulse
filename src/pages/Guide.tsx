@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom'
 import {
   Hammer, Presentation, BarChart2, Upload, Scissors, LayoutGrid,
   FileSpreadsheet, ListPlus, Bookmark, Play, Compass, Trophy, ClipboardCheck,
-  Download, Share2, Lightbulb, AlertTriangle,
+  Download, Share2, Lightbulb, AlertTriangle, ClipboardList,
 } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
 
@@ -57,6 +57,7 @@ function Btn({ children, color = 'default' }: { children: React.ReactNode; color
   const palette: Record<string, string> = {
     default: 'border-white/25 bg-white/10 text-white',
     pink:    'border-hot-pink/40 bg-hot-pink/15 text-hot-pink',
+    survey:  'border-hot-pink/50 bg-hot-pink/20 text-[#ff7aae]',
     blue:    'border-sky-blue/40 bg-sky-blue/15 text-sky-blue',
     green:   'border-fresh-green/40 bg-fresh-green/15 text-fresh-green',
     orange:  'border-[#f97316]/40 bg-[#f97316]/15 text-[#fb923c]',
@@ -218,6 +219,21 @@ const GUIDE: Stage[] = [
         ],
         tip: <>Correct answers never reach the phones until the test ends, and answers save as people go — if someone’s page closes, they rescan the QR and carry on.</>,
       },
+      {
+        id: 'survey',
+        icon: <ClipboardList className="size-4" />,
+        title: 'Survey — feedback before, during or after the session',
+        intro: 'A survey is like a Google Form inside your deck. Everyone gets all its questions on their phone at once; nothing is marked or timed. It’s anonymous unless you ask for names, and a link lets people answer after the show — until you close it.',
+        steps: [
+          { text: <><strong>Add the block:</strong> in <strong>Add slide</strong>, click <Btn color="survey">Survey</Btn>. A pink block appears in the sidebar — questions inside the pink frame are the survey. Click its header to give it a title (shown at the top of the form).</> },
+          { text: <><strong>Add questions:</strong> <Btn>Add question</Btn> (any type), or <Btn color="survey">Import CSV</Btn> inside the block. The main <Btn>Import</Btn> → <strong>Import questions in CSV</strong> also offers <strong>Into a new survey</strong>. In the CSV, <strong>checkboxes</strong> is multiple choice where people tick several, and the <strong>required</strong> column says yes or no.</> },
+          { text: <><strong>On each question:</strong> choose <strong>Must answer</strong> or <strong>Optional</strong> (must-answer questions get a red * on the phone, and the form won’t submit until they’re answered). Multiple choice has <strong>One answer</strong> or <strong>Several answers</strong> (with an optional limit, e.g. “up to 2”). Written answers can be up to 2,000 words — the box grows as people type.</> },
+          { text: <><strong>Settings:</strong> <strong>Anonymous</strong> (the default — not even the name they joined with is kept) or <strong>Ask for names</strong>; open <strong>Until I close it</strong> or <strong>Until a date</strong>; and a theme colour for the big screen. Each phone or computer can answer once.</> },
+          { text: <><strong>During the show:</strong> the survey opens the first time your show reaches it. People who joined see it on their phone straight away; the big screen shows a QR code and the survey link for anyone else, plus a live count of responses. If you move on before everyone’s finished, their phones show a <strong>Survey open — Answer</strong> bar. <Btn>Show results</Btn> steps through each question’s answers (→ / ←); <Btn>Close survey</Btn> stops new answers.</> },
+          { text: <><strong>After the show:</strong> the link keeps working until you close the survey — email it, or put it in a Teams chat. New answers appear in Results whenever you open it. You can close or reopen the survey from the Results page.</> },
+        ],
+        tip: <>Put a survey first in your deck for a “before” check-in, in the middle for a quick pulse, or at the end for feedback — or start the show, copy the link, and send it out.</>,
+      },
     ],
   },
   {
@@ -236,6 +252,7 @@ const GUIDE: Stage[] = [
           { text: <>Use the download buttons to export everything as an <strong>Excel file</strong> (per-question tabs, participants, and — for quizzes — the leaderboard) or as a <strong>PDF summary</strong>.</>, image: 'results-page.png', imageAlt: 'Results page with Excel and PDF download buttons' },
           { text: <>Every question is tagged as one of three kinds. <strong>Self-paced test:</strong> questions inside a Self-paced test block — everyone answers on their own phone at their own pace within one time limit. Multiple choice is marked automatically and ranked by correct answers, then finish time; other question types are marked by the host afterwards. <strong>Live quiz:</strong> multiple-choice questions with a correct answer, shown one at a time on the big screen while Live quiz is on — points for each right answer, plus extra points for answering fast. <strong>Poll:</strong> questions that aren’t scored, such as word clouds, open-ended, rating, ranking, and multiple choice with no correct answer — they show what the room thinks.</> },
           { text: <>For a self-paced test, the results page lists every participant with their score, time taken and status — click a name to see each answer they gave. The Excel adds <strong>Test results</strong>, <strong>Test answers</strong> and <strong>Test questions</strong> tabs — and its first tab, <strong>How to read this</strong>, explains what every tab shows.</> },
+          { text: <><strong>Survey results:</strong> each survey has <strong>Summary</strong> (a pie chart or bars per question, ratings and rankings, every written answer — <Btn>Copy chart</Btn> pastes a chart into slides) and <strong>Individual</strong> (one person’s whole form at a time). <Btn>Print summary</Btn> prints it neatly (or saves a PDF), <Btn>Word report</Btn> gives a document to read and share, <Btn>Excel</Btn> gives one row per person — upload it to Google Drive to open it as a Google Sheet — and <Btn color="pink">Copy for Gemini</Btn> copies the answers with a ready-made prompt: paste it into Gemini for the main themes, what people liked, what to improve and a few quotes. Check what AI says before you share it, and follow your company’s AI policy.</> },
           { text: <><strong>Marking written answers:</strong> if the test had questions you mark, the Excel also has a <strong>To mark</strong> tab — one row per answer, with the marking guide, the marks available and an empty Mark column. Or use the <strong>answers to mark</strong> box on the results page: download the answers file, copy the ready-made prompt, and paste both into Gemini (or ChatGPT / Claude) to get a mark and a reason for each answer plus everyone’s total. Always check AI marks, and make sure your company’s AI policy allows it.</> },
           { text: <>Results are saved with the deck, so you can come back and download them later too.</> },
         ],

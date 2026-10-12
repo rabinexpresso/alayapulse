@@ -13,13 +13,16 @@
 # - Replace the example rows at the bottom with your own questions -- one question per row
 # - Lines starting with # are instructions and are ignored on import
 #
-# type -- one of: mcq | wordcloud | openended | rating | ranking
+# type -- one of: mcq | checkboxes | wordcloud | openended | rating | ranking
 #
 # mcq -- multiple choice
 #   Put the answer options in option_a onwards (2 to 100 options)
 #   correct = the column letter of the right answer e.g. B -- or several e.g. A|C|D
 #   explanation = why the answer is correct (optional -- shown after the answer is revealed)
 #   timer = seconds to answer -- leave blank for 30
+#
+# checkboxes -- multiple choice where people can tick several answers (for surveys)
+#   Put the answer options in option_a onwards. Leave correct / timer blank
 #
 # rating -- people score each item on a scale
 #   Put the things to rate in option_a onwards (1 to 5 items) e.g. Workload then Communication
@@ -31,19 +34,24 @@
 #
 # wordcloud and openended -- no options needed
 #   Leave option columns / correct / timer blank
+#   (a short answer or a paragraph from a Google Form is openended)
 #
 # SELF-PACED TESTS -- for rating, ranking, wordcloud and openended questions,
 #   explanation = the marking guide: what a good answer includes (optional)
+#
+# SURVEYS -- nothing is marked, so correct / explanation / timer are ignored
+#   required = yes if people must answer the question, no if it's optional (blank = yes)
 #
 # MORE THAN 6 OPTIONS
 #   Add more columns to the header: option_g then option_h and so on up to option_z
 #   For very long lists use numbered columns instead: option_1 to option_100
 #   With numbered columns write correct as the number e.g. 34 -- or several e.g. 3|17|22
 # ===================================================================
-type,question,option_a,option_b,option_c,option_d,option_e,option_f,correct,explanation,timer
-mcq,Example MCQ -- single correct answer,Option A,Option B,Option C,Option D,,,B,This is why B is the correct answer.,30
-mcq,Example MCQ -- multiple correct answers,Option A,Option B,Option C,Option D,Option E,Option F,A|C,A and C are both correct because of this reason.,30
-wordcloud,Example Word Cloud -- what one word comes to mind?,,,,,,,,,
-openended,Example Open Ended -- what is one thing you will do differently after today?,,,,,,,,,
-rating,Example Rating -- how do you feel about these areas?,Workload,Communication,Team support,,,,,,
-ranking,Example Ranking -- rank what matters most to you in a manager,Trust,Communication,Recognition,Growth,,,,,
+type,question,option_a,option_b,option_c,option_d,option_e,option_f,correct,explanation,timer,required
+mcq,Example MCQ -- single correct answer,Option A,Option B,Option C,Option D,,,B,This is why B is the correct answer.,30,
+mcq,Example MCQ -- multiple correct answers,Option A,Option B,Option C,Option D,Option E,Option F,A|C,A and C are both correct because of this reason.,30,
+checkboxes,Example Checkboxes (surveys) -- which parts did you enjoy?,Videos,Group games,Discussion,Worksheets,,,,,,yes
+wordcloud,Example Word Cloud -- what one word comes to mind?,,,,,,,,,,
+openended,Example Open Ended -- what is one thing you will do differently after today?,,,,,,,,,,no
+rating,Example Rating -- how do you feel about these areas?,Workload,Communication,Team support,,,,,,,
+ranking,Example Ranking -- rank what matters most to you in a manager,Trust,Communication,Recognition,Growth,,,,,,

@@ -12,7 +12,8 @@ import { cn, optionLabel, MAX_VIZ_OPTIONS } from '@/lib/utils'
 import { aggregateRanking, rankingOrder, type RankingResult } from '@/lib/ranking'
 import { Confetti, Fireworks, CountUp } from '@/components/Celebration'
 import { TestBlockView, type TestNav, type LeaderboardEntry } from '@/components/TestBlockShow'
-import { rankTest, qTypeOf, hasAnswer, type TestBlockShowSlide, type TestQuestion, type TestState, type TestAnswerDoc } from '@/lib/selfPacedTest'
+import { SurveyBlockView } from '@/components/SurveyBlockShow'
+import { rankTest, qTypeOf, hasAnswer, isSurvey, surveyParticipants, type TestBlockShowSlide, type TestQuestion, type TestState, type TestAnswerDoc } from '@/lib/selfPacedTest'
 import {
   updateSessionState, endSession, subscribeToSlideResponses, subscribeToViewerCount, subscribeToViewers,
   fetchAllSessionResponses, getSessionByCode, publishQuizRanks, startTimer, clearTimer, resetSlideAndTimer, updateQuestionMeta,
@@ -334,7 +335,7 @@ export default function Present() {
 
   const slide      = deck[current] as AnySlide
   const isQuestion = slide.type !== 'pdf' && slide.type !== 'image' && slide.type !== 'video' && slide.type !== 'content' && slide.type !== 'canvas' && slide.type !== 'html' && slide.type !== 'leaderboard' && slide.type !== 'testblock'
-  const hasTest    = deck.some(s => s.type === 'testblock')
+  const hasTest    = deck.some(s => s.type === 'testblock' && !isSurvey(s as TestBlockShowSlide))
   // A self-paced test block handles → / ← itself while it has stages to show
   const testNavRef = useRef<TestNav | null>(null)
   const code       = (sessionId ?? 'DEMO').slice(0, 6).toUpperCase()
@@ -665,7 +666,17 @@ export default function Present() {
             transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
             className="h-full w-full"
           >
-            {slide.type === 'testblock' ? (
+            {slide.type === 'testblock' && isSurvey(slide as TestBlockShowSlide) ? (
+              <SurveyBlockView
+                slide={slide as TestBlockShowSlide}
+                code={code}
+                onlySurvey={deck.filter(x => x.type === 'testblock' && isSurvey(x as TestBlockShowSlide)).length === 1}
+                navRef={testNavRef}
+                renderAnswers={(q, sheets) => (
+                  <TestAnswersDisplay key={q.id} question={q} sheets={sheets} theme={q.theme ?? (slide as TestBlockShowSlide).theme ?? 'navy'} />
+                )}
+              />
+            ) : slide.type === 'testblock' ? (
               <TestBlockView
                 slide={slide as TestBlockShowSlide}
                 code={code}
@@ -1128,7 +1139,8 @@ export default function Present() {
                         // actually received a response. Skips empty history from
                         // content-only runs or sessions nobody answered, so the
                         // saved data (and the all-data export) stays meaningful.
-                        if (snapshot.questions.some(q => q.responseCount > 0) || snapshot.tests?.some(t => t.participants.length > 0)) {
+                        // A survey is always kept: people can still answer it after the show.
+                        if (snapshot.questions.some(q => q.responseCount > 0) || snapshot.tests?.some(t => t.participants.length > 0 || t.kind === 'survey')) {
                           lastResults = snapshot
                         }
                       } catch (e) {
@@ -3877,6 +3889,17 @@ function buildResultsSnapshot(
   for (const s of deck) {
     if (s.type !== 'testblock') continue
     const t = s as TestBlockShowSlide
+    if (isSurvey(t)) {
+      // Surveys: every submitted answer so far (more can arrive through the link later)
+      const sheets = ((byId.get(t.id) ?? []) as unknown as TestAnswerDoc[]).filter(d => d.finished)
+      tests.push({
+        blockId: t.id, timeLimit: 0, kind: 'survey', title: t.title?.trim() || 'Survey', ...(t.askNames ? { askNames: true } : {}),
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        questions: t.questions.map(({ imgUrl, ...q }) => ({ ...q, type: qTypeOf(q) })),
+        participants: surveyParticipants(sheets),
+      })
+      continue
+    }
     const state = testStates?.[t.id]
     const sheets = (byId.get(t.id) ?? []) as unknown as TestAnswerDoc[]
     if (!state || sheets.length === 0) continue

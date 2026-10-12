@@ -1099,6 +1099,7 @@ function StorageChoiceScreen({
 const TYPE_LABELS: Record<string, string> = {
   mcq: 'MCQ', wordcloud: 'Word Cloud', openended: 'Open-ended', rating: 'Rating', ranking: 'Ranking',
   testblock: 'Self-paced test',
+  survey: 'Survey',
 }
 const TYPE_COLORS: Record<string, string> = {
   mcq: 'bg-sky-blue/10 text-sky-blue',
@@ -1107,6 +1108,7 @@ const TYPE_COLORS: Record<string, string> = {
   rating: 'bg-hot-pink/10 text-hot-pink',
   ranking: 'bg-sky-blue/10 text-sky-blue',
   testblock: 'bg-golden-sun/15 text-[#a07800]',
+  survey: 'bg-hot-pink/10 text-hot-pink',
 }
 
 /* ── Slide theme palette (mirrors Create.tsx CONTENT_COLORS / QSLIDE_COLORS) */
@@ -1286,7 +1288,7 @@ function DeckCard({ deck, onOpen, onDelete, onExport, onShare, onDuplicate, isSe
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const slides     = (deck.slides as any[]).filter(s => s?.type !== 'testend')
   const qSlides    = slides.filter(s => s.type !== 'pdf')
-  const qTypes     = [...new Set(qSlides.map(s => s.type as string))]
+  const qTypes     = [...new Set(qSlides.map(s => (s.type === 'testblock' && s.kind === 'survey' ? 'survey' : s.type) as string))]
   const slideCount = slides.length
 
   // Share dropdown state

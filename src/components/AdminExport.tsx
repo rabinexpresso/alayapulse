@@ -7,6 +7,7 @@ import { app, db } from '@/lib/firebase'
 import { optionLabel, fitColumns } from '@/lib/utils'
 import { aggregateRanking, parseRanking, rankingOrder } from '@/lib/ranking'
 import { formatDuration } from '@/lib/selfPacedTest'
+import { surveyAnswerText } from '@/lib/surveyReport'
 import {
   isResponseCorrect, onAuthStateChanged, auth,
   type ResultQuestion, type ResultResponse,
@@ -216,7 +217,7 @@ async function buildAllSessionsWorkbook(sessions: ExportSession[], startDate: st
   const testRows: Record<string, string | number>[] = []
   sessions.forEach(s => {
     const date = new Date(s.conductedAt).toISOString().slice(0, 10)
-    ;(s.tests ?? []).forEach((t, ti) => {
+    ;(s.tests ?? []).filter(t => t.kind !== 'survey').forEach((t, ti) => {
       t.participants.forEach(p => {
         testRows.push({
           'Date':       date,
@@ -229,6 +230,30 @@ async function buildAllSessionsWorkbook(sessions: ExportSession[], startDate: st
           'Score (multiple choice)': p.total ? `${p.correct}/${p.total}` : '—',
           'Time taken': formatDuration(p.timeMs),
           'Status':     p.status === 'submitted' ? 'Submitted' : 'Ran out of time',
+        })
+      })
+    })
+  })
+
+  // ── Tab 5: Surveys (one row per answer, so different surveys line up) ──
+  const surveyRows: Record<string, string | number>[] = []
+  sessions.forEach(s => {
+    const date = new Date(s.conductedAt).toISOString().slice(0, 10)
+    ;(s.tests ?? []).filter(t => t.kind === 'survey').forEach(t => {
+      t.participants.forEach((p, pi) => {
+        t.questions.forEach((q, qi) => {
+          surveyRows.push({
+            'Date':     date,
+            'Owner':    s.ownerEmail,
+            'Deck':     s.deckTitle,
+            'Session':  s.sessionCode,
+            'Survey':   t.title || 'Survey',
+            'Response': pi + 1,
+            'Name':     t.askNames ? p.name : 'Anonymous',
+            'Q#':       qi + 1,
+            'Question': q.question,
+            'Answer':   surveyAnswerText(q, p.answers[q.id]) || '—',
+          })
         })
       })
     })
@@ -255,6 +280,7 @@ async function buildAllSessionsWorkbook(sessions: ExportSession[], startDate: st
     'All Questions',
   )
   if (testRows.length) XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(testRows), testRows), 'Self-paced Tests')
+  if (surveyRows.length) XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(surveyRows), surveyRows), 'Surveys')
 
   const stamp = (startDate || endDate)
     ? `${startDate || 'start'} to ${endDate || 'now'}`

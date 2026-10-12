@@ -724,19 +724,19 @@ function SaveStatus({ status }: { status: 'saved' | 'saving' | 'offline' }) {
 /* ── Answer inputs for the types the host marks ─────────────────────────── */
 
 /** One written answer, up to OE_MAX_WORDS (extra words are trimmed off as you type). */
-function OpenAnswer({ value, onChange }: { q: StoredTestQuestion; value: string; onChange: (v: string) => void }) {
+export function OpenAnswer({ value, onChange, compact = false }: { q: StoredTestQuestion; value: string; onChange: (v: string) => void; compact?: boolean }) {
   const limit = OE_MAX_WORDS
   const [hit, setHit] = useState(false)
   const n = wordCount(value)
   const box = useRef<HTMLTextAreaElement>(null)
   useAutoGrow(box, value)
   return (
-    <div className="mt-4">
+    <div className={compact ? 'mt-3' : 'mt-4'}>
       <textarea
         ref={box}
         value={value}
-        rows={8}
-        style={{ minHeight: '12rem' }}
+        rows={compact ? 4 : 8}
+        style={{ minHeight: compact ? '7rem' : '12rem' }}
         placeholder="Type your answer…"
         onChange={e => {
           let v = e.target.value
@@ -759,7 +759,7 @@ const ORDINAL_WORDS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', '
 /** Word cloud in a test: one short answer per box. Typing a comma (or Enter)
  *  jumps to the next box, and pasting "a, b, c" fills the boxes in turn, so
  *  nobody squeezes all their answers into the first one. */
-function ShortAnswers({ q, value, onChange }: { q: StoredTestQuestion; value: string[]; onChange: (v: string[]) => void }) {
+export function ShortAnswers({ q, value, onChange }: { q: StoredTestQuestion; value: string[]; onChange: (v: string[]) => void }) {
   const n = q.maxEntries ?? 3
   const vals = Array.from({ length: n }, (_, i) => value[i] ?? '')
   const refs = useRef<(HTMLInputElement | null)[]>([])
@@ -811,7 +811,7 @@ function ShortAnswers({ q, value, onChange }: { q: StoredTestQuestion; value: st
 }
 
 /** Rate each item on the 0..N scale. */
-function RateItems({ q, value, onChange }: { q: StoredTestQuestion; value: number[]; onChange: (v: number[]) => void }) {
+export function RateItems({ q, value, onChange }: { q: StoredTestQuestion; value: number[]; onChange: (v: number[]) => void }) {
   const max = q.ratingMax ?? 5
   const vals = q.options.map((_, i) => (typeof value[i] === 'number' ? value[i] : -1))
   const scale = Array.from({ length: max + 1 }, (_, i) => i)
@@ -848,7 +848,7 @@ function RateItems({ q, value, onChange }: { q: StoredTestQuestion; value: numbe
 }
 
 /** Tap the items in order: first tap is #1; tapping a ranked item takes it out. */
-function RankItems({ q, value, onChange }: { q: StoredTestQuestion; value: number[]; onChange: (v: number[]) => void }) {
+export function RankItems({ q, value, onChange }: { q: StoredTestQuestion; value: number[]; onChange: (v: number[]) => void }) {
   const order = value.filter(v => Number.isInteger(v) && v >= 0 && v < q.options.length)
   const done = order.length === q.options.length
   return (
