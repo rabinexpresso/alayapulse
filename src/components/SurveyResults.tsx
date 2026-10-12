@@ -58,7 +58,7 @@ export function SurveyResultSection({ survey, deckTitle, sessionCode, conductedA
   const word = async () => {
     setBusy('word')
     try { downloadBlob(await surveyDocx(survey, deckTitle), `${fileBase} survey report.docx`) }
-    catch (e) { console.error(e); alert('Could not make the Word report. Try again.') }
+    catch (e) { console.error(e); alert('Could not make the Word report. Refresh the page and try again.') }
     finally { setBusy(null) }
   }
   const excel = async () => {
@@ -77,7 +77,7 @@ export function SurveyResultSection({ survey, deckTitle, sessionCode, conductedA
       XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(responses.length ? responses : [{ Submitted: 'No responses yet' }]), responses), 'Survey responses')
       XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(summary), summary), 'Survey summary')
       XLSX.writeFile(wb, `${fileBase.replace(/[\\/:*?"<>|]+/g, '-')} survey.xlsx`)
-    } catch (e) { console.error(e); alert('Could not make the Excel file. Try again.') }
+    } catch (e) { console.error(e); alert('Could not make the Excel file. Refresh the page and try again.') }
     finally { setBusy(null) }
   }
   const gemini = () => {

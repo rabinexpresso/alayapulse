@@ -225,7 +225,7 @@ export default function Results() {
       doc.save(`${safeTitle} - ${date} results.pdf`)
     } catch (e) {
       console.error('PDF generation failed:', e)
-      alert('Could not generate PDF. Try again or take a screenshot of this page.')
+      alert('Could not make the PDF. Refresh the page and try again.')
     } finally {
       setDownloading(false)
     }
@@ -380,7 +380,7 @@ export default function Results() {
       XLSX.writeFile(wb, `${safeTitle} - ${date} scorecard.xlsx`)
     } catch (e) {
       console.error('Excel generation failed:', e)
-      alert('Could not generate Excel file. Try again.')
+      alert('Could not make the Excel file. Refresh the page and try again.')
     } finally {
       setDownloadingXlsx(false)
     }
