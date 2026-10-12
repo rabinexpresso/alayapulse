@@ -11,6 +11,7 @@ import {
   summarize, surveyTypeLabel, summaryLine, pieSvg, chartCanvas, canvasPng, surveyPrintHtml, surveyDocx, surveySheets,
   surveyGeminiText, surveyAnswerText, downloadBlob, fmtDateTime, placeLabel, SURVEY_COLOURS, PIE_MAX, type QSummary,
 } from '@/lib/surveyReport'
+import { topChoiceText, RANKING_HOW_TO_READ } from '@/lib/ranking'
 
 /* ─────────────────────────────────────────────────────────────────────────
    A survey's results on the Results page — like Google Forms' responses:
@@ -224,7 +225,7 @@ function SummaryCard({ q, i, survey }: { q: TestResultQuestion; i: number; surve
           {showAll ? 'Show fewer' : `Show all ${s.texts.length} answers`}
         </button>
       )}
-      {s.kind !== 'text' && s.answered > 0 && <p className="mt-3 text-xs text-midnight-sky-500">{summaryLine(q, s)}</p>}
+      {s.kind !== 'text' && s.kind !== 'ranking' && s.answered > 0 && <p className="mt-3 text-xs text-midnight-sky-500">{summaryLine(q, s)}</p>}
     </motion.div>
   )
 }
@@ -300,8 +301,28 @@ function SummaryBody({ s, askNames, showAll }: { s: QSummary; askNames: boolean;
     const top = Math.max(...s.rows.map(r => r.points), 1)
     return (
       <>
-        <Bars rows={s.rows.map((r, k) => ({ label: `${placeLabel(k)} · ${r.label}`, frac: r.points / top, value: r.avgPos ? `avg place ${r.avgPos.toFixed(1)}` : '–' }))} />
-        {s.voters < s.answered && <p className="mt-2 text-[11px] text-midnight-sky-500">{s.answered - s.voters} unfinished ranking{s.answered - s.voters !== 1 ? 's' : ''} not counted.</p>}
+        <div className="flex flex-col gap-2.5">
+          {s.rows.map((r, k) => (
+            <div key={k} className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto] items-center gap-3 text-sm">
+              <span className="min-w-0">
+                <span className="block truncate text-midnight-sky-800" title={r.label}>
+                  <span className="font-semibold">{r.tied ? 'Joint ' : ''}{placeLabel(r.place - 1)}</span> · {r.label}
+                </span>
+                <span className="block truncate text-[11px] text-midnight-sky-500">{topChoiceText(r.firsts, s.voters)}</span>
+              </span>
+              <div className="h-3 overflow-hidden rounded-full bg-midnight-sky-100">
+                <motion.div className="h-full rounded-full bg-sky-blue" initial={{ width: 0 }} animate={{ width: `${Math.round((r.points / top) * 100)}%` }} transition={{ duration: 0.6 }} />
+              </div>
+              <span className="whitespace-nowrap text-right leading-tight">
+                <span className="block text-xs font-semibold tabular-nums text-midnight-sky-700">{r.avgPos ? r.avgPos.toFixed(1) : '–'}</span>
+                <span className="block text-[10px] text-midnight-sky-500">average position</span>
+              </span>
+            </div>
+          ))}
+        </div>
+        <p className="mt-2 text-[11px] leading-relaxed text-midnight-sky-500">
+          {s.voters < s.answered ? `${s.answered - s.voters} unfinished ranking${s.answered - s.voters !== 1 ? 's' : ''} not counted. ` : ''}{RANKING_HOW_TO_READ}
+        </p>
       </>
     )
   }

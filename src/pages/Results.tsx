@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
 import { cn, optionLabel, fitColumns } from '@/lib/utils'
-import { aggregateRanking, parseRanking, rankingOrder } from '@/lib/ranking'
+import { aggregateRanking, parseRanking, rankingOrder, rankingPlaces, topChoiceText, RANKING_HOW_TO_READ } from '@/lib/ranking'
 import { KindTag, KIND_INFO, TestResultSection, liveKind, testSheets, addTestPdf, type QuestionKind } from '@/components/TestResults'
 import { SurveyResultSection } from '@/components/SurveyResults'
 import { hasAnswer, surveyParticipants } from '@/lib/selfPacedTest'
@@ -974,11 +974,15 @@ function RankingVisual({ q }: { q: ResultQuestion }) {
     return <p className="text-sm italic text-midnight-sky-400">No complete rankings were submitted.</p>
   }
   const order       = rankingOrder(result, n)
+  const places      = rankingPlaces(result, order)
   const maxPossible = result.voters * n
   return (
     <div className="space-y-3">
+      <p className="text-xs text-midnight-sky-500">Everyone’s rankings combined — the item people put highest comes first.</p>
       {order.map((idx, pos) => {
-        const isTop = pos === 0
+        const place = places[pos]
+        const isTop = place === 1
+        const tied  = places.filter(x => x === place).length > 1
         const pct   = maxPossible > 0 ? (result.points[idx] / maxPossible) * 100 : 0
         return (
           <div key={idx} className="flex items-center gap-3">
@@ -986,11 +990,15 @@ function RankingVisual({ q }: { q: ResultQuestion }) {
               'flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold tabular-nums',
               isTop ? 'bg-hot-pink text-white' : 'bg-midnight-sky-100 text-midnight-sky-600',
             )}>
-              {pos + 1}
+              {place}
             </span>
-            <span className={cn('w-32 shrink-0 truncate text-sm font-medium sm:w-48',
-              isTop ? 'text-midnight-sky-900' : 'text-midnight-sky-700')}>
-              {q.options[idx] || `Item ${idx + 1}`}
+            <span className="w-32 min-w-0 shrink-0 sm:w-56">
+              <span className={cn('block truncate text-sm font-medium', isTop ? 'text-midnight-sky-900' : 'text-midnight-sky-700')} title={q.options[idx]}>
+                {q.options[idx] || `Item ${idx + 1}`}
+              </span>
+              <span className="block truncate text-[11px] text-midnight-sky-500">
+                {tied ? `Tied ${rankOrdinal(place - 1)} · ` : ''}{topChoiceText(result.firsts[idx], result.voters)}
+              </span>
             </span>
             <div className="relative h-7 min-w-0 flex-1 overflow-hidden rounded-lg bg-midnight-sky-100">
               <motion.div
@@ -1000,14 +1008,15 @@ function RankingVisual({ q }: { q: ResultQuestion }) {
                 transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
               />
             </div>
-            <span className="w-24 shrink-0 text-right text-sm tabular-nums text-midnight-sky-500">
-              avg <span className={cn('font-bold', isTop ? 'text-hot-pink' : 'text-midnight-sky-700')}>{result.avgPos[idx].toFixed(1)}</span>
+            <span className="w-28 shrink-0 text-right leading-tight">
+              <span className={cn('block text-sm font-bold tabular-nums', isTop ? 'text-hot-pink' : 'text-midnight-sky-700')}>{result.avgPos[idx].toFixed(1)}</span>
+              <span className="block text-[11px] text-midnight-sky-500">average position</span>
             </span>
           </div>
         )
       })}
-      <p className="pt-1 text-xs text-midnight-sky-400">
-        {result.voters} complete {result.voters === 1 ? 'ranking' : 'rankings'} · "avg" is the average position people gave each item — lower is more important
+      <p className="pt-1 text-xs text-midnight-sky-500">
+        {result.voters} complete {result.voters === 1 ? 'ranking' : 'rankings'}. {RANKING_HOW_TO_READ}
       </p>
     </div>
   )
@@ -1446,8 +1455,10 @@ function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckRes
     } else if (q.type === 'ranking') {
       const result = aggregateRanking(q.responses.map(r => r.value), q.options.length)
       if (result.voters > 0) {
-        const body = rankingOrder(result, q.options.length).map((idx, pos) => [
-          String(pos + 1),
+        const pdfOrder = rankingOrder(result, q.options.length)
+        const pdfPlaces = rankingPlaces(result, pdfOrder)
+        const body = pdfOrder.map((idx, pos) => [
+          String(pdfPlaces[pos]),
           q.options[idx] || `Item ${idx + 1}`,
           String(result.points[idx]),
           result.avgPos[idx].toFixed(1),
@@ -1455,7 +1466,7 @@ function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckRes
         ])
         autoTable(doc, {
           startY: cursorY,
-          head:   [['Rank', 'Item', 'Points', 'Avg position', 'Ranked #1']],
+          head:   [['Place', 'Item', 'Points', 'Average position', 'Top choice for']],
           body,
           theme:  'striped',
           headStyles: { fillColor: [0, 0, 121] },

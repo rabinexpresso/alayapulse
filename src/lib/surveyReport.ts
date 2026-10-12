@@ -1,5 +1,5 @@
 import { qTypeOf, hasAnswer, answerText, TEST_QTYPE_LABEL, type TestAnswer } from './selfPacedTest'
-import { aggregateRanking, rankingOrder } from './ranking'
+import { aggregateRanking, rankingOrder, rankingPlaces, topChoiceText } from './ranking'
 import type { TestResult, TestResultQuestion, TestResultParticipant } from './deckStorage'
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -30,7 +30,7 @@ export const placeLabel = (i: number) => ORD[i] ?? `${i + 1}th`
 export type QSummary =
   | { kind: 'choice'; answered: number; multi: boolean; rows: { label: string; count: number; pct: number }[] }
   | { kind: 'rating'; answered: number; max: number; rows: { label: string; avg: number | null; n: number; dist: number[]; left?: string; right?: string }[] }
-  | { kind: 'ranking'; answered: number; voters: number; rows: { label: string; avgPos: number; firsts: number; points: number }[] }
+  | { kind: 'ranking'; answered: number; voters: number; rows: { label: string; avgPos: number; firsts: number; points: number; place: number; tied: boolean }[] }
   | { kind: 'words'; answered: number; rows: { label: string; count: number }[] }
   | { kind: 'text'; answered: number; texts: { name: string; text: string }[] }
 
@@ -60,9 +60,14 @@ export function summarize(q: Q, ps: P[]): QSummary {
   }
   if (t === 'ranking') {
     const r = aggregateRanking(answered.map(p => JSON.stringify(p.answers[q.id])), q.options.length)
+    const order = rankingOrder(r, q.options.length)
+    const places = rankingPlaces(r, order)
     return {
       kind: 'ranking', answered: answered.length, voters: r.voters,
-      rows: rankingOrder(r, q.options.length).map(k => ({ label: q.options[k] ?? '', avgPos: r.avgPos[k], firsts: r.firsts[k], points: r.points[k] })),
+      rows: order.map((k, i) => ({
+        label: q.options[k] ?? '', avgPos: r.avgPos[k], firsts: r.firsts[k], points: r.points[k],
+        place: places[i], tied: places.filter(x => x === places[i]).length > 1,
+      })),
     }
   }
   if (t === 'wordcloud') {
@@ -91,7 +96,7 @@ export function summaryLine(_q: Q, s: QSummary): string {
       : `Most common answer: ${leaders.join(' and ')} (${top} ${top === 1 ? 'person' : 'people'}${leaders.length > 1 ? ' each' : ''})`
   }
   if (s.kind === 'rating') return `Average out of ${s.max}: ` + s.rows.map(r => `${r.label} ${r.avg === null ? '–' : r.avg.toFixed(1)}`).join(', ')
-  if (s.kind === 'ranking') return 'Everyone’s rankings combined: ' + s.rows.map((r, i) => `${placeLabel(i)} ${r.label}`).join(', ')
+  if (s.kind === 'ranking') return 'Everyone’s rankings combined: ' + s.rows.map(r => `${r.tied ? 'joint ' : ''}${placeLabel(r.place - 1)} ${r.label}`).join(', ')
   if (s.kind === 'words') return 'Most common: ' + s.rows.slice(0, 8).map(r => `${r.label} (${r.count})`).join(', ')
   return `${s.answered} written answer${s.answered !== 1 ? 's' : ''}`
 }
@@ -117,7 +122,7 @@ export function surveySheets(survey: TestResult): { responses: Row[]; summary: R
     const push = (answer: string, people: string | number, extra: string | number) => summary.push({ ...base, 'Answer / item': answer, People: people, '% / average': extra })
     if (s.kind === 'choice') s.rows.forEach(r => push(r.label, r.count, `${r.pct}%`))
     else if (s.kind === 'rating') s.rows.forEach(r => push(r.label, r.n, r.avg === null ? '—' : `${r.avg.toFixed(1)} out of ${s.max}`))
-    else if (s.kind === 'ranking') s.rows.forEach((r, k) => push(`${placeLabel(k)}: ${r.label}`, r.firsts, r.avgPos ? `average place ${r.avgPos.toFixed(1)}` : '—'))
+    else if (s.kind === 'ranking') s.rows.forEach(r => push(`${r.tied ? 'Joint ' : ''}${placeLabel(r.place - 1)}: ${r.label}`, `${r.firsts} put it first`, r.avgPos ? `average position ${r.avgPos.toFixed(1)}` : '—'))
     else if (s.kind === 'words') s.rows.slice(0, 40).forEach(r => push(r.label, r.count, `${pctOf(r.count, s.answered)}%`))
     else push('Written answers — see the Survey responses tab', s.answered, '')
     if (!s.answered && s.kind !== 'text') push('Nobody answered', 0, '')
@@ -143,7 +148,7 @@ export function surveyGeminiText(survey: TestResult, deckTitle: string): string 
     lines.push(`Q${i + 1}. ${q.question.replace(/\s+/g, ' ').trim()} [${surveyTypeLabel(q)}, ${s.answered} answered]`)
     if (s.kind === 'choice') s.rows.forEach(r => lines.push(`- ${r.label}: ${r.count} ${r.count === 1 ? 'person' : 'people'} (${r.pct}%)`))
     else if (s.kind === 'rating') s.rows.forEach(r => lines.push(`- ${r.label}: average ${r.avg === null ? '–' : r.avg.toFixed(1)} out of ${s.max} (${r.n} ratings)`))
-    else if (s.kind === 'ranking') s.rows.forEach((r, k) => lines.push(`- ${placeLabel(k)}: ${r.label} (average place ${r.avgPos ? r.avgPos.toFixed(1) : '–'})`))
+    else if (s.kind === 'ranking') s.rows.forEach(r => lines.push(`- ${r.tied ? 'joint ' : ''}${placeLabel(r.place - 1)}: ${r.label} (average position ${r.avgPos ? r.avgPos.toFixed(1) : '–'}; ${topChoiceText(r.firsts, s.voters).toLowerCase()})`))
     else if (s.kind === 'words') s.rows.slice(0, 40).forEach(r => lines.push(`- ${r.label}: ${r.count}`))
     else s.texts.forEach(t => lines.push(`- ${t.text.replace(/\s*\n\s*/g, ' ')}`))
     lines.push('')
@@ -240,7 +245,7 @@ export function chartCanvas(_q: Q, s: QSummary): HTMLCanvasElement | null {
   const rows: { label: string; value: number; max: number; right: string; colour: string }[] =
     s.kind === 'choice' ? s.rows.map((r, i) => ({ label: r.label, value: r.count, max: s.answered, right: `${r.count} · ${r.pct}%`, colour: s.multi ? '#00b0ff' : SURVEY_COLOURS[i % SURVEY_COLOURS.length] }))
     : s.kind === 'rating' ? s.rows.map(r => ({ label: r.label, value: r.avg ?? 0, max: s.max, right: r.avg === null ? '–' : `${r.avg.toFixed(1)} / ${s.max}`, colour: '#ff0065' }))
-    : s.kind === 'ranking' ? s.rows.map((r, i) => ({ label: `${i + 1}. ${r.label}`, value: r.points, max: Math.max(...s.rows.map(x => x.points), 1), right: r.avgPos ? `avg place ${r.avgPos.toFixed(1)}` : '–', colour: '#00b0ff' }))
+    : s.kind === 'ranking' ? s.rows.map(r => ({ label: `${r.place}. ${r.label}`, value: r.points, max: Math.max(...s.rows.map(x => x.points), 1), right: r.avgPos ? `avg position ${r.avgPos.toFixed(1)}` : '–', colour: '#00b0ff' }))
     : s.rows.slice(0, 15).map(r => ({ label: r.label, value: r.count, max: Math.max(s.rows[0]?.count ?? 1, 1), right: String(r.count), colour: '#42db66' }))
   const rowH = 44
   const H = rows.length * rowH + 30
@@ -278,10 +283,11 @@ export function surveyPrintHtml(survey: TestResult, deckTitle: string, when: num
     } else if (s.kind === 'choice' || s.kind === 'words' || s.kind === 'rating' || s.kind === 'ranking') {
       const rows = s.kind === 'choice' ? s.rows.map(r => ({ l: r.label, f: r.pct / 100, v: `${r.count} · ${r.pct}%` }))
         : s.kind === 'rating' ? s.rows.map(r => ({ l: r.label, f: (r.avg ?? 0) / s.max, v: r.avg === null ? '–' : `${r.avg.toFixed(1)} / ${s.max}` }))
-        : s.kind === 'ranking' ? s.rows.map((r, k) => ({ l: `${k + 1}. ${r.label}`, f: r.points / Math.max(...s.rows.map(x => x.points), 1), v: r.avgPos ? `avg place ${r.avgPos.toFixed(1)}` : '–' }))
+        : s.kind === 'ranking' ? s.rows.map(r => ({ l: `${r.place}. ${r.label}${r.tied ? ' (tied)' : ''}`, f: r.points / Math.max(...s.rows.map(x => x.points), 1), v: r.avgPos ? `average position ${r.avgPos.toFixed(1)}` : '–' }))
         : s.rows.slice(0, 20).map(r => ({ l: r.label, f: r.count / Math.max(s.rows[0].count, 1), v: String(r.count) }))
       body = `<table class="bars">${rows.map(r => `<tr><td class="l">${esc(r.l)}</td><td class="b"><div><span style="width:${Math.round(r.f * 100)}%"></span></div></td><td class="v">${r.v}</td></tr>`).join('')}</table>`
       if (s.kind === 'choice' && s.multi) body += '<p class="muted">People could tick several — % of everyone who answered.</p>'
+      if (s.kind === 'ranking') body += '<p class="muted">Everyone’s rankings combined, highest first. Average position: 1.0 means everyone put it first, so lower is better.</p>'
     } else {
       body = `<ul class="texts">${s.texts.map(t => `<li>${esc(t.text)}${survey.askNames ? ` <span class="who">— ${esc(t.name)}</span>` : ''}</li>`).join('')}</ul>`
     }
@@ -359,7 +365,10 @@ export async function surveyDocx(survey: TestResult, deckTitle: string): Promise
     }
     if (s.kind === 'choice') children.push(table(['Answer', 'People', '%'], s.rows.map(r => [r.label, String(r.count), `${r.pct}%`]), [6226, 1400, 1400]))
     else if (s.kind === 'rating') children.push(table(['Item', 'Average', 'Ratings'], s.rows.map(r => [r.label, r.avg === null ? '–' : `${r.avg.toFixed(1)} / ${s.max}`, String(r.n)]), [6226, 1400, 1400]))
-    else if (s.kind === 'ranking') children.push(table(['Place', 'Item', 'Average place', '#1 for'], s.rows.map((r, k) => [placeLabel(k), r.label, r.avgPos ? r.avgPos.toFixed(1) : '–', String(r.firsts)]), [1000, 5226, 1500, 1300]))
+    else if (s.kind === 'ranking') {
+      children.push(table(['Place', 'Item', 'Average position', 'Put it first'], s.rows.map(r => [`${r.tied ? 'Joint ' : ''}${placeLabel(r.place - 1)}`, r.label, r.avgPos ? r.avgPos.toFixed(1) : '–', String(r.firsts)]), [1300, 4926, 1700, 1100]))
+      children.push(text('Average position: where people placed it on average — 1.0 means everyone put it first, so lower is better.', { size: 17, color: '6666AF', before: 60 }))
+    }
     else if (s.kind === 'words') children.push(table(['Answer', 'People'], s.rows.slice(0, 40).map(r => [r.label, String(r.count)]), [7426, 1600]))
     else s.texts.forEach(t => children.push(new Paragraph({
       numbering: { reference: 'answers', level: 0 }, spacing: { after: 60 },
@@ -417,7 +426,7 @@ export function addSurveyPdf(doc: any, autoTable: any, survey: TestResult) {
     if (!s.answered) { y += 22; return }
     if (s.kind === 'choice') table(start, ['Answer', 'People', '%'], s.rows.map(r => [r.label, String(r.count), `${r.pct}%`]), { 1: { cellWidth: 56, halign: 'center' }, 2: { cellWidth: 44, halign: 'center' } })
     else if (s.kind === 'rating') table(start, ['Item', `Average (out of ${s.max})`, 'Ratings'], s.rows.map(r => [r.label, r.avg === null ? '-' : r.avg.toFixed(1), String(r.n)]), { 1: { cellWidth: 100, halign: 'center' }, 2: { cellWidth: 56, halign: 'center' } })
-    else if (s.kind === 'ranking') table(start, ['Place', 'Item', 'Average place'], s.rows.map((r, k) => [placeLabel(k), r.label, r.avgPos ? r.avgPos.toFixed(1) : '-']), { 0: { cellWidth: 44 }, 2: { cellWidth: 80, halign: 'center' } })
+    else if (s.kind === 'ranking') table(start, ['Place', 'Item', 'Average position'], s.rows.map(r => [`${r.tied ? '=' : ''}${placeLabel(r.place - 1)}`, r.label, r.avgPos ? r.avgPos.toFixed(1) : '-']), { 0: { cellWidth: 50 }, 2: { cellWidth: 96, halign: 'center' } })
     else if (s.kind === 'words') table(start, ['Answer', 'People'], s.rows.slice(0, 40).map(r => [r.label, String(r.count)]), { 1: { cellWidth: 56, halign: 'center' } })
     else table(start, survey.askNames ? ['Name', 'Answer'] : ['Answer'], s.texts.map(t => survey.askNames ? [t.name, t.text] : [t.text]), survey.askNames ? { 0: { cellWidth: 110 } } : {})
     y = lastY() + 24

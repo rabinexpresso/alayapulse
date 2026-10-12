@@ -8,7 +8,7 @@ import type { ResultQuestion, TestResult, TestResultQuestion, TestResultParticip
 import {
   formatDuration, sameAnswer, qTypeOf, isMarkable, hasAnswer, answerText, autoMarked, TEST_QTYPE_LABEL, type TestAnswer,
 } from '@/lib/selfPacedTest'
-import { aggregateRanking, rankingOrder } from '@/lib/ranking'
+import { aggregateRanking, rankingOrder, rankingPlaces, topChoiceText } from '@/lib/ranking'
 
 /* ─────────────────────────────────────────────────────────────────────────
    Results for self-paced tests, plus the three question kinds every
@@ -389,16 +389,21 @@ function MarkedQuestionCard({ q, i, ps }: { q: TestResultQuestion; i: number; ps
         )}
         {t === 'ranking' && answered.length > 0 && (() => {
           const r = aggregateRanking(answered.map(p => JSON.stringify(p.answers[q.id])), q.options.length)
+          const order = rankingOrder(r, q.options.length)
+          const places = rankingPlaces(r, order)
           return (
-            <ol className="mt-3 space-y-1">
-              {rankingOrder(r, q.options.length).map((k, pos) => (
-                <li key={k} className="flex items-center gap-2.5 text-sm text-midnight-sky-800">
-                  <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-midnight-sky-100 text-[11px] font-bold text-midnight-sky-600">{pos + 1}</span>
-                  {q.options[k]}
-                  <span className="ml-auto text-xs tabular-nums text-midnight-sky-400">avg position {r.avgPos[k] ? r.avgPos[k].toFixed(1) : '–'}</span>
-                </li>
-              ))}
-            </ol>
+            <>
+              <p className="mt-3 text-xs text-midnight-sky-500">Everyone’s rankings combined, highest first. Average position: 1.0 = everyone put it first, so lower is better.</p>
+              <ol className="mt-2 space-y-1">
+                {order.map((k, pos) => (
+                  <li key={k} className="flex items-center gap-2.5 text-sm text-midnight-sky-800">
+                    <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-midnight-sky-100 text-[11px] font-bold text-midnight-sky-600">{places[pos]}</span>
+                    <span>{q.options[k]} <span className="text-xs text-midnight-sky-500">· {topChoiceText(r.firsts[k], r.voters)}</span></span>
+                    <span className="ml-auto whitespace-nowrap text-xs tabular-nums text-midnight-sky-500">average position {r.avgPos[k] ? r.avgPos[k].toFixed(1) : '–'}</span>
+                  </li>
+                ))}
+              </ol>
+            </>
           )
         })()}
         {t === 'wordcloud' && answered.length > 0 && (

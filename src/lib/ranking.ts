@@ -74,3 +74,23 @@ export function rankingOrder(result: RankingResult, count: number): number[] {
   return Array.from({ length: count }, (_, i) => i).sort((a, b) =>
     result.points[b] - result.points[a] || result.avgPos[a] - result.avgPos[b] || a - b)
 }
+
+/**
+ * Each item's overall place, following `order` (1 = top). Items with the same
+ * score share a place — two items both on 2.0 are both "1st", not 1st and 2nd.
+ */
+export function rankingPlaces(result: RankingResult, order: number[]): number[] {
+  const places: number[] = []
+  order.forEach((idx, pos) => {
+    places.push(pos > 0 && result.points[idx] === result.points[order[pos - 1]] ? places[pos - 1] : pos + 1)
+  })
+  return places
+}
+
+/** "Top choice for 1 of 2 people" / "Nobody's top choice" */
+export const topChoiceText = (firsts: number, voters: number) =>
+  firsts > 0 ? `Top choice for ${firsts} of ${voters} ${voters === 1 ? 'person' : 'people'}` : 'Nobody’s top choice'
+
+/** One line that tells a first-time host how to read ranking results. */
+export const RANKING_HOW_TO_READ =
+  'Everyone put the items in order. The list shows everyone’s rankings combined, highest first. “Average position” is where people placed an item on average — 1.0 means everyone put it first, so lower is better.'

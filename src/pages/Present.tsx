@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { cn, optionLabel, MAX_VIZ_OPTIONS } from '@/lib/utils'
-import { aggregateRanking, rankingOrder, type RankingResult } from '@/lib/ranking'
+import { aggregateRanking, rankingOrder, rankingPlaces, topChoiceText, type RankingResult } from '@/lib/ranking'
 import { Confetti, Fireworks, CountUp } from '@/components/Celebration'
 import { TestBlockView, type TestNav, type LeaderboardEntry } from '@/components/TestBlockShow'
 import { SurveyBlockView } from '@/components/SurveyBlockShow'
@@ -3546,7 +3546,8 @@ function RankingResults({ items, result, theme }: {
     )
   }
 
-  const order = rankingOrder(result, n)
+  const order  = rankingOrder(result, n)
+  const places = rankingPlaces(result, order)
   // Bar = share of the most points an item could possibly earn (every voter
   // putting it first), so a full bar genuinely means "everyone's #1".
   const maxPossible = result.voters * n
@@ -3554,8 +3555,13 @@ function RankingResults({ items, result, theme }: {
 
   return (
     <div className={cn('mx-auto flex w-full max-w-5xl flex-col', dense ? 'gap-2' : 'gap-3')}>
+      <p className="mb-1 text-center text-sm" style={{ color: c.fgDim }}>
+        Everyone’s rankings combined — the item people put highest comes first
+      </p>
       {order.map((idx, pos) => {
-        const isTop = pos === 0
+        const place = places[pos]
+        const isTop = place === 1
+        const tied  = places.filter(x => x === place).length > 1
         const pct   = maxPossible > 0 ? (result.points[idx] / maxPossible) * 100 : 0
         return (
           <motion.div
@@ -3575,15 +3581,16 @@ function RankingResults({ items, result, theme }: {
                 ? { backgroundColor: acc.selected, color: '#ffffff' }
                 : { backgroundColor: c.cardBorder, color: c.fg }}
             >
-              {pos + 1}
+              {place}
             </span>
-            <span
-              className={cn('w-[34%] min-w-0 shrink-0 truncate font-semibold', dense ? 'text-base' : 'text-lg')}
-              style={{ color: c.fg }}
-              title={items[idx]}
-            >
-              {items[idx]}
-            </span>
+            <div className="w-[38%] min-w-0 shrink-0">
+              <p className={cn('line-clamp-2 font-semibold leading-snug', dense ? 'text-base' : 'text-lg')} style={{ color: c.fg }} title={items[idx]}>
+                {items[idx]}
+              </p>
+              <p className={cn(dense ? 'text-xs' : 'text-sm')} style={{ color: c.fgDim }}>
+                {tied ? `Tied ${rankOrdinal(place - 1)} · ` : ''}{topChoiceText(result.firsts[idx], result.voters)}
+              </p>
+            </div>
             <div className={cn('flex-1 overflow-hidden rounded-full', dense ? 'h-2.5' : 'h-3')} style={{ backgroundColor: c.cardBorder }}>
               <motion.div
                 className="h-full rounded-full"
@@ -3593,14 +3600,15 @@ function RankingResults({ items, result, theme }: {
                 style={{ backgroundColor: isTop ? acc.selected : c.fgDim }}
               />
             </div>
-            <span className={cn('shrink-0 text-right tabular-nums', dense ? 'w-24 text-sm' : 'w-28 text-base')} style={{ color: c.fgDim }}>
-              avg <span className="font-bold" style={{ color: c.fg }}>{result.avgPos[idx].toFixed(1)}</span>
-            </span>
+            <div className={cn('shrink-0 text-right leading-tight', dense ? 'w-28' : 'w-32')}>
+              <p className={cn('font-bold tabular-nums', dense ? 'text-base' : 'text-xl')} style={{ color: c.fg }}>{result.avgPos[idx].toFixed(1)}</p>
+              <p className="text-xs" style={{ color: c.fgDim }}>average position</p>
+            </div>
           </motion.div>
         )
       })}
       <p className="mt-1 text-center text-xs" style={{ color: c.fgFaint }}>
-        {result.voters} {result.voters === 1 ? 'ranking' : 'rankings'} · “avg” is the average position people gave it, lower is better
+        {result.voters} {result.voters === 1 ? 'person' : 'people'} ranked these · Average position = where people put it on average: 1.0 means everyone put it first, so lower is better
       </p>
     </div>
   )
