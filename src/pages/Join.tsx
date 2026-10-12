@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { getSessionByCode } from '@/lib/session'
+import { isSurvey, surveyOpen, surveyPath, type StoredTestBlockSlide } from '@/lib/selfPacedTest'
 import { motion, AnimatePresence } from 'framer-motion'
 import { AlertCircle } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
@@ -153,6 +154,14 @@ export default function Join() {
         return
       }
       if (session.status === 'ended') {
+        // The show is over, but a survey that's still open keeps taking answers
+        const surveys = session.slides.filter(s => s.type === 'testblock' && isSurvey(s as StoredTestBlockSlide)) as StoredTestBlockSlide[]
+        const open = surveys.find(b => surveyOpen(session.surveys?.[b.id], b))
+        if (open) {
+          setStatus('idle')
+          navigate(surveyPath(session.code, open.id, surveys.length === 1))
+          return
+        }
         setStatus('error')
         setErrorMsg('This session has already ended.')
         return

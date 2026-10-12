@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Download, Clock, Users, BarChart2, Cloud as CloudIcon,
   TrendingUp, ChevronDown, ChevronUp, Star, AlertCircle,
-  Trash2, History, CheckCircle2, Table2, Check,
+  Trash2, History, CheckCircle2, Table2, Check, ClipboardCheck, ClipboardList,
 } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
 import { cn, optionLabel, fitColumns } from '@/lib/utils'
@@ -17,7 +17,7 @@ import { surveySheets, addSurveyPdf } from '@/lib/surveyReport'
 import {
   listResults, saveResults, deleteResults, isResponseCorrect, getStorageBackend, onAuthStateChanged, auth,
   browserListDecks, cloudListDecks,
-  type Deck, type DeckResults, type ResultQuestion, type ResultResponse,
+  type Deck, type DeckResults, type ResultQuestion, type ResultResponse, type TestResult,
   type StorageBackend,
 } from '@/lib/deckStorage'
 
@@ -47,6 +47,40 @@ function respondentLabels(questions: ResultQuestion[]): Map<string, string> {
   return labels
 }
 
+/** One part of a session's results: the live questions, a self-paced test or a survey. */
+interface Part {
+  key:   string          // 'live' | 't:<blockId>' | 's:<blockId>'
+  kind:  'live' | 'test' | 'survey'
+  label: string
+  sub:   string
+  test?: TestResult
+}
+
+/** The session's parts in the order they came in the deck (live questions
+ *  count from the first one), so the tabs, Excel and PDF all follow the show. */
+function sessionParts(r: DeckResults, deck: Deck | null): Part[] {
+  const ids = ((deck?.slides ?? []) as { id?: string }[]).map(s => s?.id)
+  const at = (id?: string) => { const i = ids.indexOf(id); return i < 0 ? 1e6 : i }
+  const out: (Part & { at: number; seq: number })[] = []
+  if (r.questions.length) {
+    out.push({ key: 'live', kind: 'live', label: 'Live questions', sub: `${r.questions.length} question${r.questions.length !== 1 ? 's' : ''}`,
+      at: Math.min(...r.questions.map(q => at(q.slideId))), seq: 0 })
+  }
+  const tests = (r.tests ?? []).filter(t => t.kind !== 'survey')
+  tests.forEach((t, i) => out.push({ key: `t:${t.blockId}`, kind: 'test', test: t,
+    label: tests.length > 1 ? `Self-paced test ${i + 1}` : 'Self-paced test',
+    sub: `${t.participants.length} took it`, at: at(t.blockId), seq: 10 + i }))
+  ;(r.tests ?? []).filter(t => t.kind === 'survey').forEach((t, i) => out.push({ key: `s:${t.blockId}`, kind: 'survey', test: t,
+    label: t.title || 'Survey', sub: `${t.participants.length} response${t.participants.length !== 1 ? 's' : ''}`, at: at(t.blockId), seq: 100 + i }))
+  return out.sort((a, b) => a.at - b.at || a.seq - b.seq)
+}
+
+const PART_STYLE: Record<Part['kind'], { on: string; icon: React.ReactNode }> = {
+  live:   { on: 'border-sky-blue bg-sky-blue/10 text-midnight-sky-900',  icon: <BarChart2 className="size-4 text-sky-blue" /> },
+  test:   { on: 'border-golden-sun bg-golden-sun/10 text-midnight-sky-900', icon: <ClipboardCheck className="size-4 text-[#a07800]" /> },
+  survey: { on: 'border-hot-pink bg-hot-pink/[0.06] text-midnight-sky-900', icon: <ClipboardList className="size-4 text-hot-pink" /> },
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    Results page — saved-poll analysis for one deck.
    URL: /results/:deckId
@@ -68,6 +102,8 @@ export default function Results() {
   const [selectMode, setSelectMode]     = useState(false)
   const [selectedIds, setSelectedIds]   = useState<Set<string>>(new Set())
   const [showBulkConfirm, setShowBulkConfirm] = useState(false)
+  // Which part of the session is showing (live questions, a test, a survey)
+  const [partKey, setPartKey] = useState<string | null>(null)
 
   /* Wait for auth before loading cloud data — Firebase restores auth
      asynchronously on page load. */
@@ -186,6 +222,8 @@ export default function Results() {
   const deckTitle    = deck?.title ?? 'Untitled session'
   const testsOnly    = (results.tests ?? []).filter(t => t.kind !== 'survey')
   const surveysOnly  = (results.tests ?? []).filter(t => t.kind === 'survey')
+  const parts        = sessionParts(results, deck)
+  const activePart   = parts.find(p => p.key === partKey) ?? parts[0]
   // Self-paced test answers count as responses too
   const testAnswers = (results.tests ?? []).reduce((n, t) =>
     n + t.participants.reduce((m, p) => m + t.questions.filter(q => hasAnswer({ ...q, pick: 1 }, p.answers[q.id])).length, 0), 0)
@@ -197,8 +235,11 @@ export default function Results() {
   const presentedQuestions = results.questions.filter(q => q.responseCount > 0)
   const uniqueRespondents = new Set<string>()
   presentedQuestions.forEach(q => q.responses.forEach(resp => uniqueRespondents.add(respondentKey(resp))))
-  ;(results.tests ?? []).forEach(t => t.participants.forEach(p => uniqueRespondents.add(p.id)))
-  const respondentCount = uniqueRespondents.size > 0 ? uniqueRespondents.size : results.audienceCount
+  testsOnly.forEach(t => t.participants.forEach(p => uniqueRespondents.add(p.id)))
+  // Survey answers carry a separate id (anonymous ones can't be matched to a
+  // person), so they don't add people: the count is whichever is bigger.
+  const people = Math.max(uniqueRespondents.size, ...surveysOnly.map(t => t.participants.length))
+  const respondentCount = people > 0 ? people : results.audienceCount
   // Each test question counts like a question: answered ÷ people taking part
   const testShares = (results.tests ?? []).flatMap(t => t.questions.map(q =>
     t.participants.filter(p => hasAnswer({ ...q, pick: 1 }, p.answers[q.id])).length))
@@ -219,7 +260,7 @@ export default function Results() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const autoTable: any = (autoTableMod as any).default ?? (autoTableMod as any).autoTable ?? autoTableMod
       const doc = new jsPDF({ unit: 'pt', format: 'a4' })
-      buildResultsPdf(doc, autoTable, deck.title, results, totalResponses, avgParticipation, !!deck.isQuiz)
+      buildResultsPdf(doc, autoTable, deck.title, results, totalResponses, avgParticipation, !!deck.isQuiz, parts.map(pt => pt.key))
       const safeTitle = deck.title.replace(/[^a-z0-9\-_ ]/gi, '').trim() || 'results'
       const date = new Date(results.conductedAt).toISOString().slice(0, 10)
       doc.save(`${safeTitle} - ${date} results.pdf`)
@@ -320,11 +361,13 @@ export default function Results() {
 
       // Every tab, in order, with one line on what it's for — the first tab
       // of the file ("How to read this") lists them all.
-      const tabs: { name: string; about: string; rows: Record<string, string | number>[] }[] = []
+      type Tab = { name: string; about: string; rows: Record<string, string | number>[] }
+      const groups: Record<string, Tab[]> = {}
       const surveyList = (results.tests ?? []).filter(t => t.kind === 'survey')
       surveyList.forEach((t, si) => {
         const suffix = surveyList.length > 1 ? ` ${si + 1}` : ''
         const sheets = surveySheets(t)
+        const tabs = (groups[`s:${t.blockId}`] = [] as Tab[])
         tabs.push({ name: `Survey responses${suffix}`, rows: sheets.responses.length ? sheets.responses : [{ Submitted: 'No responses yet' }],
           about: `Survey "${t.title || 'Survey'}": one row per person who answered${t.askNames ? '' : ' (anonymous)'}, one column per question — the same layout as a Google Forms sheet.` })
         tabs.push({ name: `Survey summary${suffix}`, rows: sheets.summary,
@@ -334,6 +377,7 @@ export default function Results() {
       testList.forEach((t, ti) => {
         const suffix = testList.length > 1 ? ` ${ti + 1}` : ''
         const sheets = testSheets(t)
+        const tabs = (groups[`t:${t.blockId}`] = [] as Tab[])
         tabs.push({ name: `Test results${suffix}`, rows: sheets.results,
           about: 'Self-paced test: one row per person — place, multiple-choice score and time. Each Q column shows their answer: ✓ right or ✗ wrong for multiple choice; written answers show a word count (the full text is in Test answers).' })
         if (sheets.toMark.length) tabs.push({ name: `To mark${suffix}`, rows: sheets.toMark,
@@ -343,9 +387,10 @@ export default function Results() {
         tabs.push({ name: `Test questions${suffix}`, rows: sheets.questions,
           about: 'One row per test question: the correct answer, how many got it right, and a plain-English summary of what everyone answered.' })
       })
-      if (scorecardRows.length > 0) tabs.push({ name: 'Scorecard', rows: scorecardRows,
+      const liveTabs = (groups.live = [] as Tab[])
+      if (scorecardRows.length > 0) liveTabs.push({ name: 'Scorecard', rows: scorecardRows,
         about: 'Live questions (shown one at a time on the big screen): one row per person, one column per question.' })
-      if (summaryRows.length > 0) tabs.push({ name: 'Question summary', rows: summaryRows,
+      if (summaryRows.length > 0) liveTabs.push({ name: 'Question summary', rows: summaryRows,
         about: 'Live questions: one row per question, with the correct answer and how many got it right.' })
 
       // Only add the Leaderboard if this deck is a quiz with at least one
@@ -361,9 +406,11 @@ export default function Results() {
           'Speed Points':    row.speedPts,
           'Total Points':    row.total,
         }))
-        tabs.push({ name: 'Live quiz leaderboard', rows: leaderboardRows,
+        liveTabs.push({ name: 'Live quiz leaderboard', rows: leaderboardRows,
           about: 'Live quiz points per person: points for right answers plus extra points for answering fast.' })
       }
+      // Same order as the tabs on the page (the order of the show)
+      const tabs = parts.flatMap(pt => groups[pt.key] ?? [])
 
       const guide: Record<string, string>[] = [
         ...tabs.map(t => ({ Tab: t.name, 'What it shows': t.about })),
@@ -590,26 +637,51 @@ export default function Results() {
         )}
       </section>
 
-      {/* Self-paced tests */}
-      {testsOnly.length > 0 && (
-        <section className="mx-auto max-w-6xl space-y-4 px-6 pb-8">
-          {testsOnly.map((t, i) => <TestResultSection key={t.blockId} test={t} index={i} title={`${deckTitle}${testsOnly.length > 1 ? ` test ${i + 1}` : ''}`} />)}
+      {/* The session's parts — tabs when there's more than one */}
+      {parts.length > 1 && (
+        <nav className="mx-auto max-w-6xl px-6 pb-5" aria-label="Parts of this session">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-midnight-sky-500">In this session — in the order you showed them</p>
+          <div className="flex flex-wrap gap-2">
+            {parts.map(pt => {
+              const on = pt.key === activePart?.key
+              return (
+                <button
+                  key={pt.key}
+                  onClick={() => setPartKey(pt.key)}
+                  aria-pressed={on}
+                  className={cn('flex items-center gap-2.5 rounded-2xl border-2 bg-white px-4 py-2.5 text-left transition',
+                    on ? PART_STYLE[pt.kind].on : 'border-midnight-sky-100 text-midnight-sky-600 hover:border-midnight-sky-300')}
+                >
+                  {PART_STYLE[pt.kind].icon}
+                  <span>
+                    <span className="block max-w-[16rem] truncate text-sm font-semibold">{pt.label}</span>
+                    <span className="block text-xs text-midnight-sky-500">{pt.sub}</span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </nav>
+      )}
+
+      {/* Self-paced test */}
+      {activePart?.kind === 'test' && activePart.test && (
+        <section className="mx-auto max-w-6xl space-y-4 px-6 pb-20">
+          <TestResultSection key={activePart.key} test={activePart.test} index={testsOnly.indexOf(activePart.test)}
+            title={`${deckTitle}${testsOnly.length > 1 ? ` test ${testsOnly.indexOf(activePart.test) + 1}` : ''}`} />
         </section>
       )}
 
-      {/* Surveys */}
-      {surveysOnly.length > 0 && (
-        <section className="mx-auto max-w-6xl space-y-4 px-6 pb-8">
-          {surveysOnly.map(t => <SurveyResultSection key={t.blockId} survey={t} deckTitle={deckTitle} sessionCode={results.sessionCode} conductedAt={results.conductedAt} />)}
+      {/* Survey */}
+      {activePart?.kind === 'survey' && activePart.test && (
+        <section className="mx-auto max-w-6xl space-y-4 px-6 pb-20">
+          <SurveyResultSection key={activePart.key} survey={activePart.test} deckTitle={deckTitle} sessionCode={results.sessionCode} conductedAt={results.conductedAt} />
         </section>
       )}
 
-      {/* Per-question results */}
-      {results.questions.length > 0 && (
+      {/* Live questions */}
+      {activePart?.kind === 'live' && (
       <section className="mx-auto max-w-6xl px-6 pb-20">
-        {(results.tests?.length ?? 0) > 0 && (
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-midnight-sky-500">Live questions and polls</h2>
-        )}
         <div className="space-y-4">
           {results.questions.map((q, idx) => (
             <QuestionResult
@@ -1269,7 +1341,7 @@ function formatTime(ts: number): string {
    ───────────────────────────────────────────────────────────────────────── */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckResults, totalResponses: number, avgParticipation: number, deckIsQuiz = false) {
+function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckResults, totalResponses: number, avgParticipation: number, deckIsQuiz = false, order: string[] = ['live']) {
   const pageW = doc.internal.pageSize.getWidth()
   const margin = 40
 
@@ -1323,12 +1395,18 @@ function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckRes
     doc.text('Note: ' + r.trimNote, margin, y, { maxWidth: pageW - margin * 2 })
   }
 
-  // Self-paced tests first, then surveys
+  // Each part in the order of the show: live questions, tests, surveys
   const pdfTests = (r.tests ?? []).filter(t => t.kind !== 'survey')
-  pdfTests.forEach((t, i) => addTestPdf(doc, autoTable, t, pdfTests.length > 1 ? `Self-paced test ${i + 1}` : 'Self-paced test'))
-  ;(r.tests ?? []).filter(t => t.kind === 'survey').forEach(t => addSurveyPdf(doc, autoTable, t))
+  for (const key of order) {
+    if (key === 'live') { addLivePdf(); continue }
+    const t = (r.tests ?? []).find(x => `${x.kind === 'survey' ? 's' : 't'}:${x.blockId}` === key)
+    if (!t) continue
+    if (t.kind === 'survey') addSurveyPdf(doc, autoTable, t)
+    else addTestPdf(doc, autoTable, t, pdfTests.length > 1 ? `Self-paced test ${pdfTests.indexOf(t) + 1}` : 'Self-paced test')
+  }
 
-  // Then live quiz questions, then polls (deck order within each)
+  // Live questions: quiz questions first, then polls (deck order within each)
+  function addLivePdf() {
   const ordered = r.questions
     .map((q, idx) => ({ q, idx, kind: liveKind(q, deckIsQuiz) }))
     .sort((a, b) => (a.kind === b.kind ? a.idx - b.idx : a.kind === 'live' ? -1 : 1))
@@ -1515,6 +1593,7 @@ function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckRes
       }
     }
   })
+  }
 }
 
 /** "1. Trust  >  2. Growth  >  …" across everyone, for the Excel summary tab. */
