@@ -561,6 +561,11 @@ function parseCsvQuestions(csvText: string): CsvParseResult {
 
 const CSV_AI_PROMPT =
   'Fill in this CSV template with the questions from my document. Replace the example rows with my questions and keep the exact column layout.'
+/** Surveys: the two things a survey CSV needs that a quiz one doesn't. */
+const CSV_SURVEY_HINT =
+  'Use checkboxes for questions where people can tick several answers, and in the required column put yes for questions that must be answered and no for optional ones.'
+const CSV_SURVEY_PROMPT =
+  'Fill in this CSV template with the survey questions from my document. Replace the example rows with my questions and keep the exact column layout. ' + CSV_SURVEY_HINT
 
 function CsvStep({ n, children }: { n: number; children: ReactNode }) {
   return (
@@ -2350,7 +2355,10 @@ function CsvImportModal({ onClose, onImport, destination = 'live', hasTest = fal
             <p className="text-sm font-semibold text-midnight-sky-800">How to import your questions</p>
             <ol className="mt-2.5 space-y-2.5 text-xs leading-relaxed text-midnight-sky-700">
               <CsvStep n={1}>
-                <strong>Prepare your questions</strong> in a Word document, including the correct answers and explanations if you need them.
+                {destination === 'survey'
+                  ? <><strong>Prepare your survey questions</strong> in a Word document — mark which ones must be answered, and which let people tick several answers.</>
+                  : <><strong>Prepare your questions</strong> in a Word document, including the correct answers and explanations if you need them.
+                    {destination === 'ask' && <> For a survey, mark which questions must be answered and which let people tick several answers.</>}</>}
               </CsvStep>
               <CsvStep n={2}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2368,7 +2376,7 @@ function CsvImportModal({ onClose, onImport, destination = 'live', hasTest = fal
               </CsvStep>
               <CsvStep n={3}>
                 <strong>Paste this prompt</strong> into the AI chat:
-                <CsvPromptBox text={CSV_AI_PROMPT} />
+                <CsvPromptBox text={destination === 'survey' ? CSV_SURVEY_PROMPT : destination === 'ask' ? `${CSV_AI_PROMPT} If these are survey questions: ${CSV_SURVEY_HINT.charAt(0).toLowerCase()}${CSV_SURVEY_HINT.slice(1)}` : CSV_AI_PROMPT} />
               </CsvStep>
               <CsvStep n={4}>
                 <strong>Download the CSV file</strong> the AI gives you.
