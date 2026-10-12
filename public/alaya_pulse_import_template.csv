@@ -12,6 +12,8 @@
 # - Keep the header row (the row starting with type) exactly as it is
 # - Replace the example rows at the bottom with your own questions -- one question per row
 # - Lines starting with # are instructions and are ignored on import
+# - Put double quotes around any question or option that contains a comma
+#   e.g. "Overall, how useful did you find today's session?"
 #
 # type -- one of: mcq | checkboxes | wordcloud | openended | rating | ranking
 #

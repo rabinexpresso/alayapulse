@@ -560,12 +560,12 @@ function parseCsvQuestions(csvText: string): CsvParseResult {
 /* ── CSV import modal: step list + copyable AI prompt ─────────────────── */
 
 const CSV_AI_PROMPT =
-  'Fill in this CSV template with the questions from my document. Replace the example rows with my questions and keep the exact column layout.'
+  'Fill in this CSV template with the questions from my document. Replace the example rows with my questions and keep the exact column layout. Put double quotes around any question or option that contains a comma.'
 /** Surveys: the two things a survey CSV needs that a quiz one doesn't. */
 const CSV_SURVEY_HINT =
   'Use checkboxes for questions where people can tick several answers, and in the required column put yes for questions that must be answered and no for optional ones.'
 const CSV_SURVEY_PROMPT =
-  'Fill in this CSV template with the survey questions from my document. Replace the example rows with my questions and keep the exact column layout. ' + CSV_SURVEY_HINT
+  'Fill in this CSV template with the survey questions from my document. Replace the example rows with my questions and keep the exact column layout. Put double quotes around any question or option that contains a comma. ' + CSV_SURVEY_HINT
 
 function CsvStep({ n, children }: { n: number; children: ReactNode }) {
   return (
