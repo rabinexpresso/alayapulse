@@ -1990,6 +1990,26 @@ export default function Create() {
             )}
           </div>
 
+          {/* Live audience count — before Results, at the host's request */}
+          <AnimatePresence>
+            {resumeCode && viewerCount > 0 && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.85 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.85 }}
+                transition={{ duration: 0.2 }}
+                className="flex items-center gap-1.5 rounded-full bg-fresh-green/10 px-3 py-1.5 text-xs font-medium text-fresh-green"
+              >
+                <span className="relative flex size-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-fresh-green opacity-60" />
+                  <span className="relative inline-flex size-2 rounded-full bg-fresh-green" />
+                </span>
+                <Users className="size-3" />
+                {viewerCount} in room
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           {(() => {
             // Enabled whenever the deck is saved (so its past sessions can be
             // viewed) or a session just ended. The Results page shows a friendly
@@ -2042,25 +2062,6 @@ export default function Create() {
           {/* Separator before session controls */}
           {resumeCode && <span className="h-4 w-px bg-white/15" />}
 
-          {/* Live audience count */}
-          <AnimatePresence>
-            {resumeCode && viewerCount > 0 && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.85 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.85 }}
-                transition={{ duration: 0.2 }}
-                className="flex items-center gap-1.5 rounded-full bg-fresh-green/10 px-3 py-1.5 text-xs font-medium text-fresh-green"
-              >
-                <span className="relative flex size-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-fresh-green opacity-60" />
-                  <span className="relative inline-flex size-2 rounded-full bg-fresh-green" />
-                </span>
-                <Users className="size-3" />
-                {viewerCount} in room
-              </motion.div>
-            )}
-          </AnimatePresence>
 
           {/* Start / Resume session */}
           {resumeCode && slides.length > 0 ? (
