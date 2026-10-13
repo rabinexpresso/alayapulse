@@ -1,0 +1,441 @@
+{
+  "s01-intro": {
+    "captions": [
+      {
+        "at": 1.73,
+        "text": "Alaya Pulse: live polls, quizzes and tests for your presentations"
+      },
+      {
+        "at": 6.43,
+        "text": "Here’s how to run your first session, step by step"
+      }
+    ]
+  },
+  "s02-import": {
+    "captions": [
+      {
+        "at": 0.4,
+        "text": "Step 1: build your deck. Click Import to bring in your slides"
+      },
+      {
+        "at": 6.6,
+        "text": "Use a PDF or HTML file. From PowerPoint or Google Slides? Save it as a PDF first"
+      },
+      {
+        "at": 12.9,
+        "text": "An HTML file is cut into separate slides for you"
+      },
+      {
+        "at": 19.23,
+        "text": "Wrong number of slides? You can fix it yourself"
+      },
+      {
+        "at": 23.27,
+        "text": "Open the file, find the last slide number, and type it in"
+      },
+      {
+        "at": 30.5,
+        "text": "Now every slide is separate, so you can add questions in between"
+      }
+    ]
+  },
+  "s04-question-types": {
+    "captions": [
+      {
+        "at": 0.3,
+        "text": "Add a question anywhere in your deck"
+      },
+      {
+        "at": 5.13,
+        "text": "Pick a type: multiple choice, word cloud, open-ended, rating or ranking"
+      },
+      {
+        "at": 12.83,
+        "text": "Type your question, then the answers"
+      },
+      {
+        "at": 26.4,
+        "text": "The preview beside it shows how it looks on the big screen"
+      },
+      {
+        "at": 31.13,
+        "text": "Add a timer to make it a race: faster answers score more"
+      },
+      {
+        "at": 37.73,
+        "text": "Pick a colour or a gradient. The text colour is set for you"
+      }
+    ]
+  },
+  "s05-csv-import": {
+    "captions": [
+      {
+        "at": 0.33,
+        "text": "Already have lots of questions? Add them all at once"
+      },
+      {
+        "at": 8.07,
+        "text": "Download the template. Ask ChatGPT or Gemini to fill it in from your Word document"
+      },
+      {
+        "at": 14.4,
+        "text": "Upload the file, then choose where they go: live questions, a test or a survey"
+      },
+      {
+        "at": 21.97,
+        "text": "Each question becomes its own slide"
+      }
+    ]
+  },
+  "s06-overview": {
+    "captions": [
+      {
+        "at": 0.33,
+        "text": "Slide Overview shows your whole deck"
+      },
+      {
+        "at": 5.83,
+        "text": "Drag a slide to move it"
+      }
+    ]
+  },
+  "s07-save": {
+    "captions": [
+      {
+        "at": 0.33,
+        "text": "Made a mistake? Use Undo and Redo"
+      },
+      {
+        "at": 6.8,
+        "text": "Click Save to keep your deck"
+      }
+    ]
+  },
+  "s08-live-quiz": {
+    "captions": [
+      {
+        "at": 1.83,
+        "text": "Tick the right answer, and quiz scoring turns on by itself"
+      },
+      {
+        "at": 8.83,
+        "text": "Right answers score points. Faster answers score more"
+      },
+      {
+        "at": 13.2,
+        "text": "A leaderboard is added to the end of your deck for you"
+      }
+    ]
+  },
+  "s09-lobby": {
+    "captions": [
+      {
+        "at": 0.33,
+        "text": "Step 2: present. Click Start Show"
+      },
+      {
+        "at": 7,
+        "text": "Your audience scans the QR code with their phone camera. No app or sign-up needed"
+      }
+    ]
+  },
+  "s10-audience": {
+    "captions": [
+      {
+        "at": 0.4,
+        "text": "This is what your audience sees on their phone"
+      },
+      {
+        "at": 11.03,
+        "text": "They’re in. Questions will appear on their phone"
+      }
+    ]
+  },
+  "s11-navigate": {
+    "captions": [
+      {
+        "at": 0.3,
+        "text": "Press the arrow keys to move between slides"
+      },
+      {
+        "at": 8.6,
+        "text": "Or move your mouse to the edge of the screen for arrow buttons"
+      },
+      {
+        "at": 13.5,
+        "text": "Tip: for HTML slides, use these arrows, not the arrows inside your slides"
+      }
+    ]
+  },
+  "s12-live-question": {
+    "captions": [
+      {
+        "at": 1.03,
+        "text": "On a question slide, answers come in live"
+      },
+      {
+        "at": 8.53,
+        "text": "When you’re ready, show the results"
+      }
+    ]
+  },
+  "s13-reset": {
+    "captions": [
+      {
+        "at": 0.4,
+        "text": "Want to ask again? Reset the votes so everyone can answer again"
+      },
+      {
+        "at": 9.37,
+        "text": "The timer starts again too"
+      }
+    ]
+  },
+  "s14-test-add": {
+    "captions": [
+      {
+        "at": 0.33,
+        "text": "Want everyone to answer a set of questions at their own pace, like an exam?"
+      },
+      {
+        "at": 7.97,
+        "text": "Add a Self-paced test. The questions inside the gold box are the test"
+      }
+    ]
+  },
+  "s15-test-import": {
+    "captions": [
+      {
+        "at": 2.07,
+        "text": "Import your test questions, or add them one by one"
+      },
+      {
+        "at": 9,
+        "text": "The right answers are already marked, so the test scores itself"
+      }
+    ]
+  },
+  "s16-test-settings": {
+    "captions": [
+      {
+        "at": 2.03,
+        "text": "Set one time limit for the whole test"
+      },
+      {
+        "at": 7.27,
+        "text": "Choose when people see their score, and what happens after the test"
+      },
+      {
+        "at": 14.2,
+        "text": "And pick a colour or gradient for the big screen"
+      }
+    ]
+  },
+  "s17-test-start": {
+    "captions": [
+      {
+        "at": 0.87,
+        "text": "A self-paced test starts with the rules, while people get ready"
+      },
+      {
+        "at": 5.87,
+        "text": "Press Start test. The clock starts for everyone"
+      }
+    ]
+  },
+  "s18-test-phone": {
+    "captions": [
+      {
+        "at": 0.5,
+        "text": "Everyone gets all the questions on their own phone"
+      },
+      {
+        "at": 9.43,
+        "text": "Some questions have more than one right answer"
+      },
+      {
+        "at": 16.8,
+        "text": "Tap any number to go back to a question"
+      },
+      {
+        "at": 28.07,
+        "text": "Some questions want a written answer"
+      },
+      {
+        "at": 38.77,
+        "text": "Check your answers, then submit"
+      },
+      {
+        "at": 44.23,
+        "text": "Done! Your score shows when the test ends"
+      }
+    ]
+  },
+  "s19-test-dashboard": {
+    "captions": [
+      {
+        "at": 0.37,
+        "text": "See live who is still answering and who has finished"
+      },
+      {
+        "at": 4.4,
+        "text": "You can add time, pause, or end the test early"
+      }
+    ]
+  },
+  "s20-test-leaderboard": {
+    "captions": [
+      {
+        "at": 1.23,
+        "text": "Then the leaderboard. Most right answers wins. If it’s a tie, the faster finish wins"
+      }
+    ]
+  },
+  "s21-test-phone-place": {
+    "captions": [
+      {
+        "at": 0.77,
+        "text": "Everyone sees their place and the right answers"
+      }
+    ]
+  },
+  "s22-test-review": {
+    "captions": [
+      {
+        "at": 1.67,
+        "text": "Then go through the answers together, one question at a time"
+      }
+    ]
+  },
+  "s22b-answer-guide": {
+    "captions": [
+      {
+        "at": 0.33,
+        "text": "For written answers, everyone’s answers fill the screen first"
+      },
+      {
+        "at": 7.13,
+        "text": "Show your marking guide when you’re ready, or skip it"
+      }
+    ]
+  },
+  "s22c-survey-add": {
+    "captions": [
+      {
+        "at": 0.37,
+        "text": "Want feedback? Add a survey. It works like a Google Form inside your deck"
+      },
+      {
+        "at": 7.8,
+        "text": "Questions inside the pink frame are the survey. Give it a title"
+      },
+      {
+        "at": 16.9,
+        "text": "Import the questions, or add them one by one"
+      }
+    ]
+  },
+  "s22d-survey-settings": {
+    "captions": [
+      {
+        "at": 0.33,
+        "text": "Each question can be Must answer or Optional"
+      },
+      {
+        "at": 3.9,
+        "text": "It’s anonymous, unless you choose Ask for names"
+      },
+      {
+        "at": 7.93,
+        "text": "It stays open until you close it, so people can answer after the show too"
+      }
+    ]
+  },
+  "s22e-survey-screen": {
+    "captions": [
+      {
+        "at": 0.33,
+        "text": "The survey opens on everyone’s phone. Anyone else can scan the code"
+      },
+      {
+        "at": 6.83,
+        "text": "Watch the responses come in"
+      }
+    ]
+  },
+  "s22f-survey-phone": {
+    "captions": [
+      {
+        "at": 0.6,
+        "text": "Everyone gets all the questions at once"
+      },
+      {
+        "at": 4.9,
+        "text": "Some let you tick more than one"
+      },
+      {
+        "at": 17.03,
+        "text": "Sent. That’s it"
+      }
+    ]
+  },
+  "s22g-survey-results": {
+    "captions": [
+      {
+        "at": 0.8,
+        "text": "Show results steps through each question"
+      },
+      {
+        "at": 13.13,
+        "text": "The survey link keeps working after the show, until you close it"
+      }
+    ]
+  },
+  "s22h-end-session": {
+    "captions": [
+      {
+        "at": 0.3,
+        "text": "Finished? Press Esc, then End session"
+      },
+      {
+        "at": 6.3,
+        "text": "Type who it was with, so you can find this session later"
+      }
+    ]
+  },
+  "s23-results": {
+    "captions": [
+      {
+        "at": 0.37,
+        "text": "Step 3: afterwards, open Results"
+      },
+      {
+        "at": 6.63,
+        "text": "Each session shows its name, so groups are easy to tell apart"
+      },
+      {
+        "at": 14.33,
+        "text": "Tabs switch between the live questions, the test and the survey"
+      },
+      {
+        "at": 24.37,
+        "text": "Survey answers come as charts, ready to print, or as Word, Excel or an AI summary"
+      },
+      {
+        "at": 31.73,
+        "text": "Download everything as Excel or PDF"
+      }
+    ]
+  },
+  "s23b-share": {
+    "captions": [
+      {
+        "at": 0.37,
+        "text": "Share gives you a link, so colleagues can use your deck"
+      }
+    ]
+  },
+  "s24-outro": {
+    "captions": []
+  }
+}

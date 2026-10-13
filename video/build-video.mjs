@@ -6,12 +6,16 @@
    2 · the clips are joined with short crossfades
    3 · the background music (video/assets/music.m4a) is looped smoothly to
        the video's length and laid underneath
+   4 · the narrator reads each caption as it appears (voice.mjs; caption
+       times are in video/clips/captions.json), and the music dips under it
+       — NARRATOR=off builds without the voice
    Writes public/alaya-pulse-tutorial.mp4 and prints where every scene
    starts — those times are the "Watch this part" links in src/pages/Guide.tsx. */
 import { spawnSync } from 'node:child_process'
-import { readdirSync, mkdirSync, rmSync } from 'node:fs'
+import { readdirSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import os from 'node:os'
+import { makeVoice, voiceFile, VOICE } from './voice.mjs'
 
 const FF = resolve('node_modules/ffmpeg-static/ffmpeg.exe')
 const CLIPS = resolve('video/clips')
@@ -19,6 +23,8 @@ const MUSIC = resolve('video/assets/music.m4a')
 const OUT = resolve(process.env.OUT || 'public/alaya-pulse-tutorial.mp4')   // OUT=… to write somewhere else
 const WORK = join(os.tmpdir(), 'alaya-video-build')
 const T = 0.5            // crossfade seconds
+const LEAD = 0.25        // the voice starts just after its caption appears
+const SR = 48000         // narration sample rate
 const BG = '0x0d1033'    // brand dark for letterboxing the phone scenes
 
 try { rmSync(WORK, { recursive: true, force: true }) } catch {}
@@ -76,8 +82,39 @@ while (duration(W(loop)) < V + 2) {
     '-map', '[a]', '-c:a', 'pcm_s16le', W(next)], 'music loop')
   loop = next
 }
-run(['-y', '-i', W('silent.mp4'), '-i', W(loop), '-filter_complex',
-  `[1:a]atrim=0:${V.toFixed(3)},afade=t=in:st=0:d=2,afade=t=out:st=${(V - 8).toFixed(3)}:d=8[a]`,
+const music = `[1:a]atrim=0:${V.toFixed(3)},aresample=${SR},afade=t=in:st=0:d=2,afade=t=out:st=${(V - 8).toFixed(3)}:d=8`
+
+/* 4 · Narrator: every caption's line goes on one voice track at the moment
+       the caption appears. A line that would run into the next caption is
+       sped up a little (never more than 15%). */
+let mix = `${music}[a]`, voiceIn = []
+if (process.env.NARRATOR !== 'off') {
+  const CAPS = JSON.parse(readFileSync(join(CLIPS, 'captions.json'), 'utf8'))
+  const lines = starts.flatMap(s => (CAPS[s.name.replace('.webm', '')]?.captions || []).map(c => ({ text: c.text, at: s.at + c.at + LEAD })))
+  const made = await makeVoice(lines.map(l => l.text))
+  console.log(`narrator ${VOICE}: ${lines.length} lines (${made} new from Google)`)
+  const pcm = (file, af = 'anull') => spawnSync(FF, ['-v', 'error', '-i', file, '-af', af, '-f', 's16le', '-ac', '1', '-ar', String(SR), '-'], { maxBuffer: 1 << 28 }).stdout
+  const track = Buffer.alloc(Math.ceil(V * SR) * 2)
+  lines.forEach((l, i) => {
+    const room = Math.min(lines[i + 1]?.at ?? V, V - 1) - 0.15 - l.at
+    let a = pcm(voiceFile(l.text))
+    const len = a.length / 2 / SR
+    if (len > room) {
+      const tempo = Math.min(1.15, len / room)
+      a = pcm(voiceFile(l.text), `atempo=${tempo.toFixed(3)}`)
+      console.log(`  sped up ${Math.round((tempo - 1) * 100)}%: "${l.text}"${len / tempo > room + 0.05 ? ' — still runs on by ' + (len / tempo - room).toFixed(1) + ' s' : ''}`)
+    }
+    const at = Math.round(l.at * SR) * 2
+    a.copy(track, at, 0, Math.max(0, Math.min(a.length, track.length - at)))
+  })
+  writeFileSync(W('voice.raw'), track)
+  voiceIn = ['-f', 's16le', '-ar', String(SR), '-ac', '1', '-i', W('voice.raw')]
+  // music well under the voice, dipping further while it speaks; a limiter catches peaks
+  mix = `${music},volume=0.35[m];[2:a]volume=1.6,aformat=channel_layouts=stereo,asplit=2[key][voice];` +
+    `[m][key]sidechaincompress=threshold=0.02:ratio=6:attack=40:release=600[bed];` +
+    `[bed][voice]amix=inputs=2:normalize=0:duration=first,alimiter=limit=0.95[a]`
+}
+run(['-y', '-i', W('silent.mp4'), '-i', W(loop), ...voiceIn, '-filter_complex', mix,
   '-map', '0:v', '-map', '[a]', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', OUT], 'mix')
 
 console.log(`\nwritten ${OUT} — ${clock(duration(OUT))}\n\nScene start times (for the Guide's "Watch this part" links):`)

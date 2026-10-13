@@ -8,7 +8,7 @@
    colleagues join and take part through the Firebase SDK, so the lobby,
    results, dashboard and leaderboard look like a real session. */
 import puppeteer from 'puppeteer-core'
-import { mkdirSync, rmSync, readFileSync } from 'node:fs'
+import { mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import os from 'node:os'
 import { initializeApp } from 'firebase/app'
@@ -53,11 +53,14 @@ async function overlay(page) {
   })
 }
 
-/* Every caption stays up long enough to read at an easy pace. */
+/* Every caption stays up long enough to read at an easy pace. Each one is
+   noted with its time in the clip, so the narrator can read it out then. */
 const readTime = t => 1300 + t.length * 58
+let rolling = null            // { t0, captions } for the scene being recorded
 async function cap(page, text, hold = 2600) {
   hold = Math.max(hold, readTime(text))
   await overlay(page)
+  if (rolling && text) rolling.captions.push({ at: +((Date.now() - rolling.t0 + 180) / 1000).toFixed(2), text })
   await page.evaluate(t => {
     const el = document.getElementById('__cap')
     el.style.opacity = '0'
@@ -138,6 +141,7 @@ async function scene(page, name, fn) {
   let rec
   try {
     rec = await page.screencast({ path: file, ffmpegPath: FFMPEG })
+    rolling = { t0: Date.now(), captions: [] }
     const note = await fn()
     results.push({ scene: name, ok: true, note: note || '' })
     console.log(`✓ ${name}${note ? '  — ' + note : ''}`)
@@ -146,7 +150,15 @@ async function scene(page, name, fn) {
     console.log(`✗ ${name}  — ${String(e).slice(0, 160)}`)
   } finally {
     if (rec) { try { await rec.stop() } catch {} }
+    if (rolling) saveCaptions(name, rolling.captions)
+    rolling = null
   }
+}
+function saveCaptions(name, captions) {
+  const f = `${CLIPS}/captions.json`
+  const all = existsSync(f) ? JSON.parse(readFileSync(f, 'utf8')) : {}
+  all[name] = { captions }
+  writeFileSync(f, JSON.stringify(all, null, 2) + '\n')
 }
 
 /* ── Simulated colleagues ───────────────────────────────────────────────── */

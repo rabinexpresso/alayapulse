@@ -292,7 +292,7 @@ const TASKS: { label: string; sub: string; link: string; icon: React.ReactNode; 
 const readMinutes = (t: Topic) => Math.max(1, Math.round(t.steps.length / 4))
 /** The walkthrough video. Bump `v` whenever the video is rebuilt: browsers keep
  *  it for a day, and the Watch times must match the video they play. */
-const TUTORIAL_SRC = '/alaya-pulse-tutorial.mp4?v=2026-10-13'
+const TUTORIAL_SRC = '/alaya-pulse-tutorial.mp4?v=2026-10-13-voice'
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
@@ -571,7 +571,7 @@ export default function Guide() {
               </video>
               <figcaption className="flex items-center gap-2 border-t border-white/10 px-4 py-2.5 text-[13px] text-white/50">
                 <Play className="size-3.5 shrink-0 text-hot-pink" />
-                The full walkthrough — 8 min 54 sec. Prefer reading? Every step is below.
+                The full walkthrough, narrated — 8 min 54 sec. Prefer reading? Every step is below.
               </figcaption>
             </figure>
           </div>
