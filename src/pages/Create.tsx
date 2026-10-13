@@ -643,6 +643,32 @@ function makeContent(template: ContentTemplate): ContentSlide {
   return { id: uid(), type: 'content', template, title: '', body: '', attribution: '', theme: 'navy' }
 }
 
+/* ── Editor layout ───────────────────────────────────────────────── */
+
+/** Wide windows: two columns (content left, settings / preview right) so the
+ *  editor uses the width instead of one long column. Narrow: one column. */
+const WIDE_GRID = 'xl:grid xl:max-w-[1600px] xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] xl:items-start xl:gap-5 xl:px-5 xl:pb-6'
+const BLOCK_GRID = 'grid items-start gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] xl:gap-5'
+
+/** A block's explanation: its first sentence, then the rest behind More. */
+function BlockAbout({ first, rest, color }: { first: string; rest: ReactNode; color: string }) {
+  const [more, setMore] = useState(false)
+  return (
+    <div className="text-sm leading-relaxed text-midnight-sky-600">
+      <p>
+        {first}{' '}
+        {!more && <button onClick={() => setMore(true)} className={cn('font-semibold underline-offset-2 hover:underline', color)}>More</button>}
+      </p>
+      {more && (
+        <div className="mt-1">
+          {rest}{' '}
+          <button onClick={() => setMore(false)} className={cn('text-xs font-semibold underline-offset-2 hover:underline', color)}>Less</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ── Canvas constants + factory ─────────────────────────────────── */
 
 const CANVAS_BG_COLORS = [
@@ -809,6 +835,8 @@ export default function Create() {
   const [csvImportToast, setCsvImportToast] = useState<{ count: number; message?: string } | null>(null)
   // Self-paced test notes: "block added", "moved out of the block", …
   const [testToast, setTestToast] = useState<string | null>(null)
+  // The test / survey block waiting for "keep or delete its questions?"
+  const [removingBlock, setRemovingBlock] = useState<string | null>(null)
   // CSV import window: where the questions go
   const [csvModal, setCsvModal] = useState<{ dest: 'live' | BlockKind | 'ask'; headerId?: string } | null>(null)
 
@@ -1231,18 +1259,40 @@ export default function Create() {
     setAddMenu(undefined)
   }, [pushHistory, isQuiz])
 
+  /** Removes a test / survey block, keeping its questions as live questions
+   *  or deleting them with it. Undo brings everything back. */
+  const removeBlock = useCallback((id: string, withQuestions: boolean) => {
+    const target = slidesRef.current.find(s => s.id === id)
+    const r = testRanges(slidesRef.current).find(x => x.headerId === id)
+    if (!target || !r) return
+    pushHistory()
+    const kind = blockKind(target) === 'survey' ? 'Survey' : 'Test'
+    const n = r.memberIds.length
+    const qs = `${n} question${n !== 1 ? 's' : ''}`
+    if (withQuestions) {
+      const gone = new Set([id, ...r.memberIds, ...slidesRef.current.filter(s => s.type === 'testend' && (s as TestEndSlide).blockId === id).map(s => s.id)])
+      const after = slidesRef.current.slice(r.end + 1).find(s => !gone.has(s.id)) ?? slidesRef.current.slice(0, r.start).reverse().find(s => !gone.has(s.id))
+      setSlides(prev => prev.filter(s => !gone.has(s.id)))
+      setSelectedId(after?.id ?? null)
+      if (n) setTestToast(`${kind} block and its ${qs} deleted — Undo (↶ at the top) brings them back`)
+    } else {
+      setSlides(prev => prev.filter(s => s.id !== id && !(s.type === 'testend' && (s as TestEndSlide).blockId === id)))
+      setSelectedId(r.memberIds[0] ?? null)
+      if (n) setTestToast(`${kind} block removed — its ${n === 1 ? 'question is' : `${qs} are`} now live questions`)
+    }
+  }, [pushHistory])
+
   const deleteSlide = useCallback((id: string) => {
     const target = slidesRef.current.find(s => s.id === id)
     if (target?.type === 'testend') return
-    pushHistory()
     if (target?.type === 'testblock') {
-      // Removing a block keeps its questions — they become live questions
+      // A block with questions: ask whether they go too
       const r = testRanges(slidesRef.current).find(x => x.headerId === id)
-      setSlides(prev => prev.filter(s => s.id !== id && !(s.type === 'testend' && (s as TestEndSlide).blockId === id)))
-      setSelectedId(r?.memberIds[0] ?? null)
-      if (r?.memberIds.length) setTestToast(`${blockKind(target) === 'survey' ? 'Survey' : 'Test'} block removed — its ${r.memberIds.length} question${r.memberIds.length !== 1 ? 's are' : ' is'} now live questions`)
+      if (r?.memberIds.length) { setRemovingBlock(id); return }
+      removeBlock(id, false)
       return
     }
+    pushHistory()
     setSlides(prev => {
       const next = prev.filter(s => s.id !== id)
       if (selectedId === id) {
@@ -1251,7 +1301,7 @@ export default function Create() {
       }
       return next
     })
-  }, [selectedId, pushHistory])
+  }, [selectedId, pushHistory, removeBlock])
 
   const duplicateSlide = useCallback((id: string) => {
     const target = slidesRef.current.find(s => s.id === id)
@@ -2121,6 +2171,24 @@ export default function Create() {
             onImport={(list, dest) => { importCsvSlides(list, dest, csvModal.headerId); setCsvModal(null) }}
           />
         )}
+      </AnimatePresence>
+
+      {/* ── Remove a test / survey block: keep or delete its questions ── */}
+      <AnimatePresence>
+        {removingBlock && (() => {
+          const target = slides.find(s => s.id === removingBlock)
+          const n = testRanges(slides).find(x => x.headerId === removingBlock)?.memberIds.length ?? 0
+          if (!target) return null
+          return (
+            <RemoveBlockDialog
+              survey={blockKind(target) === 'survey'}
+              count={n}
+              onKeep={() => { removeBlock(removingBlock, false); setRemovingBlock(null) }}
+              onDeleteAll={() => { removeBlock(removingBlock, true); setRemovingBlock(null) }}
+              onClose={() => setRemovingBlock(null)}
+            />
+          )
+        })()}
       </AnimatePresence>
 
       {/* ── Self-paced test notes ───────────────────────────────────── */}
@@ -3961,21 +4029,24 @@ function SlideEditor({ slide, onUpdate, onSplitHtml, onPushHistory }: {
     )
   }
 
-  // Question slides — editor form above, 16:9 slide preview below
+  // Question slides — editor form, then the 16:9 slide preview: below it on a
+  // narrow window, beside it (staying in view while you scroll) on a wide one
   return (
     <div className="scrollbar-panel flex flex-1 flex-col overflow-auto" style={{ background: '#f8f7f5' }}>
+      <div className={WIDE_GRID}>
       {/* Editor form */}
-      <div className="max-w-3xl px-5 py-4">
+      <div className="max-w-3xl px-5 py-4 xl:max-w-none xl:px-0">
         <QuestionEditor slide={slide as QuestionSlide} onUpdate={patch => onUpdate(slide.id, patch)} hidePreview onPushHistory={onPushHistory} />
       </div>
       {/* Slide preview */}
-      <div className="max-w-3xl px-5 pb-6">
+      <div className="max-w-3xl px-5 pb-6 xl:sticky xl:top-4 xl:max-w-none xl:px-0 xl:pb-0 xl:pt-4">
         <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-midnight-sky-500">
           Slide preview
         </p>
         <SlidePreviewCard slide={testCtx
           ? { ...(slide as QuestionSlide), theme: TEST_THEMES.some(t => t.id === (slide as QuestionSlide).theme) ? (slide as QuestionSlide).theme : (testCtx.testTheme ?? 'navy') }
           : slide as QuestionSlide} />
+      </div>
       </div>
     </div>
   )
@@ -6967,8 +7038,9 @@ function TestBlockEditor({
   )
 
   return (
-    <div className="max-w-3xl px-5 py-4">
-      <motion.div key={header.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }} className="flex flex-col gap-4">
+    <div className="max-w-3xl px-5 py-4 xl:max-w-[1600px]">
+      <motion.div key={header.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }} className={BLOCK_GRID}>
+        <div className="flex min-w-0 flex-col gap-4">
 
         {/* Title */}
         <div className="overflow-hidden rounded-2xl bg-white shadow-[0_2px_16px_-2px_rgba(0,0,121,0.09)]">
@@ -6978,12 +7050,17 @@ function TestBlockEditor({
               <ClipboardCheck className="size-3.5" />
               Self-paced test block
             </div>
-            <p className="text-sm leading-relaxed text-midnight-sky-600">
-              Everyone answers these questions on their own phone, at their own pace, within one time limit.
-              Multiple choice is marked automatically: answers are revealed when the test ends, and the most correct answers wins — if two people tie, the faster finish ranks higher.
-              Open-ended, word cloud, rating and ranking answers are collected for you to mark afterwards, by hand or with AI.
-            </p>
-            <p className="mt-2 text-xs text-midnight-sky-500">It scores itself: no need to turn on Live quiz.</p>
+            <BlockAbout
+              color="text-[#a07800]"
+              first="Everyone answers these questions on their own phone, at their own pace, within one time limit."
+              rest={<>
+                <p>
+                  Multiple choice is marked automatically: answers are revealed when the test ends, and the most correct answers wins — if two people tie, the faster finish ranks higher.
+                  Open-ended, word cloud, rating and ranking answers are collected for you to mark afterwards, by hand or with AI.
+                </p>
+                <p className="mt-2 text-xs text-midnight-sky-500">It scores itself: no need to turn on Live quiz.</p>
+              </>}
+            />
           </div>
         </div>
 
@@ -7082,7 +7159,9 @@ function TestBlockEditor({
             </div>
           )}
         </div>
+        </div>
 
+        <div className="flex min-w-0 flex-col gap-4">
         {/* Settings */}
         <div className={card}>
           <p className="mb-3 text-sm font-semibold text-midnight-sky-800">Settings</p>
@@ -7181,10 +7260,74 @@ function TestBlockEditor({
         </div>
 
         <button onClick={() => onDelete(header.id)} className="self-start rounded-xl px-3 py-2 text-xs font-medium text-red-500 transition hover:bg-red-50">
-          Remove test block (its questions stay as live questions)
+          Remove test block…
         </button>
+        </div>
       </motion.div>
     </div>
+  )
+}
+
+/* ── Removing a test / survey block ────────────────────────────────────── */
+
+function RemoveBlockDialog({ survey, count, onKeep, onDeleteAll, onClose }: {
+  survey: boolean
+  count: number
+  onKeep: () => void
+  onDeleteAll: () => void
+  onClose: () => void
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  const qs = `${count} question${count !== 1 ? 's' : ''}`
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-midnight-sky-900/50 px-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 12 }}
+        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+        onClick={e => e.stopPropagation()}
+        role="dialog" aria-modal="true" aria-labelledby="remove-block-title"
+        className="w-full max-w-md rounded-2xl border border-midnight-sky-100 bg-white p-6 shadow-2xl"
+      >
+        <h3 id="remove-block-title" className="text-lg font-semibold text-midnight-sky-900">Remove this {survey ? 'survey' : 'self-paced test'}?</h3>
+        <p className="mt-1 text-sm text-midnight-sky-500">It has {qs}.</p>
+        <button
+          autoFocus
+          onClick={onKeep}
+          className="mt-5 flex w-full items-start gap-3 rounded-xl border border-midnight-sky-200 px-4 py-3 text-left transition hover:border-midnight-sky-400 hover:bg-midnight-sky-50"
+        >
+          <Undo2 className="mt-0.5 size-4 shrink-0 text-midnight-sky-600" />
+          <span>
+            <span className="block text-sm font-semibold text-midnight-sky-900">Keep the {qs}</span>
+            <span className="mt-0.5 block text-xs leading-relaxed text-midnight-sky-500">
+              Only the block goes. {count === 1 ? 'It stays' : 'They stay'} in the deck as live questions, shown one at a time{survey ? ' (survey settings like “Must answer” no longer apply)' : ''}.
+            </span>
+          </span>
+        </button>
+        <button
+          onClick={onDeleteAll}
+          className="mt-2.5 flex w-full items-start gap-3 rounded-xl border border-red-200 px-4 py-3 text-left transition hover:border-red-400 hover:bg-red-50"
+        >
+          <Trash2 className="mt-0.5 size-4 shrink-0 text-red-500" />
+          <span>
+            <span className="block text-sm font-semibold text-red-600">Delete the block and its {qs}</span>
+            <span className="mt-0.5 block text-xs leading-relaxed text-midnight-sky-500">Everything in it goes. Undo (↶ at the top) brings it back.</span>
+          </span>
+        </button>
+        <div className="mt-5 flex justify-end">
+          <button onClick={onClose} className="rounded-xl border border-midnight-sky-200 px-4 py-2 text-sm font-medium text-midnight-sky-700 transition hover:bg-midnight-sky-50">
+            Cancel
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
   )
 }
 
@@ -7233,8 +7376,9 @@ function SurveyBlockEditor({
   const typeLabel = (q: QuestionSlide) => q.type === 'mcq' && q.pickMany ? 'Checkboxes' : QTYPES.find(t => t.type === q.type)?.label
 
   return (
-    <div className="max-w-3xl px-5 py-4">
-      <motion.div key={header.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }} className="flex flex-col gap-4">
+    <div className="max-w-3xl px-5 py-4 xl:max-w-[1600px]">
+      <motion.div key={header.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }} className={BLOCK_GRID}>
+        <div className="flex min-w-0 flex-col gap-4">
 
         {/* What it is + its title */}
         <div className="overflow-hidden rounded-2xl bg-white shadow-[0_2px_16px_-2px_rgba(0,0,121,0.09)]">
@@ -7244,10 +7388,11 @@ function SurveyBlockEditor({
               <ClipboardList className="size-3.5" />
               Survey
             </div>
-            <p className="text-sm leading-relaxed text-midnight-sky-600">
-              Everyone gets all the questions on their phone at once, like a Google Form. Nothing is marked or timed.
-              It opens when your show reaches it and stays open — people can also answer after the show at the survey link — until you close it.
-            </p>
+            <BlockAbout
+              color="text-hot-pink"
+              first="Everyone gets all the questions on their phone at once, like a Google Form."
+              rest={<p>Nothing is marked or timed. It opens when your show reaches it and stays open — people can also answer after the show at the survey link — until you close it.</p>}
+            />
             <label className="mb-1.5 mt-4 block text-xs font-semibold text-midnight-sky-700">
               Survey title <span className="font-normal text-midnight-sky-500">shown at the top of the form</span>
             </label>
@@ -7351,7 +7496,9 @@ function SurveyBlockEditor({
             </div>
           )}
         </div>
+        </div>
 
+        <div className="flex min-w-0 flex-col gap-4">
         {/* Settings */}
         <div className={card}>
           <p className="mb-3 text-sm font-semibold text-midnight-sky-800">Settings</p>
@@ -7431,8 +7578,9 @@ function SurveyBlockEditor({
         </div>
 
         <button onClick={() => onDelete(header.id)} className="self-start rounded-xl px-3 py-2 text-xs font-medium text-red-500 transition hover:bg-red-50">
-          Remove survey block (its questions stay as live questions)
+          Remove survey block…
         </button>
+        </div>
       </motion.div>
     </div>
   )
