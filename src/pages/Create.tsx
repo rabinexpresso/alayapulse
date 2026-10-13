@@ -4006,7 +4006,7 @@ function SlideEditor({ slide, onUpdate, onSplitHtml, onPushHistory }: {
   if (slide.type === 'content') {
     return (
       <div className="scrollbar-panel flex flex-1 flex-col overflow-auto" style={{ background: '#f8f7f5' }}>
-        <div className="w-full max-w-3xl px-5 py-4">
+        <div className="w-full max-w-3xl px-5 py-4 xl:max-w-[1600px]">
           <ContentEditor slide={slide} onUpdate={patch => onUpdate(slide.id, patch)} onPushHistory={onPushHistory} />
         </div>
       </div>
@@ -5315,6 +5315,8 @@ function ContentEditor({ slide, onUpdate, onPushHistory }: {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+        // Wide windows: the form on the left, the preview beside it (like question slides)
+        className="xl:grid xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] xl:items-start xl:gap-5"
       >
         {/* Form card */}
         <div className="overflow-hidden rounded-2xl bg-white shadow-[0_2px_16px_-2px_rgba(0,0,121,0.09)]">
@@ -5473,8 +5475,8 @@ function ContentEditor({ slide, onUpdate, onPushHistory }: {
           </div>
         </div>
 
-        {/* Live preview */}
-        <div className="mt-4">
+        {/* Live preview — stays in view while you scroll on a wide window */}
+        <div className="mt-4 xl:sticky xl:top-4 xl:mt-0">
           <p className="mb-2 px-1 text-[11px] font-semibold text-midnight-sky-600">Preview</p>
           <div className="overflow-hidden rounded-2xl shadow-[0_8px_32px_-8px_rgba(0,0,121,0.25)]">
             <ContentSlidePreview slide={slide} />

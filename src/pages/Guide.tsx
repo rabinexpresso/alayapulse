@@ -82,80 +82,78 @@ const GUIDE: Stage[] = [
         videoAt: 9,
         icon: <Upload className="size-4" />,
         title: 'Import your slides',
-        intro: 'Already have slides? Bring them in as HTML, PDF, images or video. PowerPoint / Keynote / Google Slides users: export to PDF first, then import the PDF.',
+        intro: 'Already have slides? Bring them in as a PDF, images, video or an HTML slideshow. Using PowerPoint, Keynote or Google Slides? Save as PDF first.',
         steps: [
-          { text: <>From <strong>My Decks</strong>, open a deck (or create a new one) to enter the editor.</> },
-          { text: <>In the left sidebar, click the orange <Btn color="orange">Import</Btn> button, then choose <Btn>Import slides</Btn>.</>, image: 'import-menu.png', imageAlt: 'Import menu with Import slides option' },
-          { text: <>Pick your file. A PDF becomes one slide per page. An HTML slideshow is scanned automatically — look for the <em>“Auto-split into N slides”</em> message at the top.</>, image: 'autosplit-toast.png', imageAlt: 'Auto-split toast after importing an HTML deck' },
-          { text: <><strong>Check the number.</strong> If “N” matches the real number of slides in your HTML file, you’re done. If it didn’t split (or the number is wrong), fix it in 10 seconds — see the next topic.</> },
+          { text: <>Open a deck from <strong>My Decks</strong>, or create a new one.</> },
+          { text: <>Click the orange <Btn color="orange">Import</Btn> button at the top of the sidebar, then <Btn>Import slides</Btn>.</>, image: 'import-menu.png', imageAlt: 'Import menu with Import slides option' },
+          { text: <>Pick your file. A PDF becomes one slide per page.</> },
+          { text: <>An HTML slideshow is split into slides for you, and a message at the top says how many. Check the number matches your slides. If it doesn’t, see the next topic.</>, image: 'autosplit-toast.png', imageAlt: 'Auto-split message after importing an HTML deck' },
         ],
-        warning: <>During the live show, always move between slides with <strong>Alaya Pulse’s own navigation</strong> — keyboard ← → arrows, or the arrow buttons that appear at the left/right edges of the screen. Don’t click the next/back buttons drawn inside your HTML slides; Pulse blocks most of them, but its own controls are the reliable way.</>,
+        warning: <>During the show, move between slides with Alaya Pulse’s own controls: the <strong>← →</strong> keys, or the arrows at the edges of the screen. Don’t use the next / back buttons drawn inside an HTML slide.</>,
       },
       {
         id: 'split-html',
         videoAt: 27,
         icon: <Scissors className="size-4" />,
-        title: 'Fix the split when auto-detect misses',
-        intro: 'Alaya Pulse tries to detect how many slides your HTML file contains, but some files hide it too well. You always have a manual override.',
+        title: 'Fix the split when it’s wrong',
+        intro: 'Sometimes Alaya Pulse can’t tell how many slides an HTML file has. You can set the number yourself.',
         steps: [
-          { text: <>First, know your real number: open the HTML file directly in your browser, go to the last slide, and read its counter (e.g. <em>“21 / 21”</em> → the number is <strong>21</strong>).</> },
-          { text: <>In the editor, click the imported HTML slide to select it.</> },
-          { text: <>Click the gold <Btn color="gold">＋ Split into … slides</Btn> button at the top-right of the slide. If Pulse detected a count it’s pre-filled; if not, the button reads <em>“Split into multiple slides”</em> — either way you can set the true number before confirming.</>, image: 'split-manual.png', imageAlt: 'Manual split button above the imported HTML slide' },
-          { text: <>The one HTML slide becomes that many Pulse slides — so you can insert questions between them and step through one by one.</> },
+          { text: <>Find the real number: open the HTML file in your browser, go to the last slide and read its counter. For example, <em>“21 / 21”</em> means <strong>21</strong>.</> },
+          { text: <>In the editor, click the HTML slide.</> },
+          { text: <>Click the gold <Btn color="gold">＋ Split into … slides</Btn> button above the slide, type the number and confirm.</>, image: 'split-manual.png', imageAlt: 'Split button above the imported HTML slide' },
+          { text: <>You now have that many slides, so you can put questions between them.</> },
         ],
-        tip: <>Split wrong? Just change the number and split again, or use Undo (Ctrl+Z).</>,
+        tip: <>Wrong number? Change it and split again, or press <strong>Ctrl+Z</strong> to undo.</>,
       },
       {
         id: 'add-slides',
         videoAt: 44,
         icon: <ListPlus className="size-4" />,
-        title: 'Add question & content slides',
-        intro: 'Questions are what make a session interactive — mix them between your normal slides.',
+        title: 'Add questions and content slides',
+        intro: 'Questions make a session interactive. Mix them in between your normal slides.',
         steps: [
-          { text: <>Click <Btn color="pink">Add slide</Btn> (or <em>“Insert slide here”</em> between two slides in the sidebar).</>, image: 'add-slide-menu.png', imageAlt: 'Add slide menu showing all slide types' },
-          { text: <><strong>Question types:</strong> <Btn>MCQ</Btn> (multiple choice, supports correct answers), <Btn>Word Cloud</Btn> (short words build a live cloud), <Btn>Open Ended</Btn> (free-text answers), <Btn>Rating</Btn> (score items on a scale), <Btn>Ranking</Btn> (put items in order of importance).</> },
-          { text: <><strong>Ranking:</strong> add 2–10 items. Everyone taps them on their phone from most to least important — tap an item again to take it back out. Results show the items in overall order: each 1st place earns the most points, and “avg” is the average position people gave each item (lower is more important). Ranking isn’t scored in Quiz mode, since there’s no right order for opinions.</> },
-          { text: <><strong>Content types:</strong> <Btn>Heading</Btn>, <Btn>Bullets</Btn>, <Btn>Quote</Btn> and <Btn>Custom Slide</Btn> for anything you design yourself.</> },
-          { text: <><strong>Leaderboard:</strong> added for you at the end of the deck when Quiz mode is on — it reveals the top scorers with points. (See the Quiz mode topic below.)</> },
-          { text: <>Each question slide has its own settings on the right — options, correct answer(s), timer, and how many answers each person may submit.</> },
-          { text: <><strong>Colours:</strong> pick a plain colour or one of five <strong>gradients</strong> (Midnight, Ocean, Forest, Flame, Sunset) for question slides, Heading, Bullets and Quote slides, and the self-paced test and survey screens. The text colour is set for you so it reads well on a projector. Custom slides have their own background picker.</> },
+          { text: <>Use the <strong>Add slide</strong> panel at the bottom of the sidebar, or click <em>“Insert slide here”</em> between two slides.</>, image: 'add-slide-menu.png', imageAlt: 'Add slide panel showing all slide types' },
+          { text: <><strong>Question slides:</strong> <Btn>MCQ</Btn> multiple choice · <Btn>Word Cloud</Btn> short words that build a cloud · <Btn>Open-ended</Btn> written answers · <Btn>Rating</Btn> score things on a scale · <Btn>Ranking</Btn> put things in order.</> },
+          { text: <><strong>Content slides:</strong> <Btn>Heading</Btn>, <Btn>Bullets</Btn>, <Btn>Quote</Btn>, and <Btn>Custom Slide</Btn> for anything you design yourself.</> },
+          { text: <>Click any slide to edit it. The settings are on the left and a preview of the big screen is on the right (on a smaller window, the preview is underneath).</> },
+          { text: <><strong>Colours:</strong> pick a plain colour or one of five gradients — Midnight, Ocean, Forest, Flame or Sunset. The text colour is set for you, so it’s easy to read on a projector.</> },
+          { text: <><strong>Reading ranking results:</strong> items are listed in everyone’s combined order. “Average position” 1.0 means everyone put it first, so lower is better.</> },
         ],
+        tip: <>Want a scored competition? See <strong>Live quiz</strong> below. Want everyone to answer at their own pace? See <strong>Self-paced test</strong>.</>,
       },
       {
         id: 'import-questions',
         videoAt: 74,
         icon: <FileSpreadsheet className="size-4" />,
-        title: 'Import many questions at once (CSV + AI)',
-        intro: 'Typing 20 questions by hand is slow. If your questions already live in a Word document, let an AI convert them into the import template for you.',
+        title: 'Import lots of questions at once (CSV + AI)',
+        intro: 'Got your questions in a Word document? Let AI turn them into a file Alaya Pulse can import.',
         steps: [
-          { text: <>Click <Btn color="orange">Import</Btn> → <Btn>Import questions in CSV</Btn>, then click <Btn>Download template</Btn> to save the CSV template.</>, image: 'csv-modal.png', imageAlt: 'Import questions modal with Download template' },
-          { text: <>Open Gemini (or ChatGPT / Claude). Attach <strong>both</strong> the template and your Word document, and paste the prompt shown in the import window — it has a <Btn>Copy</Btn> button: <em>“Fill in this CSV template with the questions from my document. Replace the example rows with my questions and keep the exact column layout.”</em></> },
-          { text: <>Check the AI’s output (especially the correct answers!), save it as a <strong>.csv</strong> file.</> },
-          { text: <>Back in Alaya Pulse, upload the finished CSV in the same <em>Import questions</em> window. Every question becomes a ready-made slide.</> },
+          { text: <>Click <Btn color="orange">Import</Btn> → <Btn>Import questions in CSV</Btn>, then <Btn>Download template</Btn>.</>, image: 'csv-modal.png', imageAlt: 'Import questions window with Download template' },
+          { text: <>Open Gemini (or ChatGPT or Claude). Attach the template and your Word document, then paste the prompt from the import window — it has a <Btn>Copy</Btn> button.</> },
+          { text: <>Check what the AI made, especially the correct answers. Save it as a <strong>.csv</strong> file.</> },
+          { text: <>Upload the .csv in the same window, and choose where the questions go: <strong>live questions</strong>, a <strong>self-paced test</strong> or a <strong>survey</strong>.</> },
         ],
-        tip: <>The template’s columns cover question text, type, options, correct answer(s), an explanation (shown after the answer is revealed) and timer seconds — anything you leave empty just uses the defaults.</>,
+        tip: <>The template has columns for the question, type, options, correct answer, explanation and timer. Leave a column empty to use the default.</>,
       },
       {
         id: 'rearrange',
         videoAt: 98,
         icon: <LayoutGrid className="size-4" />,
-        title: 'Rearrange slides in Slide Overview',
+        title: 'Move slides around',
         steps: [
-          { text: <>Click the <Btn>Slide overview</Btn> button (grid icon) in the editor.</>, image: 'slide-overview.png', imageAlt: 'Slide Overview grid' },
-          { text: <><strong>Drag</strong> any slide card to a new position to reorder the deck.</> },
-          { text: <>Click a card to jump straight to editing that slide.</> },
+          { text: <>Click the grid button next to <Btn color="orange">Import</Btn> to open <strong>Slide overview</strong>.</>, image: 'slide-overview.png', imageAlt: 'Slide overview grid' },
+          { text: <>Drag a slide to move it. Click a slide to edit it.</> },
         ],
-        tip: <>The sidebar list also supports dragging slides up and down for quick single moves.</>,
+        tip: <>You can also drag slides up and down in the sidebar.</>,
       },
       {
         id: 'save-undo',
         videoAt: 109,
         icon: <Bookmark className="size-4" />,
-        title: 'Save, undo, redo',
+        title: 'Save and undo',
         steps: [
-          { text: <>Click <Btn>Save</Btn> in the top bar whenever you want to store your deck — it flips to <em>“Saved”</em> when done.</> },
-          { text: <>Made a mistake? <Btn>Undo</Btn> with the toolbar arrow or <strong>Ctrl+Z</strong>. <Btn>Redo</Btn> with <strong>Ctrl+Shift+Z</strong>.</> },
-          { text: <>Save before starting a show or closing the tab, so nothing is lost.</> },
+          { text: <>Your deck saves by itself a few seconds after each change. <Btn>Save</Btn> saves straight away and shows <em>“Saved”</em>.</> },
+          { text: <>Made a mistake? Click the undo arrow at the top or press <strong>Ctrl+Z</strong>. Redo with <strong>Ctrl+Shift+Z</strong>.</> },
         ],
       },
     ],
@@ -170,70 +168,74 @@ const GUIDE: Stage[] = [
         id: 'slideshow',
         videoAt: 135,
         icon: <Play className="size-4" />,
-        title: 'Start the show & get your audience in',
+        title: 'Start the show and get people in',
         steps: [
-          { text: <>Click the pink <Btn color="pink">Start Show</Btn> button in the editor. You land in the <strong>lobby</strong>: a big QR code plus a short session code.</>, image: 'lobby-qr.png', imageAlt: 'Session lobby with QR code and join code' },
-          { text: <>The audience scans the QR with their phone camera — or types the code at <strong>alaya-pulse.web.app/join</strong>. You’ll see the audience counter tick up as they arrive.</> },
-          { text: <>Press <strong>→</strong> (or click the right edge) to leave the lobby and begin. The QR and code stay visible in the bottom bar for latecomers.</> },
-          { text: <><strong>Resume vs New Show:</strong> if you exit and come back, <Btn color="pink">Resume</Btn> continues the <em>same</em> session — everyone stays connected, no re-scanning. <Btn color="blue">New Show</Btn> starts fresh with a new code (audience must join again). Use Resume for accidental exits or quick edits mid-session.</> },
+          { text: <>Click the pink <Btn color="pink">Start Show</Btn> button. You land in the <strong>lobby</strong>, with a big QR code and a 6-letter code.</>, image: 'lobby-qr.png', imageAlt: 'Lobby with QR code and join code' },
+          { text: <>People scan the QR code with their phone camera, or go to <strong>alaya-pulse.web.app/join</strong> and type the code. The audience count goes up as they join.</> },
+          { text: <>Press <strong>→</strong> to start. The QR code and join code stay in the bottom bar for latecomers.</> },
+          { text: <><strong>Left the show by accident?</strong> <Btn color="pink">Resume</Btn> carries on the same session, so nobody has to join again. <Btn color="blue">New Show</Btn> starts a new session with a new code.</> },
+          { text: <><strong>Finishing:</strong> press <strong>Esc</strong> (or ✕ in the bottom bar), then <Btn color="pink">End session</Btn>. You can type who it was with — for example “Sydney team” — so you can find it in Results later.</> },
         ],
       },
       {
         id: 'navigate',
         videoAt: 162,
         icon: <Compass className="size-4" />,
-        title: 'Moving between slides during the show',
+        title: 'Moving through the show',
         steps: [
-          { text: <><strong>Keyboard:</strong> → / ← arrows move forward and back. On a question slide, → first reveals the results, then moves on.</> },
-          { text: <><strong>Mouse:</strong> hover the far left or right edge of the screen — arrow buttons appear. The bottom bar also has ‹ › arrows next to the slide counter.</>, image: 'show-navigation.png', imageAlt: 'Slideshow navigation arrows and bottom bar' },
-          { text: <><strong>Imported HTML decks:</strong> ignore any next/back buttons drawn inside the slides themselves — always use the Pulse controls above. Pulse keeps its slide counter and the deck perfectly in sync only when it does the driving.</> },
+          { text: <><strong>Keyboard:</strong> <strong>→</strong> and <strong>←</strong> move forward and back. On a question, → first shows the results, then moves on.</> },
+          { text: <><strong>Mouse:</strong> hover over the left or right edge of the screen for arrows, or use ‹ › in the bottom bar.</>, image: 'show-navigation.png', imageAlt: 'Slide arrows and the bottom bar' },
+          { text: <><strong>HTML slides:</strong> always use these controls, not the buttons drawn inside your slides.</> },
         ],
-        tip: <>Press <strong>I</strong> to hide or show the bottom info bar. Press <strong>Esc</strong> to exit the show.</>,
+        tip: <>Press <strong>I</strong> to hide or show the bottom bar.</>,
       },
       {
         id: 'quiz-mode',
         videoAt: 118,
         icon: <Trophy className="size-4" />,
-        title: 'Live quiz — points, timer resets, re-votes',
-        intro: 'Live quiz turns the MCQ questions you show one at a time into a scored competition: right answers earn points, faster answers earn more, and a Leaderboard slide shows the champions. (Self-paced tests don’t need it — they’re always scored.)',
+        title: 'Live quiz — points and a leaderboard',
+        intro: 'Live quiz turns your multiple-choice questions into a competition. Right answers score points, faster answers score more, and a Leaderboard slide shows the winners.',
         steps: [
-          { text: <><strong>It switches on by itself:</strong> as soon as you mark a correct answer on an MCQ, the toggle in the top bar turns to <Btn color="gold">Live quiz On</Btn> and a Leaderboard slide is added at the end of your deck (drag it anywhere you like). Every MCQ without a timer gets a 30-second one. Don’t want a competition? Click <Btn>Turn off</Btn> in the message that pops up (or the toggle) and it stays off for that deck.</>, image: 'quiz-toggle.png', imageAlt: 'Quiz mode toggle in the editor toolbar' },
-          { text: <><strong>Check it during the show:</strong> a gold <em>“Live quiz”</em> badge sits in the bottom bar of the slideshow. No badge = Live quiz is off.</> },
-          { text: <><strong>Reset a question / timer:</strong> on a question slide, click the circular-arrow <Btn>Reset votes</Btn> control in the bottom bar and confirm. All answers for that question are cleared, the timer restarts, and everyone can answer once more.</>, image: 'reset-votes.png', imageAlt: 'Reset votes control during a live question' },
-          { text: <>Want the scores between rounds too? Add another <Btn>Leaderboard</Btn> slide wherever you like. At each one the top 10 are revealed with a drumroll, and every player’s phone shows their own place.</> },
+          { text: <><strong>It turns on by itself</strong> when you tick a correct answer on an MCQ. The top bar shows <Btn color="gold">Live quiz On</Btn>, a Leaderboard slide is added at the end, and each MCQ gets a 30-second timer. Don’t want a competition? Click <Btn>Turn off</Btn>.</>, image: 'quiz-toggle.png', imageAlt: 'Live quiz switch in the editor' },
+          { text: <>During the show, a gold <em>“Live quiz”</em> badge in the bottom bar shows it’s on.</> },
+          { text: <><strong>Ask a question again:</strong> click the circular arrow in the bottom bar and confirm. Answers are cleared, the timer restarts and everyone can answer again.</>, image: 'reset-votes.png', imageAlt: 'Reset answers button during a question' },
+          { text: <>Want scores between rounds? Add more <Btn>Leaderboard</Btn> slides. Each one reveals the top 10, and every phone shows that person’s place.</> },
         ],
-        tip: <>Set each question’s timer length in the editor — the timer also drives speed points, so shorter timers make speed matter more.</>,
+        tip: <>Shorter timers make speed matter more.</>,
       },
       {
         id: 'self-paced-test',
         icon: <ClipboardCheck className="size-4" />,
         title: 'Self-paced test — everyone at their own pace',
         videoAt: 209,
-        intro: 'A self-paced test gives everyone the whole set of questions on their phone at once. They go at their own pace within one time limit. Multiple choice marks itself: the answers are shown at the end and the winner has the most correct answers — a tie goes to the faster finish. Open-ended, word cloud, rating and ranking questions can go in too; you mark those afterwards, by hand or with AI.',
+        intro: 'Everyone gets all the questions on their phone at once and answers at their own pace, within one time limit. Multiple choice marks itself. You mark written answers afterwards, by hand or with AI.',
         steps: [
-          { text: <><strong>Add the block:</strong> in <strong>Add slide</strong>, click <Btn color="gold">Self-paced test</Btn>. A gold block appears in the sidebar. Questions <em>inside</em> the gold frame are the test; anything outside is a normal live question.</> },
-          { text: <><strong>Add questions:</strong> click <Btn>Add question</Btn> or <Btn color="gold">Import CSV</Btn> inside the block (same template and steps as other CSV imports). The main <Btn>Import</Btn> → <strong>Import questions in CSV</strong> asks whether the questions go into a self-paced test or become live questions. Any question type can go in a test. Multiple-choice questions need their correct answer(s) ticked — several correct answers make it a “choose 2 / choose 3” question.</> },
-          { text: <><strong>Questions you mark:</strong> for open-ended, word cloud, rating and ranking questions in a test, set the <strong>Marks available</strong> (or “Not marked” to just collect answers) and an optional <strong>Marking guide</strong> — what a good answer includes. The guide is never shown on phones. When you import a CSV, the <strong>explanation</strong> column becomes the marking guide for these question types. Open-ended answers can be up to 2,000 words (about 4 A4 pages); word cloud questions give each person one box per answer (you choose how many). The leaderboard ranks the multiple-choice score only; a test with no multiple choice skips the leaderboard.</> },
-          { text: <><strong>Settings:</strong> click the gold header card to set the time limit, whether people see their score as soon as they submit or only at the end, and what follows the test: leaderboard then answer review, review then leaderboard, leaderboard only, or review only. Pick a <strong>Theme</strong> colour for how the test looks on the big screen — and, if you like, give any question its own <strong>Big-screen colour</strong> for its answer review (it uses the test’s colour unless you change it). The arrow on the card folds the whole test into one card.</> },
-          { text: <><strong>During the show:</strong> the block shows the rules while people get ready — press <Btn color="gold">Start test</Btn>. A live dashboard shows the time left, how many have completed, who is answering and who hasn’t answered anything yet. Add or remove minutes, set an exact time, <Btn>Pause</Btn> (questions hide on every phone), <Btn>Restart</Btn> (just the timer — answers are kept and anyone who already submitted submits again — or the whole test), or <Btn color="pink">End test</Btn>.</> },
-          { text: <><strong>After the test:</strong> press → for the leaderboard (top 10 with the drumroll — every phone then shows its own place) and the answer review, one question per press, with how the room answered and the explanation. For questions you mark, the answers fill the screen first; click <Btn>Show answer guide</Btn> (or press <strong>G</strong>) to show your marking guide beside them — or skip it if you’d rather not show it.</> },
+          { text: <><strong>Add it:</strong> in the Add slide panel, click <Btn color="gold">Self-paced test</Btn>. A gold frame appears in the sidebar — the questions inside it are the test.</> },
+          { text: <><strong>Add questions:</strong> click <Btn>Add question</Btn> or <Btn color="gold">Import CSV</Btn> inside the test. Any question type works. On multiple-choice questions, tick the correct answer.</> },
+          { text: <><strong>Questions you mark</strong> (open-ended, word cloud, rating, ranking): set the marks and, if you like, a <strong>marking guide</strong> — what a good answer includes. Press Enter to put each point on its own line. Phones never see it.</> },
+          { text: <><strong>Settings:</strong> click the gold header card to set the time limit, when people see their score, what comes after the test (leaderboard, answer review or both), and the colour.</> },
+          { text: <><strong>Run it:</strong> press <Btn color="gold">Start test</Btn>. The big screen shows the time left and who has finished. You can add time, <Btn>Pause</Btn>, <Btn>Restart</Btn> or <Btn color="pink">End test</Btn>.</> },
+          { text: <><strong>On the phones:</strong> people can skip questions and come back to them. If they try to submit with questions left, the phone shows which ones — and the Submit button appears as soon as they answer the last one.</> },
+          { text: <><strong>After the test:</strong> press → for the leaderboard and the answer review, one question at a time. For questions you mark, the answers show first; click <Btn>Show answer guide</Btn> (or press <strong>G</strong>) to show your guide beside them.</> },
+          { text: <><strong>Removing the test:</strong> click the bin on the gold header. It asks whether to keep the questions as live questions or delete them too. Undo brings either back.</> },
         ],
-        tip: <>Correct answers never reach the phones until the test ends, and answers save as people go — if someone’s page closes, they rescan the QR and carry on.</>,
+        tip: <>Answers save as people go. If someone’s phone closes, they scan the QR code again and carry on.</>,
       },
       {
         id: 'survey',
         icon: <ClipboardList className="size-4" />,
-        title: 'Survey — feedback before, during or after the session',
-        intro: 'A survey is like a Google Form inside your deck. Everyone gets all its questions on their phone at once; nothing is marked or timed. It’s anonymous unless you ask for names, and a link lets people answer after the show — until you close it.',
+        title: 'Survey — feedback before, during or after',
+        intro: 'A survey is like a Google Form inside your deck. Everyone gets all the questions on their phone at once. Nothing is marked or timed, and it’s anonymous unless you ask for names.',
         steps: [
-          { text: <><strong>Add the block:</strong> in <strong>Add slide</strong>, click <Btn color="survey">Survey</Btn>. A pink block appears in the sidebar — questions inside the pink frame are the survey. Click its header to give it a title (shown at the top of the form).</> },
-          { text: <><strong>Add questions:</strong> <Btn>Add question</Btn> (any type), or <Btn color="survey">Import CSV</Btn> inside the block. The main <Btn>Import</Btn> → <strong>Import questions in CSV</strong> also offers <strong>Into a new survey</strong>. In the CSV, <strong>checkboxes</strong> is multiple choice where people tick several, and the <strong>required</strong> column says yes or no.</> },
-          { text: <><strong>On each question:</strong> choose <strong>Must answer</strong> or <strong>Optional</strong> (must-answer questions get a red * on the phone, and the form won’t submit until they’re answered). Multiple choice has <strong>One answer</strong> or <strong>Several answers</strong> (with an optional limit, e.g. “up to 2”). Written answers can be up to 2,000 words — the box grows as people type.</> },
-          { text: <><strong>Settings:</strong> <strong>Anonymous</strong> (the default — not even the name they joined with is kept) or <strong>Ask for names</strong>; open <strong>Until I close it</strong> or <strong>Until a date</strong>; and a theme colour for the big screen. Each phone or computer can answer once.</> },
-          { text: <><strong>During the show:</strong> the survey opens the first time your show reaches it. People who joined see it on their phone straight away; the big screen shows a QR code and the survey link for anyone else, plus a live count of responses. If you move on before everyone’s finished, their phones show a <strong>Survey open — Answer</strong> bar. <Btn>Show results</Btn> steps through each question’s answers (→ / ←); <Btn>Close survey</Btn> stops new answers.</> },
-          { text: <><strong>After the show:</strong> the link keeps working until you close the survey — email it, or put it in a Teams chat. The session’s join code and QR keep working too: they take people straight to the survey. New answers appear in Results whenever you open it. You can close or reopen the survey from the Results page.</> },
+          { text: <><strong>Add it:</strong> in the Add slide panel, click <Btn color="survey">Survey</Btn>. A pink frame appears in the sidebar. Click its header to give it a title.</> },
+          { text: <><strong>Add questions:</strong> click <Btn>Add question</Btn> or <Btn color="survey">Import CSV</Btn> inside the survey. In a CSV, use <strong>checkboxes</strong> for “tick all that apply”, and the <strong>required</strong> column (yes / no) for must-answer questions.</> },
+          { text: <><strong>On each question:</strong> choose <strong>Must answer</strong> or <strong>Optional</strong>. For multiple choice, choose <strong>One answer</strong> or <strong>Several answers</strong>.</> },
+          { text: <><strong>Settings:</strong> <strong>Anonymous</strong> (the default) or <strong>Ask for names</strong>; open <strong>Until I close it</strong> or <strong>Until a date</strong>; and the colour.</> },
+          { text: <><strong>During the show:</strong> the survey opens when your show reaches it. Phones that joined show it straight away, and the big screen shows a QR code for everyone else plus a count of responses. <Btn>Show results</Btn> steps through the answers; <Btn>Close survey</Btn> stops new ones.</> },
+          { text: <><strong>After the show:</strong> people can still answer with the survey link, the join code or the QR code — until you close it. New answers appear in Results.</> },
+          { text: <><strong>Removing the survey:</strong> click the bin on the pink header. It asks whether to keep the questions as live questions or delete them too.</> },
         ],
-        tip: <>Put a survey first in your deck for a “before” check-in, in the middle for a quick pulse, or at the end for feedback — or start the show, copy the link, and send it out.</>,
+        tip: <>Put a survey at the start for a check-in, in the middle for a quick pulse, or at the end for feedback.</>,
       },
     ],
   },
@@ -247,18 +249,18 @@ const GUIDE: Stage[] = [
         id: 'results',
         videoAt: 349,
         icon: <Download className="size-4" />,
-        title: 'Download the results',
+        title: 'See and download the results',
         steps: [
-          { text: <>After a show, open the deck and click <Btn>Results</Btn> — this opens the results page with every question’s answers.</> },
-          { text: <><strong>Same deck, different groups?</strong> When you click <Btn color="pink">End session</Btn>, type who it was with (e.g. “Sydney team”) — it’s optional. On the results page each session button shows that name (or the date and time), and <Btn>Rename</Btn> / <Btn>Name this session</Btn> changes it later. Ending a resumed show updates the same session instead of adding another.</> },
-          { text: <>Use the download buttons to export everything as an <strong>Excel file</strong> or as a <strong>PDF summary</strong>. The Excel’s first tab, <strong>Start here</strong>, lists every tab and what it shows; tab names start with the part they belong to — <strong>Live –</strong>, <strong>Test –</strong> or <strong>Survey –</strong> — and each tab has a sentence at the top explaining how to read it.</>, image: 'results-page.png', imageAlt: 'Results page with Excel and PDF download buttons' },
-          { text: <>Every question is tagged as one of three kinds. <strong>Self-paced test:</strong> questions inside a Self-paced test block — everyone answers on their own phone at their own pace within one time limit. Multiple choice is marked automatically and ranked by correct answers, then finish time; other question types are marked by the host afterwards. <strong>Live quiz:</strong> multiple-choice questions with a correct answer, shown one at a time on the big screen while Live quiz is on — points for each right answer, plus extra points for answering fast. <strong>Poll:</strong> questions that aren’t scored, such as word clouds, open-ended, rating, ranking, and multiple choice with no correct answer — they show what the room thinks.</> },
-          { text: <>For a self-paced test, the results page lists every participant with their score, time taken and status — click a name to see each answer they gave. The Excel adds <strong>Test – Scores</strong>, <strong>Test – All answers</strong> and <strong>Test – Questions</strong> tabs.</> },
-          { text: <><strong>More than one part?</strong> When a session had live questions plus a self-paced test or a survey, tabs at the top (in the order you showed them) switch between the parts, so you don’t scroll past one to reach another. The Excel and PDF downloads follow the same order.</> },
-          { text: <><strong>Survey results:</strong> each survey has <strong>Summary</strong> (a pie chart or bars per question, ratings and rankings, every written answer — <Btn>Copy chart</Btn> pastes a chart into slides) and <strong>Individual</strong> (one person’s whole form at a time). <Btn>Print summary</Btn> prints it neatly (or saves a PDF), <Btn>Word report</Btn> gives a document to read and share, <Btn>Excel</Btn> gives one row per person — upload it to Google Drive to open it as a Google Sheet — and <Btn color="pink">Copy for Gemini</Btn> copies the answers with a ready-made prompt: paste it into Gemini for the main themes, what people liked, what to improve and a few quotes. Check what AI says before you share it, and follow your company’s AI policy.</> },
-          { text: <><strong>Marking written answers:</strong> if the test had questions you mark, the Excel also has a <strong>Test – Answers to mark</strong> tab — one row per written answer, with what a good answer includes, the marks available and an empty <strong>Your mark</strong> column to fill in. Or use the <strong>answers to mark</strong> box on the results page: download the answers file, copy the ready-made prompt, and paste both into Gemini (or ChatGPT / Claude) to get a mark and a reason for each answer plus everyone’s total. Always check AI marks, and make sure your company’s AI policy allows it.</> },
-          { text: <>Results are saved with the deck, so you can come back and download them later too.</> },
+          { text: <>Open the deck and click <Btn color="gold">Results</Btn> in the top bar.</> },
+          { text: <><strong>Pick a session:</strong> each one has a button showing its name, or its date and time. Used one deck with different groups? Name each session when you end the show, or click <Btn>Name this session</Btn> on the Results page.</> },
+          { text: <><strong>More than one part?</strong> Tabs at the top switch between live questions, tests and surveys, in the order you showed them.</> },
+          { text: <><strong>Download:</strong> <Btn color="green">Download Excel</Btn> for everything, or <Btn color="pink">Download PDF</Btn> for a summary. The Excel opens on a <strong>Start here</strong> tab that explains every other tab.</>, image: 'results-page.png', imageAlt: 'Results page with the Excel and PDF buttons' },
+          { text: <><strong>Test results:</strong> everyone’s score, time and status. Click a name to see their answers.</> },
+          { text: <><strong>Marking written answers:</strong> in the Excel, open the <strong>Test – Answers to mark</strong> tab and type a mark in <strong>Your mark</strong>. Or use the marking box on the Results page to get AI to suggest marks.</> },
+          { text: <><strong>Survey results:</strong> <strong>Summary</strong> shows a chart for each question, and <strong>Individual</strong> shows one person’s whole form. Use <Btn>Print summary</Btn>, <Btn>Word report</Btn>, <Btn>Excel</Btn>, or <Btn color="pink">Copy for Gemini</Btn> for an AI summary of the main themes.</> },
+          { text: <><strong>Question labels:</strong> <em>Live quiz</em> questions score points, <em>Self-paced test</em> questions are marked, and <em>Poll</em> questions just show what the room thinks.</> },
         ],
+        tip: <>Results are saved with the deck, so you can come back any time. Check anything AI writes before you share it, and follow your company’s AI policy.</>,
       },
       {
         id: 'share',
@@ -266,14 +268,22 @@ const GUIDE: Stage[] = [
         icon: <Share2 className="size-4" />,
         title: 'Share your deck',
         steps: [
-          { text: <>In the editor’s top bar, click <Btn>Share</Btn>.</> },
-          { text: <><Btn>Copy link</Btn> gives you a link anyone can open to view the deck and import their own copy — perfect for handing a deck to a colleague.</>, image: 'share-menu.png', imageAlt: 'Share menu with Copy link' },
-          { text: <><Btn>Download JSON</Btn> saves the deck as a file — a backup you (or anyone) can bring back via <Btn color="orange">Import</Btn>.</> },
+          { text: <>In the top bar, click <Btn>Share</Btn>.</> },
+          { text: <><Btn>Copy link</Btn> gives a link anyone can open to see the deck and make their own copy.</>, image: 'share-menu.png', imageAlt: 'Share menu with Copy link' },
+          { text: <><Btn>Download JSON</Btn> saves the deck as a file — a backup you can bring back with <Btn color="orange">Import</Btn>.</> },
         ],
-        tip: <>Sharing sends a <em>copy</em> — the other person’s edits never change your original deck.</>,
+        tip: <>Sharing sends a copy. Other people’s changes never touch your deck.</>,
       },
     ],
   },
+]
+
+/* The whole journey for a first-timer; each line links to its topic. */
+const QUICK_START: { text: React.ReactNode; link: string }[] = [
+  { text: <>Make a deck: import your slides, then add questions between them.</>, link: 'add-slides' },
+  { text: <>Click <Btn color="pink">Start Show</Btn>. People scan the QR code to join.</>, link: 'slideshow' },
+  { text: <>Move through with the → key. Questions show results as people answer.</>, link: 'navigate' },
+  { text: <>Afterwards, click <Btn color="gold">Results</Btn> to see and download everything.</>, link: 'results' },
 ]
 
 /* Screenshot that removes itself if the image file doesn't exist (yet). */
@@ -339,11 +349,21 @@ export default function Guide() {
             User <span className="text-hot-pink">Guide</span>
           </h1>
           <p className="mt-3 max-w-2xl font-light text-white/60">
-            Everything you need to build a deck, run a live session and collect the results —
-            in the order you’ll actually do it. Tip: every section has its own link, so you can
-            share <span className="font-mono text-white/80">alaya-pulse.web.app/guide#quiz-mode</span> style
-            links that jump straight to an answer.
+            How to build a deck, run a live session and get the results — in the order you’ll do it.
           </p>
+
+          {/* Quick start — the whole journey in four lines */}
+          <div className="mt-6 max-w-2xl rounded-2xl border border-hot-pink/25 bg-hot-pink/[0.06] p-5">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-hot-pink">Quick start</p>
+            <ol className="mt-3 space-y-2 text-sm leading-relaxed text-white/85">
+              {QUICK_START.map((q, i) => (
+                <li key={i} className="flex gap-3">
+                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-hot-pink/15 text-xs font-bold text-hot-pink">{i + 1}</span>
+                  <span>{q.text} <a href={`#${q.link}`} className="whitespace-nowrap text-hot-pink underline-offset-2 hover:underline">How →</a></span>
+                </li>
+              ))}
+            </ol>
+          </div>
 
           {/* Walkthrough video — self-hosted (no third-party player), so
               everything stays inside our own Google Cloud project. */}
@@ -436,7 +456,7 @@ export default function Guide() {
           ))}
 
           <p className="mt-14 border-t border-white/10 pt-6 text-center text-sm font-light text-white/40">
-            That’s the whole journey — build, present, download. Have fun out there. 🎉
+            That’s it — build, present, get the results. Each section has its own link, like alaya-pulse.web.app/guide#survey, to send to a colleague.
           </p>
         </main>
       </div>
