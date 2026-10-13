@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { cn, optionLabel, MAX_VIZ_OPTIONS } from '@/lib/utils'
+import { themeFill } from '@/lib/gradients'
 import { aggregateRanking, rankingOrder, rankingPlaces, topChoiceText, type RankingResult } from '@/lib/ranking'
 import { Confetti, Fireworks, CountUp } from '@/components/Celebration'
 import { TestBlockView, type TestNav, type LeaderboardEntry } from '@/components/TestBlockShow'
@@ -1734,7 +1735,7 @@ function VideoSlideView({ slide }: { slide: VideoSlide }) {
    Content slide — heading / bullets / quote templates
    ───────────────────────────────────────────────────────────────────────── */
 
-type ThemeKey = 'navy' | 'pink' | 'sky' | 'green' | 'golden' | 'white' | 'transparent'
+type ThemeKey = 'navy' | 'pink' | 'sky' | 'green' | 'golden' | 'white' | 'transparent' | 'midnight' | 'ocean' | 'forest' | 'flame' | 'sunset'
 const CONTENT_COLORS: Record<ThemeKey, {
   bg: string; text: string; textDim: string; accent: string; quoteMark: string
 }> = {
@@ -1747,6 +1748,12 @@ const CONTENT_COLORS: Record<ThemeKey, {
   // Transparent: no bg colour — image shows through completely unshaded.
   // White text since the outer presentation container is dark.
   transparent: { bg: 'transparent', text: '#ffffff', textDim: 'rgba(255,255,255,0.58)', accent: '#ff0065', quoteMark: 'rgba(255,0,101,0.18)' },
+  // Gradients (see lib/gradients): bg is the plain colour behind an image tint
+  midnight:    { bg: '#000079',   text: '#ffffff', textDim: 'rgba(255,255,255,0.60)', accent: '#ff0065', quoteMark: 'rgba(255,0,101,0.20)' },
+  ocean:       { bg: '#000079',   text: '#ffffff', textDim: 'rgba(255,255,255,0.72)', accent: '#ffc709', quoteMark: 'rgba(255,255,255,0.20)' },
+  forest:      { bg: '#000079',   text: '#ffffff', textDim: 'rgba(255,255,255,0.72)', accent: '#ffc709', quoteMark: 'rgba(255,255,255,0.20)' },
+  flame:       { bg: '#000079',   text: '#ffffff', textDim: 'rgba(255,255,255,0.72)', accent: '#ffc709', quoteMark: 'rgba(255,255,255,0.20)' },
+  sunset:      { bg: '#ffc709',   text: '#000079', textDim: 'rgba(0,0,121,0.68)',     accent: '#000079', quoteMark: 'rgba(0,0,121,0.16)' },
 }
 function contentColors(theme: string) { return CONTENT_COLORS[theme as ThemeKey] ?? CONTENT_COLORS.navy }
 
@@ -1770,6 +1777,12 @@ const QSLIDE_COLORS: Record<string, QColorSet> = {
   // Transparent: bg is set to '#000079' so badges use navy text on white background.
   // The actual slide container is forced to CSS transparent via a separate check.
   transparent: { bg: '#000079', fg: '#ffffff', fgDim: 'rgba(255,255,255,0.60)', fgFaint: 'rgba(255,255,255,0.25)', cardBorder: 'rgba(255,255,255,0.15)', cardBg: 'rgba(255,255,255,0.12)', isDark: true  },
+  // Gradients: bg is a plain colour (badge text, image tint); the slide itself is painted with the gradient
+  midnight:    { bg: '#000079', fg: '#ffffff', fgDim: 'rgba(255,255,255,0.62)', fgFaint: 'rgba(255,255,255,0.26)', cardBorder: 'rgba(255,255,255,0.12)', cardBg: 'rgba(255,255,255,0.06)', isDark: true  },
+  ocean:       { bg: '#000079', fg: '#ffffff', fgDim: 'rgba(255,255,255,0.75)', fgFaint: 'rgba(255,255,255,0.35)', cardBorder: 'rgba(255,255,255,0.20)', cardBg: 'rgba(255,255,255,0.10)', isDark: true  },
+  forest:      { bg: '#000079', fg: '#ffffff', fgDim: 'rgba(255,255,255,0.75)', fgFaint: 'rgba(255,255,255,0.35)', cardBorder: 'rgba(255,255,255,0.20)', cardBg: 'rgba(255,255,255,0.10)', isDark: true  },
+  flame:       { bg: '#000079', fg: '#ffffff', fgDim: 'rgba(255,255,255,0.75)', fgFaint: 'rgba(255,255,255,0.35)', cardBorder: 'rgba(255,255,255,0.20)', cardBg: 'rgba(255,255,255,0.10)', isDark: true  },
+  sunset:      { bg: '#ffc709', fg: '#000079', fgDim: 'rgba(0,0,121,0.70)',     fgFaint: 'rgba(0,0,121,0.32)',     cardBorder: 'rgba(0,0,121,0.16)',      cardBg: 'rgba(0,0,121,0.08)',    isDark: false },
 }
 function qColors(theme?: string): QColorSet {
   return QSLIDE_COLORS[theme ?? 'navy'] ?? QSLIDE_COLORS.navy
@@ -1786,6 +1799,11 @@ const MCQ_ACCENTS: Record<string, MCQAccents> = {
   golden:      { selected: '#ff0065', correct: '#00b0ff' },  // hot-pink  / sky-blue
   white:       { selected: '#ff0065', correct: '#42db66' },  // hot-pink  / fresh-green
   transparent: { selected: '#ff0065', correct: '#42db66' },
+  midnight:    { selected: '#ff0065', correct: '#42db66' },
+  ocean:       { selected: '#ff0065', correct: '#ffc709' },  // no blue — the gradient ends in sky
+  forest:      { selected: '#ff0065', correct: '#ffc709' },  // no green — the gradient ends in green
+  flame:       { selected: '#00b0ff', correct: '#42db66' },  // no pink — the gradient starts in pink
+  sunset:      { selected: '#000079', correct: '#1d4ed8' },  // dark colours on pink and gold
 }
 function mcqAccents(theme?: string): MCQAccents {
   return MCQ_ACCENTS[theme ?? 'navy'] ?? MCQ_ACCENTS.navy
@@ -1818,7 +1836,7 @@ function ContentSlideView({ slide }: { slide: ContentSlide }) {
   return (
     <div
       className="absolute inset-0 overflow-hidden"
-      style={{ backgroundColor: c.bg }}
+      style={{ background: themeFill(slide.theme, c.bg) }}
     >
       {/* Soft ambient glow — navy only */}
       {slide.theme === 'navy' && (
@@ -1834,7 +1852,7 @@ function ContentSlideView({ slide }: { slide: ContentSlide }) {
           <img src={slide.imgUrl} alt="" className="absolute inset-0 z-0 h-full w-full object-cover" />
           {/* Skip overlay for transparent theme so the image shows completely unshaded */}
           {slide.theme !== 'transparent' && (
-            <div className="absolute inset-0 z-0" style={{ backgroundColor: `${c.bg}cc` }} />
+            <div className="absolute inset-0 z-0" style={{ background: themeFill(slide.theme, c.bg, 'cc') }} />
           )}
         </>
       )}
@@ -2486,7 +2504,7 @@ function QuestionSlideView({
   if (hasBgImg) {
     const isTransparentBg = slide.theme === 'transparent'
     return (
-      <div className="absolute inset-0 flex flex-col overflow-hidden pb-24" style={{ backgroundColor: isTransparentBg ? 'transparent' : c.bg }}>
+      <div className="absolute inset-0 flex flex-col overflow-hidden pb-24" style={{ background: isTransparentBg ? 'transparent' : themeFill(slide.theme, c.bg) }}>
         {/* Blurred ambient fill — skip for transparent theme */}
         {!isTransparentBg && (
           <img src={slide.imgUrl} alt="" aria-hidden className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-30" />
@@ -2495,7 +2513,7 @@ function QuestionSlideView({
         <img src={slide.imgUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
         {/* Colour overlay for text readability — skip for transparent theme */}
         {!isTransparentBg && (
-          <div className="absolute inset-0" style={{ backgroundColor: `${c.bg}cc` }} />
+          <div className="absolute inset-0" style={{ background: themeFill(slide.theme, c.bg, 'cc') }} />
         )}
         {/* Scrollable content: badge + question + options */}
         <div className="relative z-10 flex flex-1 flex-col overflow-hidden px-14 pt-12">
@@ -2537,7 +2555,7 @@ function QuestionSlideView({
     return (
       // Outer: no pb-24 so image panel reaches the bottom edge behind the HUD gradient.
       // Left column carries pb-24 so the BottomBar stays above the HUD.
-      <div className="absolute inset-0 flex overflow-hidden" style={{ backgroundColor: slide.theme === 'transparent' ? 'transparent' : c.bg }}>
+      <div className="absolute inset-0 flex overflow-hidden" style={{ background: slide.theme === 'transparent' ? 'transparent' : themeFill(slide.theme, c.bg) }}>
         {/* Left: question content + BottomBar — pb-24 keeps content above the HUD */}
         <div className="flex flex-1 flex-col overflow-hidden px-12 pt-12 pb-24">
           {/* Scrollable: badge + question + options */}
@@ -2581,7 +2599,7 @@ function QuestionSlideView({
 
   /* ── NO IMAGE — full-width layout ──────────────────────────────────── */
   return (
-    <div className="absolute inset-0 flex flex-col overflow-hidden px-14 pt-12 pb-24" style={{ backgroundColor: slide.theme === 'transparent' ? 'transparent' : c.bg }}>
+    <div className="absolute inset-0 flex flex-col overflow-hidden px-14 pt-12 pb-24" style={{ background: slide.theme === 'transparent' ? 'transparent' : themeFill(slide.theme, c.bg) }}>
       {/* Scrollable: badge + question + options — grows to fill space, scrolls if needed */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden pb-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <motion.span initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
@@ -2662,7 +2680,7 @@ function ResultsSlideView({
   return (
     <div
       className={cn('absolute inset-0 flex flex-col overflow-hidden px-14 pt-10', slide.type === 'mcq' ? 'pb-16' : 'pb-24')}
-      style={{ backgroundColor: slide.theme === 'transparent' ? 'transparent' : c.bg }}
+      style={{ background: slide.theme === 'transparent' ? 'transparent' : themeFill(slide.theme, c.bg) }}
     >
       {/* Badge + question + optional reveal button.
           When the timer pill is showing (top-right), add right padding so the
@@ -3233,6 +3251,12 @@ const CLOUD_THEME_PALETTES: Record<string, string[]> = {
   golden:      ['#000079','#ff0065','#1d4ed8','#166534','#6b21a8','#9f1239','#0c4a6e','#14532d','#581c87','#164e63','#c2410c','#1e1b4b'],
   // White (#f4f4f9): avoid light colors; navy, hot-pink, dark blue, dark green, purple, dark red
   white:       ['#000079','#ff0065','#0369a1','#166534','#6b21a8','#be185d','#1d4ed8','#9f1239','#92400e','#581c87','#134e4a','#7c2d12'],
+  // Gradients: bright colours on the dark ones (avoiding the gradient's own hues), dark ones on Sunset
+  midnight:    ['#ff0065','#00b0ff','#42db66','#ffc709','#c084fc','#fb923c','#22d3ee','#f472b6','#4ade80','#facc15','#a78bfa','#34d399'],
+  ocean:       ['#ffc709','#ff0065','#ffffff','#42db66','#fb923c','#facc15','#f472b6','#4ade80','#fde68a','#fda4af','#a3e635','#fef08a'],
+  forest:      ['#ffc709','#ff0065','#ffffff','#fb923c','#f472b6','#facc15','#fde68a','#c084fc','#fda4af','#fef08a','#e0f2fe','#f9a8d4'],
+  flame:       ['#ffc709','#00b0ff','#42db66','#ffffff','#22d3ee','#4ade80','#facc15','#a3e635','#fde68a','#7dd3fc','#86efac','#fef08a'],
+  sunset:      ['#000079','#1e1b4b','#1d4ed8','#166534','#581c87','#0c4a6e','#14532d','#312e81','#164e63','#3b0764','#1e3a5f','#052e16'],
   // Transparent: image behind — bright vivid palette like navy works on most photo backgrounds
   transparent: ['#ff0065','#00b0ff','#42db66','#ffc709','#c084fc','#fb923c','#22d3ee','#f472b6','#4ade80','#facc15','#a78bfa','#34d399'],
 }
@@ -4021,7 +4045,7 @@ function getTimerColors(
     if (secsLeft <= 30) return { bar: '#ff0065',  text: '#ffffff',           pill: 'rgba(200,0,60,0.60)',   border: 'rgba(255,0,101,0.30)'   }
     return                     { bar: '#000079',  text: '#ffffff',           pill: 'rgba(0,0,90,0.60)',     border: 'rgba(0,0,121,0.30)'     }
   }
-  if (t === 'golden') {
+  if (t === 'golden' || t === 'sunset') {
     if (secsLeft <= 10) return { bar: '#ff0065',  text: '#ffffff',           pill: 'rgba(200,0,60,0.75)',   border: 'rgba(255,255,255,0.20)' }
     if (secsLeft <= 30) return { bar: '#000079',  text: '#ffffff',           pill: 'rgba(0,0,90,0.60)',     border: 'rgba(0,0,121,0.30)'     }
     return                     { bar: '#000079',  text: '#ffffff',           pill: 'rgba(0,0,90,0.55)',     border: 'rgba(0,0,121,0.25)'     }

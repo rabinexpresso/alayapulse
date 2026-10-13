@@ -5,6 +5,7 @@ import { Plus, Trash2, Monitor, Cloud, LogOut, Clock, Layers, ArrowRightLeft, Fi
 import { AlayaMark } from '@/components/AlayaMark'
 import { AdminExport } from '@/components/AdminExport'
 import { cn } from '@/lib/utils'
+import { themeFill } from '@/lib/gradients'
 import {
   getStorageBackend, setStorageBackend, clearStorageBackend,
   browserListDecks, browserSaveDeck, browserDeleteDeck,
@@ -1119,6 +1120,12 @@ const DECK_THEME: Record<string, { bg: string; text: string }> = {
   green:  { bg: '#42db66', text: '#000079' },
   golden: { bg: '#ffc709', text: '#000079' },
   white:  { bg: '#f4f4f9', text: '#000079' },
+  // Gradients (lib/gradients): painted with themeFill(); bg is the plain colour
+  midnight: { bg: '#000079', text: '#ffffff' },
+  ocean:    { bg: '#000079', text: '#ffffff' },
+  forest:   { bg: '#000079', text: '#ffffff' },
+  flame:    { bg: '#000079', text: '#ffffff' },
+  sunset:   { bg: '#ffc709', text: '#000079' },
 }
 function deckTheme(t?: string) { return DECK_THEME[t ?? 'navy'] ?? DECK_THEME.navy }
 
@@ -1152,7 +1159,7 @@ function DeckThumbnail({ slides }: { slides: any[] }) {
   if (first.type === 'content') {
     const c = deckTheme(first.theme)
     return (
-      <div className="flex h-full w-full items-center justify-center px-5 py-4" style={{ backgroundColor: c.bg }}>
+      <div className="flex h-full w-full items-center justify-center px-5 py-4" style={{ background: themeFill(first.theme, c.bg) }}>
         <p className="line-clamp-3 text-center text-sm font-bold leading-snug" style={{ color: c.text }}>
           {first.title || first.body || 'Untitled'}
         </p>
@@ -1173,7 +1180,7 @@ function DeckThumbnail({ slides }: { slides: any[] }) {
   // Question slide (mcq / wordcloud / openended / rating)
   const c = deckTheme(first.theme)
   return (
-    <div className="flex h-full w-full items-center justify-center px-5 py-4" style={{ backgroundColor: c.bg }}>
+    <div className="flex h-full w-full items-center justify-center px-5 py-4" style={{ background: themeFill(first.theme, c.bg) }}>
       <p className="line-clamp-3 text-center text-xs font-semibold leading-snug" style={{ color: c.text }}>
         {first.question || 'Question slide'}
       </p>

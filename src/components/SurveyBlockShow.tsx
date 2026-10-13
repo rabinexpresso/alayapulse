@@ -20,7 +20,7 @@ import type { TestNav } from '@/components/TestBlockShow'
 function themeVars(id?: string): CSSProperties {
   const t = testTheme(id)
   return {
-    '--bg': t.bg, '--fg': t.fg, '--accent': t.accent,
+    '--bg': t.bg, '--fill': t.fill ?? t.bg, '--fg': t.fg, '--accent': t.accent,
     '--good': t.good, '--good-ink': t.goodInk, '--good-text': t.goodText,
     '--danger': t.danger, '--danger-ink': t.dangerInk,
   } as CSSProperties
@@ -154,7 +154,7 @@ export function SurveyBlockView({ slide, code, onlySurvey, navRef, renderAnswers
   }
 
   return (
-    <div className="relative h-full w-full bg-(--bg) text-(--fg) transition-colors duration-500"
+    <div className="relative h-full w-full text-(--fg) transition-colors duration-500 [background:var(--fill)]"
       style={themeVars(shown >= 0 ? (questions[shown]?.theme ?? slide.theme) : slide.theme)}>
       {body}
     </div>

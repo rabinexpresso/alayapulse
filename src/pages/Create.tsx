@@ -23,9 +23,10 @@ import {
 import { AlayaMark } from '@/components/AlayaMark'
 import { PersistentHtmlIframe } from '@/components/PersistentHtmlIframe'
 import { cn, optionLabel, MAX_MCQ_OPTIONS, MAX_VIZ_OPTIONS } from '@/lib/utils'
+import { GRADIENT_THEMES, gradientCss, themeFill } from '@/lib/gradients'
 import { injectSlideNavigation } from '@/lib/importFile'
 import {
-  DEFAULT_TEST_SETTINGS, DEFAULT_SURVEY_SETTINGS, AFTER_ORDER_LABEL, TEST_THEMES, testTheme, isTestable, isSurvey, OE_MAX_WORDS,
+  DEFAULT_TEST_SETTINGS, DEFAULT_SURVEY_SETTINGS, AFTER_ORDER_LABEL, TEST_THEMES, SOLID_TEST_THEMES, testTheme, isTestable, isSurvey, OE_MAX_WORDS,
   normalizeTestBlocks, collapseTestBlocks, expandTestBlocks, testRanges, testMembership, testProblems,
   type TestHeaderSlide, type TestEndSlide, type TestAfterOrder, type TestScoreTiming,
 } from '@/lib/selfPacedTest'
@@ -608,7 +609,7 @@ function CsvPromptBox({ text }: { text: string }) {
 
 /* ── Content slide helpers ─────────────────────────────────────────────── */
 
-type CThemeKey = 'navy' | 'pink' | 'sky' | 'green' | 'golden' | 'white' | 'transparent'
+type CThemeKey = 'navy' | 'pink' | 'sky' | 'green' | 'golden' | 'white' | 'transparent' | 'midnight' | 'ocean' | 'forest' | 'flame' | 'sunset'
 const CONTENT_COLORS: Record<CThemeKey, {
   bg: string; text: string; textDim: string; accent: string; quoteMark: string;
   cardBg: string; cardBorder: string; isDark: boolean
@@ -620,8 +621,36 @@ const CONTENT_COLORS: Record<CThemeKey, {
   golden:      { bg: '#ffc709',   text: '#000079', textDim: 'rgba(0,0,121,0.62)',     accent: '#000079', quoteMark: 'rgba(0,0,121,0.14)',     cardBg: 'rgba(0,0,121,0.10)',     cardBorder: 'rgba(0,0,121,0.18)',     isDark: false },
   white:       { bg: '#f4f4f9',   text: '#000079', textDim: 'rgba(0,0,121,0.52)',     accent: '#ff0065', quoteMark: 'rgba(255,0,101,0.1)',    cardBg: 'rgba(0,0,121,0.06)',     cardBorder: 'rgba(0,0,121,0.14)',     isDark: false },
   transparent: { bg: 'transparent', text: '#000079', textDim: 'rgba(0,0,121,0.62)',   accent: '#ff0065', quoteMark: 'rgba(255,0,101,0.1)',    cardBg: 'rgba(0,0,121,0.06)',     cardBorder: 'rgba(0,0,121,0.14)',     isDark: false },
+  // Gradients (lib/gradients) — bg is the plain colour; slides are painted with themeFill()
+  midnight:    { bg: '#000079',   text: '#ffffff', textDim: 'rgba(255,255,255,0.60)', accent: '#ff0065', quoteMark: 'rgba(255,0,101,0.20)', cardBg: 'rgba(255,255,255,0.10)', cardBorder: 'rgba(255,255,255,0.18)', isDark: true  },
+  ocean:       { bg: '#000079',   text: '#ffffff', textDim: 'rgba(255,255,255,0.72)', accent: '#ffc709', quoteMark: 'rgba(255,255,255,0.20)', cardBg: 'rgba(255,255,255,0.12)', cardBorder: 'rgba(255,255,255,0.22)', isDark: true  },
+  forest:      { bg: '#000079',   text: '#ffffff', textDim: 'rgba(255,255,255,0.72)', accent: '#ffc709', quoteMark: 'rgba(255,255,255,0.20)', cardBg: 'rgba(255,255,255,0.12)', cardBorder: 'rgba(255,255,255,0.22)', isDark: true  },
+  flame:       { bg: '#000079',   text: '#ffffff', textDim: 'rgba(255,255,255,0.72)', accent: '#ffc709', quoteMark: 'rgba(255,255,255,0.20)', cardBg: 'rgba(255,255,255,0.12)', cardBorder: 'rgba(255,255,255,0.22)', isDark: true  },
+  sunset:      { bg: '#ffc709',   text: '#000079', textDim: 'rgba(0,0,121,0.68)',     accent: '#000079', quoteMark: 'rgba(0,0,121,0.16)',     cardBg: 'rgba(0,0,121,0.10)',     cardBorder: 'rgba(0,0,121,0.18)',     isDark: false },
 }
 function contentColors(themeId: string) { return CONTENT_COLORS[themeId as CThemeKey] ?? CONTENT_COLORS.navy }
+
+/** The gradient themes, as a row under a theme picker's plain colours.
+ *  Each comes with its own text colour, so nothing else needs choosing. */
+function GradientSwatches({ value, onPick }: { value?: string; onPick: (id: string) => void }) {
+  return (
+    <div className="mt-2.5">
+      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-midnight-sky-500">Gradient</p>
+      <div className="flex flex-wrap gap-3">
+        {GRADIENT_THEMES.map(g => (
+          <button
+            key={g.id}
+            onClick={() => onPick(g.id)}
+            className={cn('flex flex-col items-center gap-1 transition-all', value === g.id ? 'opacity-100' : 'opacity-60 hover:opacity-90')}
+          >
+            <span className={cn('size-6 rounded-full ring-offset-1', value === g.id ? 'ring-2 ring-midnight-sky-700' : '')} style={{ background: gradientCss(g.id) }} />
+            <span className="text-[9px] font-medium text-midnight-sky-700">{g.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 const CONTENT_TEMPLATES: { template: ContentTemplate; label: string; icon: ReactNode }[] = [
   { template: 'heading', label: 'Heading', icon: <Type className="size-3.5" /> },
@@ -3195,7 +3224,7 @@ function renderThumbContent(slide: Slide): ReactNode {
     return (
       <div
         className="flex h-full w-full items-center justify-center p-2"
-        style={{ backgroundColor: (() => { const bg = contentColors(s.theme).bg; return bg === 'transparent' ? '#f4f4f9' : bg })() }}
+        style={{ background: (() => { const bg = contentColors(s.theme).bg; return bg === 'transparent' ? '#f4f4f9' : themeFill(s.theme, bg) })() }}
       >
         <p className="text-center text-[9px] font-medium leading-snug line-clamp-2"
           style={{ color: contentColors(s.theme).text, opacity: s.title ? 1 : 0.4 }}>
@@ -3285,7 +3314,7 @@ function renderThumbContent(slide: Slide): ReactNode {
   return (
     <div
       className="flex h-full w-full items-center justify-center p-2"
-      style={{ backgroundColor: (() => { const bg = contentColors(qs.theme ?? 'navy').bg; return bg === 'transparent' ? '#f4f4f9' : bg })() }}
+      style={{ background: (() => { const bg = contentColors(qs.theme ?? 'navy').bg; return bg === 'transparent' ? '#f4f4f9' : themeFill(qs.theme, bg) })() }}
     >
       <p className="text-center text-[9px] font-medium leading-snug line-clamp-2"
         style={{ color: contentColors(qs.theme ?? 'navy').text, opacity: qs.question ? 1 : 0.35 }}>
@@ -4349,13 +4378,13 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
                   >
                     <span
                       className={cn('flex size-6 items-center justify-center rounded-full ring-offset-1', !ownTestTheme ? 'ring-2 ring-midnight-sky-700' : '')}
-                      style={{ backgroundColor: testTheme(testCtx?.testTheme).bg, border: testCtx?.testTheme === 'white' ? '1px solid rgba(0,0,0,0.12)' : undefined }}
+                      style={{ background: testTheme(testCtx?.testTheme).fill ?? testTheme(testCtx?.testTheme).bg, border: testCtx?.testTheme === 'white' ? '1px solid rgba(0,0,0,0.12)' : undefined }}
                     >
                       <ClipboardCheck className="size-3" style={{ color: testTheme(testCtx?.testTheme).fg }} />
                     </span>
                     <span className="text-[9px] font-medium text-midnight-sky-700">Same as {inSurvey ? 'survey' : 'test'}</span>
                   </button>
-                  {TEST_THEMES.map(t => (
+                  {SOLID_TEST_THEMES.map(t => (
                     <button
                       key={t.id}
                       onClick={() => onUpdate({ theme: t.id })}
@@ -4369,6 +4398,7 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
                     </button>
                   ))}
                 </div>
+                <GradientSwatches value={ownTestTheme} onPick={id => onUpdate({ theme: id })} />
               </div>
             )}
 
@@ -4399,6 +4429,7 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
                   </button>
                 ))}
               </div>
+              <GradientSwatches value={slide.theme ?? 'navy'} onPick={id => onUpdate({ theme: id })} />
             </div>
           </div>
         </div>
@@ -4411,7 +4442,7 @@ function QuestionEditor({ slide, onUpdate, hidePreview = false, onPushHistory }:
             </p>
             <div
               className="overflow-hidden rounded-2xl p-5 shadow-[0_8px_32px_-8px_rgba(0,0,121,0.25)] transition-colors duration-300"
-              style={{ backgroundColor: contentColors(shownTheme).bg }}
+              style={{ background: themeFill(shownTheme, contentColors(shownTheme).bg) }}
             >
               <SlidePreviewCard slide={inTest ? { ...slide, theme: shownTheme } : slide} />
             </div>
@@ -5089,9 +5120,8 @@ function SlidePreviewCard({ slide }: { slide: QuestionSlide }) {
       className="relative w-full overflow-hidden rounded-2xl shadow-[0_8px_32px_-8px_rgba(0,0,0,0.35)]"
       style={{
         aspectRatio: '16/9',
-        backgroundColor: c.bg,
-        // Show a subtle checkerboard when transparent so the user can see "no background"
-        ...(isTransparent ? { backgroundImage: 'repeating-linear-gradient(45deg, #f0f0f0 0px, #f0f0f0 6px, white 6px, white 12px)' } : {}),
+        // A subtle checkerboard when transparent, so the user can see "no background"
+        background: isTransparent ? 'repeating-linear-gradient(45deg, #f0f0f0 0px, #f0f0f0 6px, white 6px, white 12px)' : themeFill(slide.theme, c.bg),
       }}
     >
       {/* Background image layout */}
@@ -5106,7 +5136,7 @@ function SlidePreviewCard({ slide }: { slide: QuestionSlide }) {
             className="absolute inset-0 h-full w-full object-cover" />
           {/* Colour overlay — skip for transparent theme so image shows unshaded */}
           {!isTransparent && (
-            <div className="absolute inset-0" style={{ backgroundColor: `${c.bg}cc` }} />
+            <div className="absolute inset-0" style={{ background: themeFill(slide.theme, c.bg, 'cc') }} />
           )}
         </>
       )}
@@ -5164,8 +5194,7 @@ function ContentSlidePreview({ slide }: { slide: ContentSlide }) {
     <div
       className="relative aspect-video w-full overflow-hidden rounded-xl"
       style={{
-        backgroundColor: c.bg,
-        ...(slide.theme === 'transparent' ? { backgroundImage: 'repeating-linear-gradient(45deg, #f0f0f0 0px, #f0f0f0 6px, white 6px, white 12px)' } : {}),
+        background: slide.theme === 'transparent' ? 'repeating-linear-gradient(45deg, #f0f0f0 0px, #f0f0f0 6px, white 6px, white 12px)' : themeFill(slide.theme, c.bg),
       }}
     >
       {/* Ambient glow for navy */}
@@ -5181,7 +5210,7 @@ function ContentSlidePreview({ slide }: { slide: ContentSlide }) {
         <>
           <img src={slide.imgUrl} alt="" className="absolute inset-0 z-0 h-full w-full object-cover" />
           {slide.theme !== 'transparent' && (
-            <div className="absolute inset-0 z-0" style={{ backgroundColor: `${c.bg}cc` }} />
+            <div className="absolute inset-0 z-0" style={{ background: themeFill(slide.theme, c.bg, 'cc') }} />
           )}
         </>
       )}
@@ -5439,6 +5468,7 @@ function ContentEditor({ slide, onUpdate, onPushHistory }: {
                   </button>
                 ))}
               </div>
+              <GradientSwatches value={slide.theme} onPick={id => onUpdate({ theme: id })} />
             </div>
           </div>
         </div>
@@ -7206,7 +7236,7 @@ function TestBlockEditor({
             Theme <span className="font-light text-midnight-sky-500">how the test looks on the big screen</span>
           </p>
           <div className="flex flex-wrap gap-3">
-            {TEST_THEMES.map(t => {
+            {SOLID_TEST_THEMES.map(t => {
               const on = (header.theme ?? 'navy') === t.id
               return (
                 <button key={t.id} onClick={() => onUpdate({ theme: t.id })} className={cn('flex flex-col items-center gap-1 transition-all', on ? 'opacity-100' : 'opacity-60 hover:opacity-90')}>
@@ -7219,6 +7249,7 @@ function TestBlockEditor({
               )
             })}
           </div>
+          <GradientSwatches value={header.theme ?? 'navy'} onPick={id => onUpdate({ theme: id })} />
 
           <p className="mb-2 mt-5 text-sm font-medium text-midnight-sky-700">
             Extra rule <span className="font-light text-midnight-sky-500">optional — shown with the rules before the test</span>
@@ -7238,7 +7269,7 @@ function TestBlockEditor({
           {(() => {
             const th = testTheme(header.theme)
             return (
-              <div className="rounded-xl px-6 py-5 text-center transition-colors duration-300" style={{ backgroundColor: th.bg, color: th.fg, border: th.id === 'white' ? '1px solid rgba(0,0,121,0.1)' : undefined }}>
+              <div className="rounded-xl px-6 py-5 text-center transition-colors duration-300" style={{ background: th.fill ?? th.bg, color: th.fg, border: th.id === 'white' ? '1px solid rgba(0,0,121,0.1)' : undefined }}>
                 <p className="flex items-center justify-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.2em]" style={{ color: th.accent }}>
                   <ClipboardCheck className="size-3" /> Self-paced test
                 </p>
@@ -7537,7 +7568,7 @@ function SurveyBlockEditor({
             Theme <span className="font-light text-midnight-sky-500">how the survey looks on the big screen</span>
           </p>
           <div className="flex flex-wrap gap-3">
-            {TEST_THEMES.map(t => {
+            {SOLID_TEST_THEMES.map(t => {
               const on = (header.theme ?? 'navy') === t.id
               return (
                 <button key={t.id} onClick={() => onUpdate({ theme: t.id })} className={cn('flex flex-col items-center gap-1 transition-all', on ? 'opacity-100' : 'opacity-60 hover:opacity-90')}>
@@ -7550,6 +7581,7 @@ function SurveyBlockEditor({
               )
             })}
           </div>
+          <GradientSwatches value={header.theme ?? 'navy'} onPick={id => onUpdate({ theme: id })} />
         </div>
 
         {/* Big-screen preview, in the chosen theme */}
@@ -7558,7 +7590,7 @@ function SurveyBlockEditor({
           {(() => {
             const th = testTheme(header.theme)
             return (
-              <div className="flex items-center gap-6 rounded-xl px-6 py-5 transition-colors duration-300" style={{ backgroundColor: th.bg, color: th.fg, border: th.id === 'white' ? '1px solid rgba(0,0,121,0.1)' : undefined }}>
+              <div className="flex items-center gap-6 rounded-xl px-6 py-5 transition-colors duration-300" style={{ background: th.fill ?? th.bg, color: th.fg, border: th.id === 'white' ? '1px solid rgba(0,0,121,0.1)' : undefined }}>
                 <div className="min-w-0 flex-1">
                   <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.2em]" style={{ color: th.accent }}>
                     <ClipboardList className="size-3" /> Survey

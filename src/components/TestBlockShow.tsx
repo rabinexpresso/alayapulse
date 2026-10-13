@@ -26,7 +26,7 @@ import {
 function themeVars(id?: string): CSSProperties {
   const t = testTheme(id)
   return {
-    '--bg': t.bg, '--fg': t.fg, '--accent': t.accent,
+    '--bg': t.bg, '--fill': t.fill ?? t.bg, '--fg': t.fg, '--accent': t.accent,
     '--good': t.good, '--good-ink': t.goodInk, '--good-text': t.goodText,
     '--danger': t.danger, '--danger-ink': t.dangerInk,
     '--start': t.start, '--start-ink': t.startInk,
@@ -339,7 +339,7 @@ export function TestBlockView({
 
   return (
     <div
-      className="relative h-full w-full bg-(--bg) text-(--fg) transition-colors duration-500"
+      className="relative h-full w-full text-(--fg) transition-colors duration-500 [background:var(--fill)]"
       style={themeVars(step?.stage === 'leaderboard' ? 'navy' : step?.stage === 'review' ? (questions[step.index]?.theme ?? slide.theme) : slide.theme)}
     >
       {body}
@@ -629,7 +629,7 @@ function TestAnswersReview({ index, total, question, sheets, display }: {
         // Bottom-right corner, just above the presenter's bar
         <button
           onClick={() => setShowGuide(s => !s)}
-          className="absolute bottom-[4.25rem] right-14 flex items-center gap-2 rounded-xl border border-(--accent)/40 bg-(--bg) px-3.5 py-1.5 text-sm font-semibold text-(--accent) transition hover:bg-(--accent)/10"
+          className="absolute bottom-[4.25rem] right-14 flex items-center gap-2 rounded-xl border border-(--accent)/40 bg-(--fg)/5 px-3.5 py-1.5 text-sm font-semibold text-(--accent) transition hover:bg-(--accent)/10"
         >
           {showGuide ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
           {showGuide ? 'Hide answer guide' : 'Show answer guide'}

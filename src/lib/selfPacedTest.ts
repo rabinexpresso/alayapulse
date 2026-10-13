@@ -1,4 +1,5 @@
 import { optionLabel } from './utils'
+import { gradientCss } from './gradients'
 
 /* ─────────────────────────────────────────────────────────────────────────
    Self-paced test block — everyone answers a set of questions on their own
@@ -228,6 +229,8 @@ export interface TestTheme {
   danger: string; dangerInk: string
   /** The Start test button */
   start: string; startInk: string
+  /** Gradient themes: the screen's fill (bg stays the plain colour for small pieces) */
+  fill?: string
 }
 export const TEST_THEMES: TestTheme[] = [
   { id: 'navy',   label: 'Navy',   bg: '#000079', fg: '#ffffff', accent: '#ffc709', good: '#42db66', goodInk: '#000079', goodText: '#42db66', danger: '#ff0065', dangerInk: '#ffffff', start: '#ffc709', startInk: '#000079' },
@@ -236,7 +239,16 @@ export const TEST_THEMES: TestTheme[] = [
   { id: 'green',  label: 'Green',  bg: '#42db66', fg: '#000079', accent: '#000079', good: '#000079', goodInk: '#ffffff', goodText: '#000079', danger: '#ff0065', dangerInk: '#ffffff', start: '#000079', startInk: '#ffffff' },
   { id: 'golden', label: 'Golden', bg: '#ffc709', fg: '#000079', accent: '#000079', good: '#000079', goodInk: '#ffffff', goodText: '#000079', danger: '#ff0065', dangerInk: '#ffffff', start: '#000079', startInk: '#ffffff' },
   { id: 'white',  label: 'White',  bg: '#f4f4f9', fg: '#000079', accent: '#ff0065', good: '#42db66', goodInk: '#000079', goodText: '#16a34a', danger: '#ff0065', dangerInk: '#ffffff', start: '#ff0065', startInk: '#ffffff' },
+  // Gradients — text colour picked per gradient so it reads across the whole screen
+  { id: 'midnight', label: 'Midnight', fill: gradientCss('midnight'), bg: '#000079', fg: '#ffffff', accent: '#ffc709', good: '#42db66', goodInk: '#000079', goodText: '#42db66', danger: '#ff0065', dangerInk: '#ffffff', start: '#ffc709', startInk: '#000079' },
+  { id: 'ocean',    label: 'Ocean',    fill: gradientCss('ocean'),    bg: '#000079', fg: '#ffffff', accent: '#ffc709', good: '#ffc709', goodInk: '#000079', goodText: '#ffffff', danger: '#ff0065', dangerInk: '#ffffff', start: '#ffc709', startInk: '#000079' },
+  { id: 'forest',   label: 'Forest',   fill: gradientCss('forest'),   bg: '#000079', fg: '#ffffff', accent: '#ffc709', good: '#ffc709', goodInk: '#000079', goodText: '#ffffff', danger: '#ff0065', dangerInk: '#ffffff', start: '#ffc709', startInk: '#000079' },
+  { id: 'flame',    label: 'Flame',    fill: gradientCss('flame'),    bg: '#000079', fg: '#ffffff', accent: '#ffc709', good: '#42db66', goodInk: '#000079', goodText: '#42db66', danger: '#ffffff', dangerInk: '#ff0065', start: '#ffc709', startInk: '#000079' },
+  { id: 'sunset',   label: 'Sunset',   fill: gradientCss('sunset'),   bg: '#ffc709', fg: '#000079', accent: '#000079', good: '#000079', goodInk: '#ffffff', goodText: '#000079', danger: '#ffffff', dangerInk: '#ff0065', start: '#000079', startInk: '#ffffff' },
 ]
+/** The plain colour themes; the gradient ones go in their own row in pickers. */
+export const SOLID_TEST_THEMES = TEST_THEMES.filter(t => !t.fill)
+export const GRADIENT_TEST_THEMES = TEST_THEMES.filter(t => t.fill)
 export const testTheme = (id?: string): TestTheme => TEST_THEMES.find(t => t.id === id) ?? TEST_THEMES[0]
 
 export interface TestRange {

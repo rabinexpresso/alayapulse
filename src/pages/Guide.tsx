@@ -118,6 +118,7 @@ const GUIDE: Stage[] = [
           { text: <><strong>Content types:</strong> <Btn>Heading</Btn>, <Btn>Bullets</Btn>, <Btn>Quote</Btn> and <Btn>Custom Slide</Btn> for anything you design yourself.</> },
           { text: <><strong>Leaderboard:</strong> added for you at the end of the deck when Quiz mode is on — it reveals the top scorers with points. (See the Quiz mode topic below.)</> },
           { text: <>Each question slide has its own settings on the right — options, correct answer(s), timer, and how many answers each person may submit.</> },
+          { text: <><strong>Colours:</strong> pick a plain colour or one of five <strong>gradients</strong> (Midnight, Ocean, Forest, Flame, Sunset) for question slides, Heading, Bullets and Quote slides, and the self-paced test and survey screens. The text colour is set for you so it reads well on a projector. Custom slides have their own background picker.</> },
         ],
       },
       {
