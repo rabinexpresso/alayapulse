@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  ClipboardCheck, Pause, Play, RotateCcw, Square, Check, Clock, Users, Timer,
+  ClipboardCheck, Pause, Play, RotateCcw, Square, Check, Clock, Users, Timer, Eye, EyeOff,
 } from 'lucide-react'
 import { cn, optionLabel } from '@/lib/utils'
 import {
@@ -220,7 +220,7 @@ export function TestBlockView({
     const q = questions[step.index]
     body = qTypeOf(q) === 'mcq'
       ? <TestReviewView index={step.index} total={questions.length} question={q} sheets={sheets} />
-      : <TestAnswersReview index={step.index} total={questions.length} question={q} sheets={sheets} display={renderAnswers(q, sheets)} />
+      : <TestAnswersReview key={q.id} index={step.index} total={questions.length} question={q} sheets={sheets} display={renderAnswers(q, sheets)} />
   } else if (state.status === 'ready') {
     body = <RulesView slide={slide} participants={participants} onStart={() => startClock()} />
   } else if (state.status === 'ended') {
@@ -556,7 +556,9 @@ function TestReviewView({ index, total, question, sheets }: {
   )
 }
 
-/** Answer review for a question the host marks: everyone's answers, then the marking guide. */
+/** Answer review for a question the host marks: everyone's answers, using the
+ *  whole screen. The marking guide stays hidden until the host shows it (button
+ *  or G), then sits in a slim panel on the right so the answers keep their height. */
 function TestAnswersReview({ index, total, question, sheets, display }: {
   index: number
   total: number
@@ -565,6 +567,19 @@ function TestAnswersReview({ index, total, question, sheets, display }: {
   display: ReactNode
 }) {
   const answered = sheets.filter(d => hasAnswer({ ...question, pick: 1 }, d.answers?.[question.id])).length
+  const guide = question.guide?.trim()
+  // Starts hidden on every question (each has its own key), so every answer gets its own reveal
+  const [showGuide, setShowGuide] = useState(false)
+  useEffect(() => {
+    if (!guide) return
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      if ((e.key === 'g' || e.key === 'G') && !e.ctrlKey && !e.metaKey && !e.altKey) setShowGuide(s => !s)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [guide])
   return (
     <motion.div
       key={question.id}
@@ -582,11 +597,31 @@ function TestAnswersReview({ index, total, question, sheets, display }: {
           {isMarkable(question) && <p className="mt-1 text-xs text-(--fg)/55">{question.marks} mark{question.marks !== 1 ? 's' : ''}</p>}
         </div>
       </div>
-      <div className="relative mt-6 flex min-h-0 flex-1 flex-col">{display}</div>
-      {question.guide && (
-        <div className="mt-5 rounded-2xl border border-(--accent)/25 bg-(--accent)/10 px-6 py-4">
-          <p className="text-xs font-bold uppercase tracking-widest text-(--accent)">Marking guide</p>
-          <p className="mt-1.5 text-lg leading-relaxed text-(--fg)/90">{question.guide}</p>
+      <div className="mt-6 flex min-h-0 flex-1 gap-6">
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">{display}</div>
+        <AnimatePresence initial={false}>
+          {showGuide && guide && (
+            <motion.aside
+              initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 24 }} transition={{ duration: 0.25 }}
+              className="max-h-full w-[min(30%,24rem)] shrink-0 self-start overflow-y-auto rounded-xl border border-(--accent)/25 bg-(--accent)/10 px-4 py-3 [scrollbar-width:thin]"
+            >
+              <p className="text-[11px] font-bold uppercase tracking-widest text-(--accent)">Answer guide</p>
+              <p className="mt-1 text-base leading-snug text-(--fg)/90">{guide}</p>
+            </motion.aside>
+          )}
+        </AnimatePresence>
+      </div>
+      {guide && (
+        // Kept clear of the invisible "next slide" strip along the right edge
+        <div className="mr-8 mt-3 flex justify-end">
+          <button
+            onClick={() => setShowGuide(s => !s)}
+            className="flex items-center gap-2 rounded-xl border border-(--accent)/40 px-3.5 py-1.5 text-sm font-semibold text-(--accent) transition hover:bg-(--accent)/10"
+          >
+            {showGuide ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            {showGuide ? 'Hide answer guide' : 'Show answer guide'}
+            <kbd className="rounded border border-(--accent)/30 px-1.5 text-[11px] font-medium">G</kbd>
+          </button>
         </div>
       )}
     </motion.div>

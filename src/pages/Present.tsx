@@ -3708,7 +3708,14 @@ function TestAnswersDisplay({ question, sheets, theme }: { question: TestQuestio
     )
   }
   const result = aggregateRanking(given.map(({ a }) => JSON.stringify(a)), question.options.length)
-  return <div className="min-h-0 flex-1 overflow-hidden"><RankingResults items={question.options} result={result} theme={theme} /></div>
+  // Shrinks to fit, so every item shows even on a short screen
+  return (
+    <div className="min-h-0 flex-1 overflow-hidden">
+      <FitToHeight resetKey={`${result.voters}:${question.options.length}`}>
+        <RankingResults items={question.options} result={result} theme={theme} />
+      </FitToHeight>
+    </div>
+  )
 }
 
 function RatingResults({ params, avgs, distributions, ratingMax = 5, leftLabels = [], rightLabels = [], darkBg = false, theme }: {
