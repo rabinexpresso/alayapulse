@@ -7,13 +7,14 @@ import {
   Trash2, History, CheckCircle2, Table2, Check, ClipboardCheck, ClipboardList,
 } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
-import { cn, optionLabel, fitColumns } from '@/lib/utils'
+import { cn, optionLabel } from '@/lib/utils'
 import { aggregateRanking, parseRanking, rankingOrder, rankingPlaces, topChoiceText, RANKING_HOW_TO_READ } from '@/lib/ranking'
-import { KindTag, KIND_INFO, TestResultSection, liveKind, testSheets, addTestPdf, type QuestionKind } from '@/components/TestResults'
+import { KindTag, KIND_INFO, TestResultSection, liveKind, testBookPart, addTestPdf, type QuestionKind } from '@/components/TestResults'
+import { writeResultsBook, qHeader, type BookPart } from '@/lib/excelBook'
 import { SurveyResultSection } from '@/components/SurveyResults'
 import { hasAnswer, surveyParticipants } from '@/lib/selfPacedTest'
 import { fetchSurveySheets } from '@/lib/session'
-import { surveySheets, addSurveyPdf } from '@/lib/surveyReport'
+import { surveyBookPart, addSurveyPdf } from '@/lib/surveyReport'
 import {
   listResults, saveResults, deleteResults, isResponseCorrect, getStorageBackend, onAuthStateChanged, auth,
   browserListDecks, cloudListDecks,
@@ -289,7 +290,7 @@ export default function Results() {
       const scorecardRows = respondentKeys.map(key => {
         const row: Record<string, string | number> = { Name: personLabels.get(key)! }
         results.questions.forEach((q, i) => {
-          const label = `Q${i + 1}`
+          const label = qHeader(i, q.question || '(Untitled question)')
           const resps = q.responses.filter(r => respondentKey(r) === key)
           if (resps.length === 0) { row[label] = ''; return }
           // A respondent can submit multiple values to word cloud / open-ended
@@ -315,15 +316,16 @@ export default function Results() {
               .map(idx => `${optionLabel(idx, q.options.length)} — ${(q.options[idx] || '').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()}`)
               .join('; ')
           : ''
+        const kind = liveKind(q, !!deck.isQuiz)
         return {
-          'Q#':             i + 1,
-          'Question':       q.question || '(Untitled question)',
-          'Type':           KIND_INFO[liveKind(q, !!deck.isQuiz)].label,
-          'Format':         TYPE_LABELS[q.type] ?? q.type,
-          'Correct Answer': correctAnswerText,
-          'Responses':      q.responseCount,
-          '% Correct':      hasCorrectAnswer ? `${Math.round((correctCount / Math.max(1, q.responseCount)) * 100)}%` : '',
-          'Overall Ranking': q.type === 'ranking' ? overallRankingText(q) : '',
+          'Q#':                 `Q${i + 1}`,
+          'Question':           q.question || '(Untitled question)',
+          'Question type':      TYPE_LABELS[q.type] ?? q.type,
+          'Scored?':            kind === 'live' ? 'Yes — live quiz' : 'No — poll',
+          'People who answered': q.responseCount,
+          'Correct answer':     correctAnswerText,
+          'Got it right':       hasCorrectAnswer ? `${correctCount} of ${q.responseCount} (${Math.round((correctCount / Math.max(1, q.responseCount)) * 100)}%)` : '',
+          'Ranking (everyone combined)': q.type === 'ranking' ? overallRankingText(q) : '',
         }
       })
 
@@ -359,72 +361,43 @@ export default function Results() {
         // Highest total first; ties broken alphabetically for a stable order.
         .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
 
-      // Every tab, in order, with one line on what it's for — the first tab
-      // of the file ("How to read this") lists them all.
-      type Tab = { name: string; about: string; rows: Record<string, string | number>[] }
-      const groups: Record<string, Tab[]> = {}
-      const surveyList = (results.tests ?? []).filter(t => t.kind === 'survey')
-      surveyList.forEach((t, si) => {
-        const suffix = surveyList.length > 1 ? ` ${si + 1}` : ''
-        const sheets = surveySheets(t)
-        const tabs = (groups[`s:${t.blockId}`] = [] as Tab[])
-        tabs.push({ name: `Survey responses${suffix}`, rows: sheets.responses.length ? sheets.responses : [{ Submitted: 'No responses yet' }],
-          about: `Survey "${t.title || 'Survey'}": one row per person who answered${t.askNames ? '' : ' (anonymous)'}, one column per question — the same layout as a Google Forms sheet.` })
-        tabs.push({ name: `Survey summary${suffix}`, rows: sheets.summary,
-          about: 'Survey: each question, with how many people picked each option (and the %), or the average rating, or the combined ranking.' })
-      })
-      const testList = (results.tests ?? []).filter(t => t.kind !== 'survey')
-      testList.forEach((t, ti) => {
-        const suffix = testList.length > 1 ? ` ${ti + 1}` : ''
-        const sheets = testSheets(t)
-        const tabs = (groups[`t:${t.blockId}`] = [] as Tab[])
-        tabs.push({ name: `Test results${suffix}`, rows: sheets.results,
-          about: 'Self-paced test: one row per person — place, multiple-choice score and time. Each Q column shows their answer: ✓ right or ✗ wrong for multiple choice; written answers show a word count (the full text is in Test answers).' })
-        if (sheets.toMark.length) tabs.push({ name: `To mark${suffix}`, rows: sheets.toMark,
-          about: 'Every written answer that needs marking, with the marking guide and the marks available. Type each mark in the Mark column — or use the AI marking help on the Results page.' })
-        tabs.push({ name: `Test answers${suffix}`, rows: sheets.answers,
-          about: 'Every answer from every person, in full, with whether it was right (or needs marking) and the correct answer or marking guide next to it.' })
-        tabs.push({ name: `Test questions${suffix}`, rows: sheets.questions,
-          about: 'One row per test question: the correct answer, how many got it right, and a plain-English summary of what everyone answered.' })
-      })
-      const liveTabs = (groups.live = [] as Tab[])
-      if (scorecardRows.length > 0) liveTabs.push({ name: 'Scorecard', rows: scorecardRows,
-        about: 'Live questions (shown one at a time on the big screen): one row per person, one column per question.' })
-      if (summaryRows.length > 0) liveTabs.push({ name: 'Question summary', rows: summaryRows,
-        about: 'Live questions: one row per question, with the correct answer and how many got it right.' })
-
-      // Only add the Leaderboard if this deck is a quiz with at least one
-      // scoreable question — otherwise the tab is omitted entirely (no clutter).
-      if (deck.isQuiz && leaderboard.length > 0 && totalScoreable > 0) {
-        const leaderboardRows = leaderboard.map(row => ({
-          // Standard competition ranking: tied totals share a rank, the next
-          // distinct total skips ahead (e.g. 1, 2, 2, 4).
-          'Rank':            1 + leaderboard.filter(o => o.total > row.total).length,
-          'Name':            row.name,
-          'Correct Answers': `${row.correct} / ${totalScoreable}`,
-          'Correct Points':  row.correctPts,
-          'Speed Points':    row.speedPts,
-          'Total Points':    row.total,
-        }))
-        liveTabs.push({ name: 'Live quiz leaderboard', rows: leaderboardRows,
-          about: 'Live quiz points per person: points for right answers plus extra points for answering fast.' })
+      // One part per thing in the show (live questions, each test, each survey),
+      // in the order of the show — the same order as the tabs on the page
+      const books: Record<string, BookPart> = {}
+      if (results.questions.length) {
+        const tabs: BookPart['tabs'] = [
+          { name: 'Live – Answers', rows: scorecardRows,
+            intro: 'Live questions (shown one at a time on the big screen): one row per person, one column per question. ✓ = right, ✗ = wrong (quiz questions only).',
+            about: 'Everyone’s answer to every live question: one row per person, one column per question.' },
+          { name: 'Live – Questions', rows: summaryRows,
+            intro: 'Live questions: one row per question — how many answered and, for quiz questions, the correct answer and how many got it right.',
+            about: 'One row per live question: how many answered, the correct answer and how many got it right.' },
+        ]
+        // Leaderboard only for a quiz with at least one scored question
+        if (deck.isQuiz && leaderboard.length > 0 && totalScoreable > 0) {
+          tabs.push({ name: 'Live quiz – Leaderboard',
+            intro: 'Live quiz points per person: 100 for each right answer, plus up to 100 more for answering fast. Highest total first.',
+            about: 'Live quiz points per person, highest first.',
+            rows: leaderboard.map(row => ({
+              // Standard competition ranking: tied totals share a place (1, 2, 2, 4)
+              'Place':           1 + leaderboard.filter(o => o.total > row.total).length,
+              'Name':            row.name,
+              'Right answers':   `${row.correct} of ${totalScoreable}`,
+              'Points for right answers': row.correctPts,
+              'Points for speed': row.speedPts,
+              'Total points':    row.total,
+            })) })
+        }
+        books.live = { heading: 'LIVE QUESTIONS — shown one at a time on the big screen', tabs }
       }
-      // Same order as the tabs on the page (the order of the show)
-      const tabs = parts.flatMap(pt => groups[pt.key] ?? [])
+      testsOnly.forEach((t, i) => { books[`t:${t.blockId}`] = testBookPart(t, testsOnly.length > 1 ? i + 1 : undefined) })
+      surveysOnly.forEach((t, i) => { books[`s:${t.blockId}`] = surveyBookPart(t, surveysOnly.length > 1 ? i + 1 : undefined) })
 
-      const guide: Record<string, string>[] = [
-        ...tabs.map(t => ({ Tab: t.name, 'What it shows': t.about })),
-        { Tab: '', 'What it shows': '' },
-        { Tab: '✓ / ✗', 'What it shows': 'Right / wrong answer (multiple choice)' },
-        { Tab: '—', 'What it shows': 'Not answered' },
-      ]
-      const wb = XLSX.utils.book_new()
-      XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(guide), guide), 'How to read this')
-      tabs.forEach(t => XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(t.rows), t.rows), t.name))
-
-      const safeTitle = deck.title.replace(/[^a-z0-9\-_ ]/gi, '').trim() || 'results'
-      const date = new Date(results.conductedAt).toISOString().slice(0, 10)
-      XLSX.writeFile(wb, `${safeTitle} - ${date} scorecard.xlsx`)
+      const date = new Date(results.conductedAt)
+      writeResultsBook(XLSX, `${deck.title.trim() || 'Results'} - ${date.toISOString().slice(0, 10)} results.xlsx`, {
+        title: `Alaya Pulse results — ${deck.title.trim() || 'Untitled session'}`,
+        sub: `Session ${results.sessionCode} · ${formatTimestamp(results.conductedAt)} · ${results.audienceCount} ${results.audienceCount === 1 ? 'person' : 'people'} at the peak`,
+      }, parts.map(pt => books[pt.key]).filter(Boolean))
     } catch (e) {
       console.error('Excel generation failed:', e)
       alert('Could not make the Excel file. Refresh the page and try again.')

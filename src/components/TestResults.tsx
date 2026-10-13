@@ -9,6 +9,7 @@ import {
   formatDuration, sameAnswer, qTypeOf, isMarkable, hasAnswer, answerText, autoMarked, TEST_QTYPE_LABEL, type TestAnswer,
 } from '@/lib/selfPacedTest'
 import { aggregateRanking, rankingOrder, rankingPlaces, topChoiceText } from '@/lib/ranking'
+import { qHeader, type BookPart } from '@/lib/excelBook'
 
 /* ─────────────────────────────────────────────────────────────────────────
    Results for self-paced tests, plus the three question kinds every
@@ -123,7 +124,7 @@ function answersShow(q: TestResultQuestion, ps: TestResultParticipant[]): string
     const top = [...wrong.entries()].sort((x, y) => y[1] - x[1])[0]
     return top ? `Most common wrong answer: ${top[0]} (${people(top[1])})` : 'Everyone who answered got it right'
   }
-  if (t === 'openended') return isMarkable(q) ? 'Written answers: read and mark them in the To mark tab' : 'Written answers: see the Test answers tab'
+  if (t === 'openended') return isMarkable(q) ? 'Written answers: read and mark them in the “Answers to mark” tab' : 'Written answers: read them in the “All answers” tab'
   if (t === 'wordcloud') return `Answers given, most common first: ${topWords(q, ps).slice(0, 10).map(([w, n]) => `${w} (${people(n)})`).join(', ')}`
   if (t === 'rating') {
     const max = q.ratingMax ?? 5
@@ -459,16 +460,16 @@ function toMarkRows(test: TestResult): Record<string, string | number>[] {
       if (!isMarkable(q) || !given(q, p.answers[q.id])) return
       rows.push({
         Name: p.name,
-        ...(auto > 0 ? { 'Multiple-choice score': p.correct } : {}),
         'Q#': `Q${i + 1}`,
         Question: q.question.replace(/\s+/g, ' '),
         Type: TEST_QTYPE_LABEL[qTypeOf(q)],
         'Their answer': answerText(q, p.answers[q.id]),
         Words: qTypeOf(q) === 'openended' ? String(p.answers[q.id]).trim().split(/\s+/).length : '',
-        'Marking guide': q.guide ?? '',
+        'What a good answer includes (marking guide)': q.guide ?? '',
         'Marks available': q.marks ?? 0,
-        Mark: '',
-        Comment: '',
+        'Your mark': '',
+        'Your comment': '',
+        ...(auto > 0 ? { [`Multiple-choice score (out of ${auto}, already marked)`]: p.correct } : {}),
       })
     })
   }
@@ -534,16 +535,16 @@ export function testSheets(test: TestResult): { results: Row[]; answers: Row[]; 
   const qs = test.questions
   const auto = autoMarked(qs).length
   const mixed = auto > 0 && auto < qs.length
-  const qCol = (i: number) => `Q${i + 1}`
+  const qCol = (i: number) => qHeader(i, qs[i].question)
   const scoreCol = mixed ? 'Multiple-choice score' : 'Score'
-  const correctRow: Row = { ...(auto ? { Place: '' } : {}), Name: '✓ Correct answer', ...(auto ? { [scoreCol]: '' } : {}), 'Time taken': '', 'Time (seconds)': '', Status: '' }
+  const correctRow: Row = { ...(auto ? { Place: '' } : {}), Name: '✓ Correct answer', ...(auto ? { [scoreCol]: '' } : {}), 'Time taken': '', 'Time in seconds': '', Status: '' }
   qs.forEach((q, i) => {
     correctRow[qCol(i)] = isMcq(q) ? letters(q.correctAnswers, q.options.length) : (isMarkable(q) ? `To mark · ${marksLabel(q)}` : 'Not marked')
   })
   const results: Row[] = [correctRow, ...test.participants.map(p => {
     const row: Row = {
       ...(auto ? { Place: p.place } : {}), Name: p.name, ...(auto ? { [scoreCol]: `${p.correct}/${p.total}` } : {}),
-      'Time taken': formatDuration(p.timeMs), 'Time (seconds)': Math.round(p.timeMs / 1000), Status: statusLabel(p),
+      'Time taken': formatDuration(p.timeMs), 'Time in seconds': Math.round(p.timeMs / 1000), Status: statusLabel(p),
     }
     qs.forEach((q, i) => {
       const got = p.answers[q.id]
@@ -587,6 +588,30 @@ export function testSheets(test: TestResult): { results: Row[]; answers: Row[]; 
     }
   })
   return { results, answers, questions, toMark: toMarkRows(test) }
+}
+
+/** The test's part of a results Excel file. `n` tells tests apart when a deck has several. */
+export function testBookPart(test: TestResult, n?: number): BookPart {
+  const sh = testSheets(test)
+  const label = n ? `Test ${n}` : 'Test'
+  const auto = autoMarked(test.questions).length
+  const tabs: BookPart['tabs'] = [
+    { name: `${label} – Scores`, rows: sh.results,
+      intro: 'Self-paced test: one row per person — place, score and time. The first row is the answer key. In the question columns ✓ = right, ✗ = wrong, — = not answered; written answers show a word count (read them in the “All answers” tab).',
+      about: auto ? 'One row per person: place, multiple-choice score and time taken.' : 'One row per person: time taken and status.' },
+  ]
+  if (sh.toMark.length) tabs.push({ name: `${label} – Answers to mark`, rows: sh.toMark,
+    intro: 'Written answers for YOU to mark (the app can’t mark these). For each row, read “Their answer”, compare it with “What a good answer includes”, then type a mark in “Your mark” — up to “Marks available”. Tip: the Results page can help you mark them with AI.',
+    about: 'Written answers waiting for your mark: read each one and type a mark in the “Your mark” column.' })
+  tabs.push(
+    { name: `${label} – All answers`, rows: sh.answers,
+      intro: 'Self-paced test: every answer from every person, in full, with whether it was right (or needs marking) and the correct answer next to it.',
+      about: 'Every answer from every person, in full, with right / wrong and the correct answer.' },
+    { name: `${label} – Questions`, rows: sh.questions,
+      intro: 'Self-paced test: one row per question — the correct answer, how many got it right, and a short summary of what people answered.',
+      about: 'One row per question: correct answer, how many got it right, what the answers show.' },
+  )
+  return { heading: `SELF-PACED TEST${n ? ` ${n}` : ''} — everyone answered on their own phone, at their own pace · ${test.participants.length} took it`, tabs }
 }
 
 /* ── PDF ───────────────────────────────────────────────────────────────── */

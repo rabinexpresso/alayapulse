@@ -105,29 +105,60 @@ export const fmtDateTime = (ms: number) => new Date(ms).toLocaleString(undefined
 
 /* ── Excel ─────────────────────────────────────────────────────────────── */
 
-/** Survey tabs: one row per person (like a Google Forms sheet), and a summary per question. */
+/** Survey tabs: one row per person (like a Google Forms sheet), and a
+ *  summary laid out like a report — each question, then its answers. */
 export function surveySheets(survey: TestResult): { responses: Row[]; summary: Row[] } {
   const qs = survey.questions
   const head = (q: Q, i: number) => `Q${i + 1}. ${q.question.replace(/\s+/g, ' ').trim()}`.slice(0, 250)
-  const responses: Row[] = survey.participants.map(p => {
-    const row: Row = { Submitted: p.submittedAt ? fmtDateTime(p.submittedAt) : '' }
+  const responses: Row[] = survey.participants.map((p, k) => {
+    const row: Row = { '#': k + 1, Sent: p.submittedAt ? fmtDateTime(p.submittedAt) : '' }
     if (survey.askNames) row.Name = p.name
     qs.forEach((q, i) => { row[head(q, i)] = surveyAnswerText(q, p.answers[q.id]) || '—' })
     return row
   })
+  const ANS = 'Question, then its answers', PPL = 'People', VAL = '% or average'
   const summary: Row[] = []
+  const line = (a: string, people: string | number = '', val: string | number = '', who?: string) =>
+    summary.push({ [ANS]: a, [PPL]: people, [VAL]: val, ...(survey.askNames ? { Name: who ?? '' } : {}) })
   qs.forEach((q, i) => {
     const s = summarize(q, survey.participants)
-    const base = { 'Q#': `Q${i + 1}`, Question: q.question.replace(/\s+/g, ' ').trim(), Type: surveyTypeLabel(q), Answered: s.answered }
-    const push = (answer: string, people: string | number, extra: string | number) => summary.push({ ...base, 'Answer / item': answer, People: people, '% / average': extra })
-    if (s.kind === 'choice') s.rows.forEach(r => push(r.label, r.count, `${r.pct}%`))
-    else if (s.kind === 'rating') s.rows.forEach(r => push(r.label, r.n, r.avg === null ? '—' : `${r.avg.toFixed(1)} out of ${s.max}`))
-    else if (s.kind === 'ranking') s.rows.forEach(r => push(`${r.tied ? 'Joint ' : ''}${placeLabel(r.place - 1)}: ${r.label}`, `${r.firsts} put it first`, r.avgPos ? `average position ${r.avgPos.toFixed(1)}` : '—'))
-    else if (s.kind === 'words') s.rows.slice(0, 40).forEach(r => push(r.label, r.count, `${pctOf(r.count, s.answered)}%`))
-    else push('Written answers — see the Survey responses tab', s.answered, '')
-    if (!s.answered && s.kind !== 'text') push('Nobody answered', 0, '')
+    if (i > 0) line('')
+    line(`Q${i + 1}. ${q.question.replace(/\s+/g, ' ').trim()}   (${surveyTypeLabel(q).toLowerCase()}${q.required === false ? ', optional' : ''} · ${s.answered} answered)`)
+    if (!s.answered) { line('      Nobody answered'); return }
+    if (s.kind === 'choice') {
+      s.rows.forEach(r => line(`      ${r.label}`, r.count, `${r.pct}%`))
+      if (s.multi) line('      (people could tick several, so the % add up to more than 100)')
+    } else if (s.kind === 'rating') {
+      s.rows.forEach(r => line(`      ${r.label}`, r.n, r.avg === null ? '—' : `average ${r.avg.toFixed(1)} out of ${s.max}`))
+    } else if (s.kind === 'ranking') {
+      s.rows.forEach(r => line(`      ${r.tied ? 'Joint ' : ''}${placeLabel(r.place - 1)}: ${r.label}`, `${r.firsts} put it first`, r.avgPos ? `average position ${r.avgPos.toFixed(1)}` : '—'))
+      line('      (average position: 1.0 means everyone put it first, so lower is better)')
+    } else if (s.kind === 'words') {
+      s.rows.slice(0, 40).forEach(r => line(`      ${r.label}`, r.count, `${pctOf(r.count, s.answered)}%`))
+    } else {
+      s.texts.forEach(t => line(`      “${t.text.replace(/\s*\n\s*/g, ' ')}”`, '', '', t.name))
+    }
   })
   return { responses, summary }
+}
+
+/** The survey's part of a results Excel file. `n` tells surveys apart when a deck has several. */
+export function surveyBookPart(survey: TestResult, n?: number) {
+  const { responses, summary } = surveySheets(survey)
+  const label = n ? `Survey ${n}` : 'Survey'
+  const title = survey.title || 'Survey'
+  const count = survey.participants.length
+  return {
+    heading: `SURVEY — “${title}” · ${count} response${count !== 1 ? 's' : ''} · ${survey.askNames ? 'names recorded' : 'anonymous'}`,
+    tabs: [
+      { name: `${label} – Responses`, rows: responses,
+        intro: `Survey “${title}”: one row per person who answered${survey.askNames ? '' : ' (anonymous — no names)'}, one column per question. The same layout as a Google Forms responses sheet.`,
+        about: 'Every answer: one row per person, one column per question — like a Google Forms sheet.' },
+      { name: `${label} – Summary`, rows: summary,
+        intro: `Survey “${title}”: each question, then what people answered — how many picked each option, average ratings, the combined ranking, and every written answer.`,
+        about: 'Each question with its results: counts and %, average ratings, the combined ranking and all written answers.' },
+    ],
+  }
 }
 
 /* ── Text for Gemini ───────────────────────────────────────────────────── */

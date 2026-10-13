@@ -3,12 +3,13 @@ import { motion } from 'framer-motion'
 import {
   ClipboardList, Printer, FileText, Table2, Sparkles, Check, ChevronLeft, ChevronRight, Lock, Unlock, Link2, ImageDown,
 } from 'lucide-react'
-import { cn, fitColumns } from '@/lib/utils'
+import { cn } from '@/lib/utils'
+import { writeResultsBook } from '@/lib/excelBook'
 import { subscribeToSession, setSurveyOpen } from '@/lib/session'
 import { qTypeOf, hasAnswer, surveyOpen, surveyPath, type StoredTestBlockSlide, type SurveyState } from '@/lib/selfPacedTest'
 import type { TestResult, TestResultQuestion } from '@/lib/deckStorage'
 import {
-  summarize, surveyTypeLabel, summaryLine, pieSvg, chartCanvas, canvasPng, surveyPrintHtml, surveyDocx, surveySheets,
+  summarize, surveyTypeLabel, summaryLine, pieSvg, chartCanvas, canvasPng, surveyPrintHtml, surveyDocx, surveyBookPart,
   surveyGeminiText, surveyAnswerText, downloadBlob, fmtDateTime, placeLabel, SURVEY_COLOURS, PIE_MAX, type QSummary,
 } from '@/lib/surveyReport'
 import { topChoiceText, RANKING_HOW_TO_READ } from '@/lib/ranking'
@@ -65,18 +66,10 @@ export function SurveyResultSection({ survey, deckTitle, sessionCode, conductedA
     setBusy('excel')
     try {
       const XLSX = await import('xlsx')
-      const { responses, summary } = surveySheets(survey)
-      const guide = [
-        { Tab: 'Survey responses', 'What it shows': `One row per person who answered${survey.askNames ? '' : ' (anonymous)'}, one column per question — the same layout as a Google Forms sheet.` },
-        { Tab: 'Survey summary', 'What it shows': 'Each question: how many answered, and for each option or item how many people picked it, the % or the average.' },
-        { Tab: '', 'What it shows': '' },
-        { Tab: 'Tip', 'What it shows': 'Upload this file to Google Drive to open it as a Google Sheet — then Gemini in Sheets can summarise it.' },
-      ]
-      const wb = XLSX.utils.book_new()
-      XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(guide), guide), 'How to read this')
-      XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(responses.length ? responses : [{ Submitted: 'No responses yet' }]), responses), 'Survey responses')
-      XLSX.utils.book_append_sheet(wb, fitColumns(XLSX.utils.json_to_sheet(summary), summary), 'Survey summary')
-      XLSX.writeFile(wb, `${fileBase.replace(/[\\/:*?"<>|]+/g, '-')} survey.xlsx`)
+      writeResultsBook(XLSX, `${fileBase} survey.xlsx`, {
+        title: `Alaya Pulse survey results — ${title}`,
+        sub: `${deckTitle} · session ${sessionCode} · ${fmtDateTime(conductedAt)} · ${n} response${n !== 1 ? 's' : ''}`,
+      }, [surveyBookPart(survey)], false, 'On the Results page, “Copy for Gemini” copies every answer with a ready-made prompt — paste it into Gemini for the main themes, what people liked and what to improve.')
     } catch (e) { console.error(e); alert('Could not make the Excel file. Refresh the page and try again.') }
     finally { setBusy(null) }
   }
