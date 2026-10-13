@@ -6,7 +6,8 @@ The video on `/guide` (`public/alaya-pulse-tutorial.mp4`) is built from short sc
 video/
   clips/                 one .webm per scene, joined in name order (s01-intro … s24-outro)
   assets/demo-deck.html  the sample HTML slides imported in the video
-  assets/test-demo.csv   the 5 sample self-paced test questions
+  assets/test-demo.csv   the 6 sample self-paced test questions (5 multiple choice, 1 written)
+  assets/survey-demo.csv the 4 sample survey questions
   assets/music.m4a       background music (looped to fit by the build)
   record-tutorial.mjs    records every scene on the LIVE site (captions + cursor dot included)
   build-video.mjs        joins the clips, adds the music, prints each scene's start time

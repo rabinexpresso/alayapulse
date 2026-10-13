@@ -1,0 +1,5 @@
+type,question,option_a,option_b,option_c,option_d,option_e,option_f,correct,explanation,timer,required
+mcq,"Overall, how useful was today's session?",Very useful,Somewhat useful,Not useful,,,,,,,yes
+checkboxes,Which parts did you find most helpful?,The live quiz,The self-paced test,The examples,The Q&A,,,,,,yes
+rating,How confident do you feel about each of these?,Running a live poll,Creating a test,,,,,,,,yes
+openended,What could we do better next time?,,,,,,,,,,no

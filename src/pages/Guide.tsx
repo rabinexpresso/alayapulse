@@ -84,7 +84,7 @@ const GUIDE: Stage[] = [
       },
       {
         id: 'split-html',
-        videoAt: 27,
+        videoAt: 28,
         icon: <Scissors className="size-4" />,
         title: 'Fix the split when it’s wrong',
         intro: 'Sometimes Alaya Pulse can’t tell how many slides an HTML file has. You can set the number yourself.',
@@ -114,7 +114,7 @@ const GUIDE: Stage[] = [
       },
       {
         id: 'import-questions',
-        videoAt: 74,
+        videoAt: 86,
         icon: <FileSpreadsheet className="size-4" />,
         title: 'Import lots of questions at once (CSV + AI)',
         intro: 'Got your questions in a Word document? Let AI turn them into a file Alaya Pulse can import.',
@@ -128,7 +128,7 @@ const GUIDE: Stage[] = [
       },
       {
         id: 'rearrange',
-        videoAt: 98,
+        videoAt: 112,
         icon: <LayoutGrid className="size-4" />,
         title: 'Move slides around',
         steps: [
@@ -139,7 +139,7 @@ const GUIDE: Stage[] = [
       },
       {
         id: 'save-undo',
-        videoAt: 109,
+        videoAt: 122,
         icon: <Bookmark className="size-4" />,
         title: 'Save and undo',
         steps: [
@@ -157,7 +157,7 @@ const GUIDE: Stage[] = [
     topics: [
       {
         id: 'slideshow',
-        videoAt: 135,
+        videoAt: 149,
         icon: <Play className="size-4" />,
         title: 'Start the show and get people in',
         steps: [
@@ -170,7 +170,7 @@ const GUIDE: Stage[] = [
       },
       {
         id: 'navigate',
-        videoAt: 162,
+        videoAt: 176,
         icon: <Compass className="size-4" />,
         title: 'Moving through the show',
         steps: [
@@ -182,7 +182,7 @@ const GUIDE: Stage[] = [
       },
       {
         id: 'quiz-mode',
-        videoAt: 118,
+        videoAt: 132,
         icon: <Trophy className="size-4" />,
         title: 'Live quiz — points and a leaderboard',
         intro: 'Live quiz turns your multiple-choice questions into a competition. Right answers score points, faster answers score more, and a Leaderboard slide shows the winners.',
@@ -198,7 +198,7 @@ const GUIDE: Stage[] = [
         id: 'self-paced-test',
         icon: <ClipboardCheck className="size-4" />,
         title: 'Self-paced test — everyone at their own pace',
-        videoAt: 209,
+        videoAt: 223,
         intro: 'Everyone gets all the questions on their phone at once and answers at their own pace, within one time limit. Multiple choice marks itself. You mark written answers afterwards, by hand or with AI.',
         steps: [
           { text: <><strong>Add it:</strong> in the Add slide panel, click <Btn color="gold">Self-paced test</Btn>. A gold frame appears in the sidebar — the questions inside it are the test.</> },
@@ -214,6 +214,7 @@ const GUIDE: Stage[] = [
       },
       {
         id: 'survey',
+        videoAt: 385,
         icon: <ClipboardList className="size-4" />,
         title: 'Survey — feedback before, during or after',
         intro: 'A survey is like a Google Form inside your deck. Everyone gets all the questions on their phone at once. Nothing is marked or timed, and it’s anonymous unless you ask for names.',
@@ -238,7 +239,7 @@ const GUIDE: Stage[] = [
     topics: [
       {
         id: 'results',
-        videoAt: 349,
+        videoAt: 487,
         icon: <Download className="size-4" />,
         title: 'See and download the results',
         steps: [
@@ -255,7 +256,7 @@ const GUIDE: Stage[] = [
       },
       {
         id: 'share',
-        videoAt: 366,
+        videoAt: 522,
         icon: <Share2 className="size-4" />,
         title: 'Share your deck',
         steps: [
@@ -289,6 +290,10 @@ const TASKS: { label: string; sub: string; link: string; icon: React.ReactNode; 
 
 /** Roughly how long a topic takes to read (its steps are short). */
 const readMinutes = (t: Topic) => Math.max(1, Math.round(t.steps.length / 4))
+/** The walkthrough video. Bump `v` whenever the video is rebuilt: browsers keep
+ *  it for a day, and the Watch times must match the video they play. */
+const TUTORIAL_SRC = '/alaya-pulse-tutorial.mp4?v=2026-10-13'
+
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
 /** Where each topic's part of the walkthrough starts, in video order — a part
@@ -347,7 +352,7 @@ function ClipPlayer({ clip, onClose }: { clip: Clip; onClose: () => void }) {
               if (!keepGoing.current && clip.end && v.currentTime >= clip.end) { v.pause(); setDone(true) }
             }}
           >
-            <source src="/alaya-pulse-tutorial.mp4" type="video/mp4" />
+            <source src={TUTORIAL_SRC} type="video/mp4" />
           </video>
           {done && (
             <div className="absolute inset-x-0 bottom-16 flex justify-center px-4">
@@ -561,12 +566,12 @@ export default function Guide() {
                 poster="/guide/video-poster.jpg"
                 className="block w-full"
               >
-                <source src="/alaya-pulse-tutorial.mp4" type="video/mp4" />
+                <source src={TUTORIAL_SRC} type="video/mp4" />
                 Your browser can’t play this video — the written steps below cover everything it shows.
               </video>
               <figcaption className="flex items-center gap-2 border-t border-white/10 px-4 py-2.5 text-[13px] text-white/50">
                 <Play className="size-3.5 shrink-0 text-hot-pink" />
-                The full walkthrough — 6 min 19 sec. Prefer reading? Every step is below.
+                The full walkthrough — 8 min 54 sec. Prefer reading? Every step is below.
               </figcaption>
             </figure>
           </div>
