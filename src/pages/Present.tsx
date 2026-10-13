@@ -776,11 +776,12 @@ export default function Present() {
           </motion.div>
         </AnimatePresence>
 
-        {/* Left nav hover zone */}
+        {/* Left nav hover zone — both zones stop above the bottom bar, so
+            buttons in the slide's bottom corners stay clickable */}
         {canGoPrev && (
           <button
             onClick={goPrev}
-            className="absolute left-0 top-0 z-20 flex h-full w-20 items-center justify-start pl-4 opacity-0 transition-opacity hover:opacity-100 [will-change:opacity]"
+            className="absolute left-0 top-0 bottom-28 z-20 flex w-20 items-center justify-start pl-4 opacity-0 transition-opacity hover:opacity-100 [will-change:opacity]"
           >
             <div className="rounded-full bg-black/30 p-3 transition hover:bg-black/50">
               <ChevronLeft className="size-6 text-white" />
@@ -792,7 +793,7 @@ export default function Present() {
         {canGoNext && (
           <button
             onClick={goNext}
-            className="absolute right-0 top-0 z-20 flex h-full w-20 items-center justify-end pr-4 opacity-0 transition-opacity hover:opacity-100 [will-change:opacity]"
+            className="absolute right-0 top-0 bottom-28 z-20 flex w-20 items-center justify-end pr-4 opacity-0 transition-opacity hover:opacity-100 [will-change:opacity]"
           >
             <div className="rounded-full bg-black/30 p-3 transition hover:bg-black/50">
               <ChevronRight className="size-6 text-white" />
@@ -827,9 +828,11 @@ export default function Present() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 10 }}
             transition={{ duration: 0.2 }}
-            className="absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/70 to-transparent pb-3 pt-10"
+            // The fade above the bar lets clicks through to the slide (e.g. a
+            // button in its bottom corner); only the bar itself takes clicks
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/70 to-transparent pb-3 pt-10"
           >
-            <div className="flex items-center gap-3 px-4">
+            <div className="pointer-events-auto flex items-center gap-3 px-4">
 
               {/* QR thumbnail — tap to enlarge */}
               <button
@@ -3392,9 +3395,12 @@ function WordCloudResults({
       setLayout(layoutWordCloud(words, width, height, palette))
     }
     compute()
-    const ro = new ResizeObserver(compute)
+    // Re-arrange once the space settles, not on every frame while it's
+    // sliding (the answer guide opening beside a test review's cloud)
+    let t = 0
+    const ro = new ResizeObserver(() => { window.clearTimeout(t); t = window.setTimeout(compute, 180) })
     ro.observe(containerRef.current)
-    return () => ro.disconnect()
+    return () => { ro.disconnect(); window.clearTimeout(t) }
   // palette changes whenever slideTheme changes — include it in deps
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [words, slideTheme])

@@ -556,6 +556,10 @@ function TestReviewView({ index, total, question, sheets }: {
   )
 }
 
+/** The answer guide panel's width, and the room the answers make for it. */
+const GUIDE_W = 'min(30%, 24rem)'
+const GUIDE_ROOM = `calc(${GUIDE_W} + 1.5rem)`
+
 /** Answer review for a question the host marks: everyone's answers, using the
  *  whole screen. The marking guide stays hidden until the host shows it (button
  *  or G), then sits in a slim panel on the right so the answers keep their height. */
@@ -584,7 +588,7 @@ function TestAnswersReview({ index, total, question, sheets, display }: {
     <motion.div
       key={question.id}
       initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.35 }}
-      className="flex h-full w-full flex-col px-14 pb-24 pt-10"
+      className="relative flex h-full w-full flex-col px-14 pb-28 pt-10"
     >
       <div className="flex items-start justify-between gap-8">
         <div className="min-w-0">
@@ -597,32 +601,40 @@ function TestAnswersReview({ index, total, question, sheets, display }: {
           {isMarkable(question) && <p className="mt-1 text-xs text-(--fg)/55">{question.marks} mark{question.marks !== 1 ? 's' : ''}</p>}
         </div>
       </div>
-      <div className="mt-6 flex min-h-0 flex-1 gap-6">
-        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">{display}</div>
+      <div className="relative mt-6 flex min-h-0 flex-1">
+        {/* Makes room for the guide gradually, so the answers glide left (and back) */}
+        <div
+          className="relative flex min-h-0 min-w-0 flex-1 flex-col transition-[padding] duration-[400ms] ease-[cubic-bezier(0.16,1,0.3,1)]"
+          style={{ paddingRight: showGuide && guide ? GUIDE_ROOM : 0 }}
+        >
+          {display}
+        </div>
         <AnimatePresence initial={false}>
           {showGuide && guide && (
             <motion.aside
-              initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 24 }} transition={{ duration: 0.25 }}
-              className="max-h-full w-[min(30%,24rem)] shrink-0 self-start overflow-y-auto rounded-xl border border-(--accent)/25 bg-(--accent)/10 px-4 py-3 [scrollbar-width:thin]"
+              initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 40 }} transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              className="absolute right-0 top-0 max-h-full overflow-y-auto rounded-xl border border-(--accent)/25 bg-(--accent)/10 px-4 py-3 [scrollbar-width:thin]"
+              style={{ width: GUIDE_W }}
             >
               <p className="text-[11px] font-bold uppercase tracking-widest text-(--accent)">Answer guide</p>
-              <p className="mt-1 text-base leading-snug text-(--fg)/90">{guide}</p>
+              {/* Each line typed in the editor shows on its own line */}
+              <div className="mt-1.5 space-y-2 text-base leading-snug text-(--fg)/90">
+                {guide.split('\n').map(l => l.trim()).filter(Boolean).map((l, i) => <p key={i}>{l}</p>)}
+              </div>
             </motion.aside>
           )}
         </AnimatePresence>
       </div>
       {guide && (
-        // Kept clear of the invisible "next slide" strip along the right edge
-        <div className="mr-8 mt-3 flex justify-end">
-          <button
-            onClick={() => setShowGuide(s => !s)}
-            className="flex items-center gap-2 rounded-xl border border-(--accent)/40 px-3.5 py-1.5 text-sm font-semibold text-(--accent) transition hover:bg-(--accent)/10"
-          >
-            {showGuide ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-            {showGuide ? 'Hide answer guide' : 'Show answer guide'}
-            <kbd className="rounded border border-(--accent)/30 px-1.5 text-[11px] font-medium">G</kbd>
-          </button>
-        </div>
+        // Bottom-right corner, just above the presenter's bar
+        <button
+          onClick={() => setShowGuide(s => !s)}
+          className="absolute bottom-[4.25rem] right-14 flex items-center gap-2 rounded-xl border border-(--accent)/40 bg-(--bg) px-3.5 py-1.5 text-sm font-semibold text-(--accent) transition hover:bg-(--accent)/10"
+        >
+          {showGuide ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+          {showGuide ? 'Hide answer guide' : 'Show answer guide'}
+          <kbd className="rounded border border-(--accent)/30 px-1.5 text-[11px] font-medium">G</kbd>
+        </button>
       )}
     </motion.div>
   )

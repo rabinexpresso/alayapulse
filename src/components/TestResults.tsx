@@ -280,7 +280,7 @@ function PersonRows({ p, test, auto, open, onToggle }: { p: TestResultParticipan
                     <tr key={q.id} className="border-t border-midnight-sky-100 align-top">
                       <td className="max-w-xs py-1.5 pr-3 text-midnight-sky-700"><span className="font-semibold">Q{i + 1}</span> {q.question.length > 70 ? q.question.slice(0, 70) + '…' : q.question}</td>
                       <td className="max-w-md whitespace-pre-wrap py-1.5 pr-3 text-midnight-sky-800">{text || <span className="italic text-midnight-sky-400">Not answered</span>}</td>
-                      <td className="max-w-xs py-1.5 pr-3 text-midnight-sky-600">{mcq ? full(q.correctAnswers, q) : (q.guide || '—')}</td>
+                      <td className="max-w-xs whitespace-pre-line py-1.5 pr-3 text-midnight-sky-600">{mcq ? full(q.correctAnswers, q) : (q.guide || '—')}</td>
                       {v
                         ? <td className={cn('whitespace-nowrap py-1.5 font-semibold', v.ok ? 'text-fresh-green' : 'text-hot-pink')}>{v.ok ? <Check className="inline size-3.5" /> : <><X className="inline size-3.5" /> {v.note}</>}</td>
                         : <td className="whitespace-nowrap py-1.5 font-medium text-midnight-sky-500">{text ? (isMarkable(q) ? `To mark · ${marksLabel(q)}` : 'Not marked') : ''}</td>}
@@ -414,7 +414,7 @@ function MarkedQuestionCard({ q, i, ps }: { q: TestResultQuestion; i: number; ps
             ))}
           </div>
         )}
-        {q.guide && <p className="mt-3 rounded-lg bg-golden-sun/10 px-3 py-2 text-xs leading-relaxed text-midnight-sky-700"><span className="font-semibold">Marking guide: </span>{q.guide}</p>}
+        {q.guide && <p className="mt-3 whitespace-pre-line rounded-lg bg-golden-sun/10 px-3 py-2 text-xs leading-relaxed text-midnight-sky-700"><span className="font-semibold">Marking guide: </span>{q.guide}</p>}
       </div>
       {answered.length > 0 && (
         <>

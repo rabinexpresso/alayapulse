@@ -7480,7 +7480,7 @@ function TestMarking({ slide, onUpdate }: { slide: QuestionSlide; onUpdate: (pat
       </div>
       {marks === 0 && <p className="mt-1.5 text-xs text-midnight-sky-500">Answers are still collected — they just aren’t added to the “To mark” list.</p>}
       <label className="mb-1.5 mt-4 block text-xs font-medium text-midnight-sky-700">
-        Marking guide <span className="font-light text-midnight-sky-500">optional — what a good answer includes. Never shown on phones; shown in the answer review and used for AI marking</span>
+        Marking guide <span className="font-light text-midnight-sky-500">optional — what a good answer includes. Press Enter to put each point on its own line. Never shown on phones; you can show it in the answer review, and it’s used for AI marking</span>
       </label>
       <textarea
         value={slide.markingGuide ?? ''}
