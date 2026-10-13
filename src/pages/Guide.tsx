@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   Hammer, Presentation, BarChart2, Upload, Scissors, LayoutGrid,
   FileSpreadsheet, ListPlus, Bookmark, Play, Compass, Trophy, ClipboardCheck,
-  Download, Share2, Lightbulb, AlertTriangle, ClipboardList, ArrowRight, Maximize2, X,
+  Download, Share2, Lightbulb, AlertTriangle, ClipboardList, ArrowRight, Maximize2, X, Undo2, RotateCcw,
 } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
 import { cn } from '@/lib/utils'
@@ -18,16 +18,6 @@ import { cn } from '@/lib/utils'
    Every topic has a stable id — link directly to it as /guide#<id>
    (e.g. /guide#quiz-mode) when answering "how do I…?" questions.
    ───────────────────────────────────────────────────────────────────────── */
-
-/** Scrolls up to the walkthrough video and plays it from `seconds`. */
-function playVideoAt(seconds: number) {
-  const v = document.getElementById('guide-video') as HTMLVideoElement | null
-  if (!v) return
-  v.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  const go = () => { v.currentTime = seconds; v.play().catch(() => {}) }
-  if (v.readyState >= 1) go()
-  else { v.addEventListener('loadedmetadata', go, { once: true }); v.load() }
-}
 
 interface Step {
   text: React.ReactNode
@@ -301,6 +291,84 @@ const TASKS: { label: string; sub: string; link: string; icon: React.ReactNode; 
 const readMinutes = (t: Topic) => Math.max(1, Math.round(t.steps.length / 4))
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
+/** Where each topic's part of the walkthrough starts, in video order — a part
+ *  ends where the next one starts (the last runs to the end). */
+const CLIP_STARTS = GUIDE.flatMap(st => st.topics.map(t => t.videoAt)).filter((x): x is number => x !== undefined).sort((x, y) => x - y)
+const clipEnd = (start: number) => CLIP_STARTS.find(x => x > start)
+
+interface Clip { title: string; start: number; end?: number }
+
+/* One topic's part of the walkthrough, in a pop-up over the page: starts at
+   that part and pauses where it ends, so the reader never loses their place. */
+function ClipPlayer({ clip, onClose }: { clip: Clip; onClose: () => void }) {
+  const ref = useRef<HTMLVideoElement>(null)
+  const keepGoing = useRef(false)
+  const [done, setDone] = useState(false)
+
+  useEffect(() => {
+    const v = ref.current
+    if (!v) return
+    const go = () => { v.currentTime = clip.start; v.play().catch(() => {}) }
+    if (v.readyState >= 1) go()
+    else v.addEventListener('loadedmetadata', go, { once: true })
+  }, [clip.start])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const replay = () => { const v = ref.current; if (!v) return; keepGoing.current = false; setDone(false); v.currentTime = clip.start; v.play().catch(() => {}) }
+  const carryOn = () => { keepGoing.current = true; setDone(false); ref.current?.play().catch(() => {}) }
+
+  return (
+    <div role="dialog" aria-modal="true" aria-label={`Video: ${clip.title}`} onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm">
+      <div onClick={e => e.stopPropagation()} className="w-full max-w-5xl overflow-hidden rounded-2xl border border-white/10 bg-midnight-sky-900 shadow-2xl">
+        <div className="flex items-center gap-3 border-b border-white/10 px-5 py-3">
+          <Play className="size-4 shrink-0 text-hot-pink" />
+          <p className="min-w-0 flex-1 truncate text-sm font-semibold">{clip.title}</p>
+          <span className="shrink-0 text-xs text-white/50">{clock(clip.start)}{clip.end ? ` – ${clock(clip.end)}` : ''}</span>
+          <button onClick={onClose} aria-label="Close video" className="rounded-full p-1.5 text-white/60 transition hover:bg-white/10 hover:text-white">
+            <X className="size-4" />
+          </button>
+        </div>
+        <div className="relative bg-black">
+          <video
+            ref={ref}
+            controls
+            playsInline
+            preload="auto"
+            poster="/guide/video-poster.jpg"
+            className="block aspect-video w-full"
+            onTimeUpdate={e => {
+              const v = e.currentTarget
+              if (!keepGoing.current && clip.end && v.currentTime >= clip.end) { v.pause(); setDone(true) }
+            }}
+          >
+            <source src="/alaya-pulse-tutorial.mp4" type="video/mp4" />
+          </video>
+          {done && (
+            <div className="absolute inset-x-0 bottom-16 flex justify-center px-4">
+              <div className="flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/15 bg-midnight-sky-900/95 px-4 py-3 shadow-xl">
+                <span className="mr-1 text-sm text-white/80">That’s the end of this part.</span>
+                <button onClick={carryOn} className="flex items-center gap-1.5 rounded-xl bg-hot-pink px-3.5 py-1.5 text-sm font-semibold text-white transition hover:bg-hot-pink/90">
+                  <Play className="size-3.5" /> Keep watching
+                </button>
+                <button onClick={replay} className="flex items-center gap-1.5 rounded-xl border border-white/20 px-3.5 py-1.5 text-sm font-medium text-white/85 transition hover:bg-white/10">
+                  <RotateCcw className="size-3.5" /> Watch again
+                </button>
+                <button onClick={onClose} className="rounded-xl px-3 py-1.5 text-sm font-medium text-white/60 transition hover:text-white">Close</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* A screenshot beside the steps: click to see it bigger. Hides itself if
    the image file doesn't exist (yet). */
 function Shot({ src, alt, step, onZoom }: { src: string; alt: string; step: number; onZoom: (src: string, alt: string) => void }) {
@@ -352,10 +420,34 @@ export default function Guide() {
   // The topic being read, for the menu; the screenshot shown big
   const [activeId, setActiveId] = useState<string | null>(null)
   const [zoom, setZoom] = useState<{ src: string; alt: string } | null>(null)
+  const [clip, setClip] = useState<Clip | null>(null)
+  // Where the reader was before following a link — for "Back to where you were"
+  const [backTo, setBackTo] = useState<number | null>(null)
+  const backRef = useRef<number | null>(null)
+  const awayRef = useRef(false)
+  const firstRun = useRef(true)
+  const rememberSpot = (e: React.MouseEvent) => {
+    if (!(e.target as HTMLElement).closest('a[href^="#"]')) return
+    backRef.current = window.scrollY
+    awayRef.current = false
+    setBackTo(window.scrollY)
+  }
+  const goBack = () => {
+    if (backRef.current === null) return
+    window.scrollTo({ top: backRef.current, behavior: 'smooth' })
+    backRef.current = null
+    setBackTo(null)
+  }
+  const openClip = (title: string, start: number) => {
+    ;(document.getElementById('guide-video') as HTMLVideoElement | null)?.pause()
+    setClip({ title, start, end: clipEnd(start) })
+  }
 
   // Scroll to the linked topic (e.g. /guide#quiz-mode) once content renders
   useEffect(() => {
-    if (!hash) { window.scrollTo(0, 0); return }
+    const first = firstRun.current
+    firstRun.current = false
+    if (!hash) { if (first) window.scrollTo(0, 0); return }
     const el = document.getElementById(hash.slice(1))
     if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60)
   }, [hash])
@@ -373,6 +465,12 @@ export default function Guide() {
         if (el && el.getBoundingClientRect().top <= window.innerHeight * 0.33) here = id
       }
       setActiveId(here)
+      const from = backRef.current
+      if (from !== null) {
+        const d = Math.abs(window.scrollY - from)
+        if (d > 400) awayRef.current = true
+        else if (awayRef.current && d < 150) { backRef.current = null; setBackTo(null) }
+      }
     }
     const onScroll = () => { if (!frame) frame = requestAnimationFrame(update) }
     update()
@@ -389,7 +487,7 @@ export default function Guide() {
   }, [zoom])
 
   return (
-    <div className="min-h-screen bg-midnight-sky-900 text-white">
+    <div className="min-h-screen bg-midnight-sky-900 text-white" onClickCapture={rememberSpot}>
       {/* Header */}
       <header className="sticky top-0 z-20 border-b border-white/5 bg-midnight-sky-900/85 backdrop-blur-md">
         <div className="mx-auto flex max-w-[1440px] items-center px-6 py-4">
@@ -526,7 +624,7 @@ export default function Guide() {
                         <span className="rounded-full bg-white/[0.08] px-2.5 py-0.5 text-xs text-white/55">{readMinutes(topic)} min read</span>
                         {topic.videoAt !== undefined && (
                           <button
-                            onClick={() => playVideoAt(topic.videoAt!)}
+                            onClick={() => openClip(topic.title, topic.videoAt!)}
                             className="inline-flex items-center gap-1.5 rounded-full border border-hot-pink/40 bg-hot-pink/10 px-3 py-0.5 text-xs font-medium text-white/90 transition hover:bg-hot-pink/20"
                           >
                             <Play className="size-3 text-hot-pink" />
@@ -572,6 +670,18 @@ export default function Guide() {
           </p>
         </main>
       </div>
+
+      {/* Back to where the reader was before following a link */}
+      {backTo !== null && !clip && !zoom && (
+        <button
+          onClick={goBack}
+          className="fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-full bg-hot-pink px-4 py-2.5 text-sm font-semibold text-white shadow-[0_8px_30px_-6px_rgba(255,0,101,0.6)] transition hover:bg-hot-pink/90"
+        >
+          <Undo2 className="size-4" /> Back to where you were
+        </button>
+      )}
+
+      {clip && <ClipPlayer clip={clip} onClose={() => setClip(null)} />}
 
       {/* A screenshot, big */}
       {zoom && (
