@@ -21,12 +21,16 @@ import { topChoiceText, RANKING_HOW_TO_READ } from '@/lib/ranking'
    copy-for-Gemini summary; the survey link and Close / Reopen.
    ───────────────────────────────────────────────────────────────────────── */
 
-export function SurveyResultSection({ survey, deckTitle, sessionCode, conductedAt }: {
+export function SurveyResultSection({ survey, deckTitle: deckName, sessionCode, conductedAt, sessionName }: {
   survey:      TestResult
   deckTitle:   string
   sessionCode: string
   conductedAt: number
+  /** Who the session was with ("Sydney team"), when it was named. */
+  sessionName?: string
 }) {
+  // The deck plus the session's name, on every report
+  const deckTitle = sessionName ? `${deckName} · ${sessionName}` : deckName
   const [tab, setTab] = useState<'summary' | 'individual'>('summary')
   const [person, setPerson] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
@@ -35,7 +39,7 @@ export function SurveyResultSection({ survey, deckTitle, sessionCode, conductedA
   const ps = survey.participants
   const n = ps.length
   const title = survey.title || 'Survey'
-  const fileBase = `${title} - ${new Date(conductedAt).toISOString().slice(0, 10)}`
+  const fileBase = `${title} - ${new Date(conductedAt).toISOString().slice(0, 10)}${sessionName ? ` - ${sessionName.replace(/[\\/:*?"<>|]+/g, '-')}` : ''}`
 
   // Open / closed, straight from the session — it can change after the show
   useEffect(() => subscribeToSession(sessionCode, s => {

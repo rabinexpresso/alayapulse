@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Download, Clock, Users, BarChart2, Cloud as CloudIcon,
   TrendingUp, ChevronDown, ChevronUp, Star, AlertCircle,
-  Trash2, History, CheckCircle2, Table2, Check, ClipboardCheck, ClipboardList,
+  Trash2, History, CheckCircle2, Table2, Check, ClipboardCheck, ClipboardList, Pencil, Tag,
 } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
 import { cn, optionLabel } from '@/lib/utils'
@@ -13,10 +13,10 @@ import { KindTag, KIND_INFO, TestResultSection, liveKind, testBookPart, addTestP
 import { writeResultsBook, qHeader, type BookPart } from '@/lib/excelBook'
 import { SurveyResultSection } from '@/components/SurveyResults'
 import { hasAnswer, surveyParticipants } from '@/lib/selfPacedTest'
-import { fetchSurveySheets } from '@/lib/session'
+import { fetchSurveySheets, setSessionLabel } from '@/lib/session'
 import { surveyBookPart, addSurveyPdf } from '@/lib/surveyReport'
 import {
-  listResults, saveResults, deleteResults, isResponseCorrect, getStorageBackend, onAuthStateChanged, auth,
+  listResults, saveResults, deleteResults, renameResults, isResponseCorrect, getStorageBackend, onAuthStateChanged, auth,
   browserListDecks, cloudListDecks,
   type Deck, type DeckResults, type ResultQuestion, type ResultResponse, type TestResult,
   type StorageBackend,
@@ -105,6 +105,12 @@ export default function Results() {
   const [showBulkConfirm, setShowBulkConfirm] = useState(false)
   // Which part of the session is showing (live questions, a test, a survey)
   const [partKey, setPartKey] = useState<string | null>(null)
+  // Naming the shown session ("Sydney team")
+  const [nameDraft, setNameDraft] = useState<string | null>(null)
+  const [savingName, setSavingName] = useState(false)
+  // The latest list, for saves that finish after a rename
+  const listRef = useRef(sessionsList)
+  listRef.current = sessionsList
 
   /* Wait for auth before loading cloud data — Firebase restores auth
      asynchronously on page load. */
@@ -165,7 +171,7 @@ export default function Results() {
           return { ...t, participants: live }
         })
         if (!changed) return
-        const updated = { ...r, tests }
+        const updated = { ...(listRef.current?.find(x => x.id === r.id) ?? r), tests }
         setSessionsList(list => list?.map(x => (x.id === r.id ? updated : x)))
         saveResults(backend ?? 'browser', deckId, updated).catch(e => console.warn('Could not update the saved survey answers:', e))
       })
@@ -264,7 +270,7 @@ export default function Results() {
       buildResultsPdf(doc, autoTable, deck.title, results, totalResponses, avgParticipation, !!deck.isQuiz, parts.map(pt => pt.key))
       const safeTitle = deck.title.replace(/[^a-z0-9\-_ ]/gi, '').trim() || 'results'
       const date = new Date(results.conductedAt).toISOString().slice(0, 10)
-      doc.save(`${safeTitle} - ${date} results.pdf`)
+      doc.save(`${safeTitle} - ${date}${nameForFile(results)} results.pdf`)
     } catch (e) {
       console.error('PDF generation failed:', e)
       alert('Could not make the PDF. Refresh the page and try again.')
@@ -394,9 +400,9 @@ export default function Results() {
       surveysOnly.forEach((t, i) => { books[`s:${t.blockId}`] = surveyBookPart(t, surveysOnly.length > 1 ? i + 1 : undefined) })
 
       const date = new Date(results.conductedAt)
-      writeResultsBook(XLSX, `${deck.title.trim() || 'Results'} - ${date.toISOString().slice(0, 10)} results.xlsx`, {
+      writeResultsBook(XLSX, `${deck.title.trim() || 'Results'} - ${date.toISOString().slice(0, 10)}${nameForFile(results)} results.xlsx`, {
         title: `Alaya Pulse results — ${deck.title.trim() || 'Untitled session'}`,
-        sub: `Session ${results.sessionCode} · ${formatTimestamp(results.conductedAt)} · ${results.audienceCount} ${results.audienceCount === 1 ? 'person' : 'people'} at the peak`,
+        sub: `${results.label?.trim() ? `${results.label.trim()} · ` : ''}Session ${results.sessionCode} · ${formatTimestamp(results.conductedAt)} · ${results.audienceCount} ${results.audienceCount === 1 ? 'person' : 'people'} at the peak`,
       }, parts.map(pt => books[pt.key]).filter(Boolean))
     } catch (e) {
       console.error('Excel generation failed:', e)
@@ -426,6 +432,27 @@ export default function Results() {
       setIsDeletingSession(false)
     }
   }
+
+  async function saveSessionName() {
+    if (!results || !deckId || nameDraft === null) return
+    const label = nameDraft.replace(/\s+/g, ' ').trim().slice(0, 60)
+    if (label === (results.label ?? '')) { setNameDraft(null); return }
+    setSavingName(true)
+    try {
+      await renameResults(backend ?? 'browser', deckId, results.id, label)
+      setSessionsList(list => list?.map(x => (x.id === results.id ? { ...x, label } : x)))
+      // Ending this show again after a Resume offers the same name
+      setSessionLabel(results.sessionCode, label).catch(() => { /* only the saved copy matters */ })
+      setNameDraft(null)
+    } catch (e) {
+      console.error('Could not rename the session:', e)
+      alert('Could not save the name. Try again.')
+    } finally {
+      setSavingName(false)
+    }
+  }
+
+  const sessionName = results.label?.trim()
 
   return (
     <main className="min-h-screen bg-midnight-sky-50/40">
@@ -474,6 +501,54 @@ export default function Results() {
           <h1 className="text-4xl font-bold tracking-tight text-midnight-sky-900 sm:text-5xl">
             {deckTitle}
           </h1>
+
+          {/* Who this session was with — tells sessions of the same deck apart */}
+          <div className="mt-3 flex min-h-9 flex-wrap items-center gap-2">
+            {nameDraft !== null ? (
+              <form
+                className="flex flex-wrap items-center gap-2"
+                onSubmit={e => { e.preventDefault(); saveSessionName() }}
+              >
+                <Tag className="size-4 text-hot-pink" />
+                <input
+                  autoFocus
+                  value={nameDraft}
+                  maxLength={60}
+                  onChange={e => setNameDraft(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Escape') setNameDraft(null) }}
+                  placeholder="Who was this session with? e.g. Sydney team"
+                  aria-label="Session name"
+                  className="w-72 max-w-full rounded-lg border border-midnight-sky-200 bg-white px-3 py-1.5 text-sm text-midnight-sky-900 placeholder:text-midnight-sky-300 focus:border-hot-pink focus:outline-none"
+                />
+                <button type="submit" disabled={savingName}
+                  className="rounded-lg bg-hot-pink px-3 py-1.5 text-sm font-medium text-white transition hover:bg-hot-pink/90 disabled:opacity-70">
+                  {savingName ? 'Saving…' : 'Save'}
+                </button>
+                <button type="button" onClick={() => setNameDraft(null)}
+                  className="rounded-lg px-2 py-1.5 text-sm text-midnight-sky-500 transition hover:text-midnight-sky-800">
+                  Cancel
+                </button>
+              </form>
+            ) : sessionName ? (
+              <>
+                <span className="flex items-center gap-1.5 rounded-full bg-hot-pink/10 px-3 py-1 text-sm font-semibold text-hot-pink">
+                  <Tag className="size-3.5" />
+                  {sessionName}
+                </span>
+                <button onClick={() => setNameDraft(sessionName)}
+                  className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-midnight-sky-500 transition hover:bg-midnight-sky-100 hover:text-midnight-sky-800">
+                  <Pencil className="size-3" /> Rename
+                </button>
+              </>
+            ) : (
+              <button onClick={() => setNameDraft('')}
+                className="flex items-center gap-1.5 rounded-full border border-dashed border-midnight-sky-300 px-3 py-1 text-sm font-medium text-midnight-sky-600 transition hover:border-hot-pink hover:text-hot-pink">
+                <Tag className="size-3.5" />
+                Name this session
+                <span className="font-light text-midnight-sky-400">— e.g. which team it was with</span>
+              </button>
+            )}
+          </div>
           <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-midnight-sky-700">
             <span className="flex items-center gap-1.5">
               <Clock className="size-3.5" />
@@ -507,9 +582,10 @@ export default function Results() {
                         })
                       } else {
                         setSelectedId(s.id)
+                        setNameDraft(null)
                       }
                     }}
-                    title={formatTimestamp(s.conductedAt)}
+                    title={`${s.label?.trim() ? `${s.label.trim()} · ` : ''}${formatTimestamp(s.conductedAt)} · session ${s.sessionCode}`}
                     className={cn(
                       'flex items-center gap-1.5 rounded-full border py-1.5 text-xs font-medium transition',
                       selectMode ? 'pl-2.5 pr-3' : 'pl-3 pr-7',
@@ -526,7 +602,12 @@ export default function Results() {
                         {isChecked && <Check className="size-2.5" />}
                       </span>
                     )}
-                    {formatShortDate(s.conductedAt)}
+                    {s.label?.trim() ? (
+                      <>
+                        <span className="max-w-[12rem] truncate">{s.label.trim()}</span>
+                        <span className={highlighted ? 'text-hot-pink/70' : 'text-midnight-sky-400'}>· {formatShortDate(s.conductedAt)}</span>
+                      </>
+                    ) : formatChipDate(s.conductedAt)}
                   </button>
                   {!selectMode && (
                     <button
@@ -648,7 +729,7 @@ export default function Results() {
       {/* Survey */}
       {activePart?.kind === 'survey' && activePart.test && (
         <section className="mx-auto max-w-6xl space-y-4 px-6 pb-20">
-          <SurveyResultSection key={activePart.key} survey={activePart.test} deckTitle={deckTitle} sessionCode={results.sessionCode} conductedAt={results.conductedAt} />
+          <SurveyResultSection key={activePart.key} survey={activePart.test} deckTitle={deckTitle} sessionCode={results.sessionCode} conductedAt={results.conductedAt} sessionName={sessionName} />
         </section>
       )}
 
@@ -699,7 +780,7 @@ export default function Results() {
                   {ids.length === 1 ? 'Delete this session?' : `Delete ${ids.length} sessions?`}
                 </h3>
                 <p className="mt-2 text-sm font-light text-midnight-sky-500">
-                  {single && <>{formatTimestamp(single.conductedAt)}<br /></>}
+                  {single && <>{single.label?.trim() ? <><strong className="font-semibold text-midnight-sky-800">{single.label.trim()}</strong><br /></> : null}{formatTimestamp(single.conductedAt)}<br /></>}
                   This can't be undone.
                 </p>
                 <div className="mt-6 flex gap-3">
@@ -1305,6 +1386,18 @@ function formatShortDate(ts: number): string {
   return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
+/** "12 Oct · 2:31 pm" — sessions on the same day can be told apart. */
+function formatChipDate(ts: number): string {
+  const d = new Date(ts)
+  return `${d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} · ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+}
+
+/** File-name friendly session name, or '' when there isn't one. */
+function nameForFile(r: DeckResults): string {
+  const n = (r.label ?? '').replace(/[^a-z0-9\-_ ]/gi, '').replace(/\s+/g, ' ').trim()
+  return n ? ` - ${n}` : ''
+}
+
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
@@ -1339,7 +1432,7 @@ function buildResultsPdf(doc: any, autoTable: any, deckTitle: string, r: DeckRes
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(11)
   doc.setTextColor(120)
-  doc.text(`Live poll results — session ${r.sessionCode}`, margin, 92)
+  doc.text(`Live poll results — session ${r.sessionCode}${r.label?.trim() ? ` · ${r.label.trim()}` : ''}`, margin, 92)
   doc.text(formatTimestamp(r.conductedAt), margin, 108)
 
   // Summary stats

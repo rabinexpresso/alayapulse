@@ -140,6 +140,8 @@ export interface Session {
   currentPhase:  SlidePhase
   status:        'active' | 'ended'
   createdAt:     Timestamp
+  /** Who the session is with ("Sydney team") — typed by the host when ending. */
+  label?:        string
   /** Epoch ms when the timer expires. Absent / null = no active timer. */
   timerEndsAt?:   number | null
   /** Original duration in seconds — used by audience for the progress bar. */
@@ -409,8 +411,14 @@ export async function updateSessionSlides(code: string, rawSlides: any[], isQuiz
    instead of the last question while the host is not presenting.
    ───────────────────────────────────────────────────────────────────────── */
 
-export async function endSession(code: string): Promise<void> {
-  await updateDoc(doc(db, 'sessions', code.toUpperCase()), { status: 'ended' })
+export async function endSession(code: string, label?: string): Promise<void> {
+  await updateDoc(doc(db, 'sessions', code.toUpperCase()), { status: 'ended', ...(label !== undefined ? { label } : {}) })
+}
+
+/** The session's name ("Sydney team"), kept on the session so ending a
+ *  resumed show offers the same name again. */
+export async function setSessionLabel(code: string, label: string): Promise<void> {
+  await updateDoc(doc(db, 'sessions', code.toUpperCase()), { label })
 }
 
 /* ─────────────────────────────────────────────────────────────────────────

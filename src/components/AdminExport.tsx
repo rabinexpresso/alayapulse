@@ -42,6 +42,8 @@ interface ExportSession {
   isQuiz: boolean
   id: string
   sessionCode: string
+  /** Who the session was with ("Sydney team"), when the host named it. */
+  label?: string
   conductedAt: number
   endedAt: number | null
   audienceCount: number
@@ -162,6 +164,7 @@ async function buildAllSessionsWorkbook(sessions: ExportSession[], startDate: st
     'Owner':             s.ownerEmail,
     'Deck':              s.deckTitle,
     'Session':           s.sessionCode,
+    'Session name':      s.label ?? '',
     'Duration (min)':    s.endedAt ? Math.max(1, Math.round((s.endedAt - s.conductedAt) / 60000)) : '',
     'Audience':          s.audienceCount,
     'Questions':         s.questions.length,

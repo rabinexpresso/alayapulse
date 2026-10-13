@@ -283,6 +283,7 @@ exports.exportAllSessions = onCall(
         isQuiz: !!meta.isQuiz,
         id: data.id || '',
         sessionCode: data.sessionCode || '',
+        label: typeof data.label === 'string' ? data.label : '',
         conductedAt: Number(data.conductedAt) || 0,
         endedAt: typeof data.endedAt === 'number' ? data.endedAt : null,
         audienceCount: Number(data.audienceCount) || 0,

@@ -33,7 +33,7 @@ import {
   getStorageBackend, setStorageBackend,
   browserSaveDeck, cloudSaveDeck, getUniqueDeckTitle,
   signInWithGoogle, onAuthStateChanged, auth,
-  saveResults, createSharedDeck,
+  saveResults, getResults, mergeResults, createSharedDeck,
   type StorageBackend, type Deck, type User, type DeckResults,
 } from '@/lib/deckStorage'
 
@@ -727,6 +727,9 @@ function makeCanvasWithLayout(layout: CanvasLayout): CanvasSlide {
    Main page
    ───────────────────────────────────────────────────────────────────────── */
 
+/** sessionStorage flag: this run of the show's results is already saved. */
+const resultsSavedKey = (r: DeckResults) => `alaya-results-saved-${r.id}-${r.endedAt ?? ''}`
+
 export default function Create() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -959,19 +962,18 @@ export default function Create() {
       } else {
         await cloudSaveDeck(deck)
       }
-      // Persist most-recent live poll results too (separate doc / store).
-      // Results are independent of slide content so they don't bloat the
-      // deck doc. New results from a future session overwrite this one.
-      if (lastResults) {
+      // Persist the show's results too (separate doc / store), once —
+      // later deck saves must not overwrite newer survey answers or a name
+      // given on the Results page.
+      if (lastResults && !sessionStorage.getItem(resultsSavedKey(lastResults))) {
         try {
-          await saveResults(b, deck.id, lastResults)
-          // Mark this session's results as saved so re-mounting this page
+          // Ending a resumed show saves the same session again: merge into it
+          const prev = await getResults(b, deck.id, lastResults.id).catch(() => null)
+          await saveResults(b, deck.id, prev ? mergeResults(prev, lastResults) : lastResults)
+          // Mark this run's results as saved so re-mounting this page
           // (e.g. browser-back from /results) doesn't repeat the save.
-          // Keyed by the per-session id (not sessionCode) so a "Resume"
-          // run — which reuses the same room code — still gets saved.
-          if (lastResults.id) {
-            sessionStorage.setItem(`alaya-results-saved-${lastResults.id}`, '1')
-          }
+          // Keyed by session id + end time so each Resume run still gets saved.
+          sessionStorage.setItem(resultsSavedKey(lastResults), '1')
         } catch (e) {
           console.error('Saving results failed (deck still saved):', e)
           const msg = e instanceof Error ? e.message : 'Unknown error'
@@ -1547,7 +1549,7 @@ export default function Create() {
 
     // Results for this session were already saved on a previous mount
     // (e.g. browser-back from /results page) — don't repeat the save.
-    if (lastResults.id && sessionStorage.getItem(`alaya-results-saved-${lastResults.id}`)) {
+    if (sessionStorage.getItem(resultsSavedKey(lastResults))) {
       autoSavedResultsRef.current = lastResults
       if (!currentDeckId) {
         const cachedDeckId = sessionStorage.getItem(`alaya-autosave-${lastResults.sessionCode}`)

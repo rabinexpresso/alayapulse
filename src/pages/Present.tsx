@@ -300,6 +300,10 @@ export default function Present() {
   const [responses,       setResponses]       = useState<FirestoreResponse[]>([])
   const [viewerCount,     setViewerCount]     = useState(0)
   const [showExitConfirm,   setShowExitConfirm]   = useState(false)
+  // Name for this session ("Sydney team"), asked when ending the show
+  const [endLabel,          setEndLabel]          = useState('')
+  const endLabelTouched    = useRef(false)
+  const [isEnding,          setIsEnding]          = useState(false)
   const [showQRModal,       setShowQRModal]       = useState(false)
   const [showHUD,           setShowHUD]           = useState(true)
   const [showingWaitingRoom, setShowingWaitingRoom] = useState(isRealSession && startSlide === 0)
@@ -575,6 +579,63 @@ export default function Present() {
     return () => window.removeEventListener('keydown', h)
   }, [goNext, goPrev, navigate])
 
+  // Ending a resumed show: offer the name it was given last time
+  useEffect(() => {
+    if (!showExitConfirm || !isRealSession || endLabelTouched.current) return
+    let cancelled = false
+    getSessionByCode(code).then(s => {
+      if (!cancelled && !endLabelTouched.current && s?.label) setEndLabel(s.label)
+    }).catch(() => { /* the box just starts empty */ })
+    return () => { cancelled = true }
+  }, [showExitConfirm, isRealSession, code])
+
+  // End the show: save its results and go back to the editor
+  const endShow = async () => {
+    if (isEnding) return
+    setIsEnding(true)
+    // Snapshot results from this session so the editor can
+    // save them with the deck for later analysis.
+    let lastResults: DeckResults | undefined
+    // A name typed now (or cleared on purpose) — otherwise the saved one stays
+    const label = endLabelTouched.current || endLabel.trim() ? endLabel.trim() : undefined
+    if (isRealSession) {
+      try {
+        const [all, sess] = await Promise.all([fetchAllSessionResponses(code), getSessionByCode(code)])
+        // Dated from when the show was first started, so ending a
+        // resumed show updates the same saved session.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const firstStarted = (sess?.createdAt as any)?.toMillis?.() as number | undefined
+        const snapshot = buildResultsSnapshot(
+          deck, all, code,
+          firstStarted ?? sessionStartedAt.current,
+          peakViewerRef.current,
+          sess?.tests,
+        )
+        if (label !== undefined) snapshot.label = label
+        // Only keep a results record if at least one question
+        // actually received a response. Skips empty history from
+        // content-only runs or sessions nobody answered, so the
+        // saved data (and the all-data export) stays meaningful.
+        // A survey is always kept: people can still answer it after the show.
+        if (snapshot.questions.some(q => q.responseCount > 0) || snapshot.tests?.some(t => t.participants.length > 0 || t.kind === 'survey')) {
+          lastResults = snapshot
+        }
+      } catch (e) {
+        console.error('Failed to capture session results:', e)
+      }
+      endSession(code, label).catch(console.error)
+    }
+    navigate('/create', { state: {
+      slides: stateSlides,
+      deckTitle: stateDeckTitle,
+      sessionCode: isRealSession ? code : undefined,
+      deckId: stateDeckId,
+      lastResults,
+      selectedSlideId: deck[current]?.id,
+      isQuiz,
+      quizAutoOff: locationState.quizAutoOff,
+    } })
+  }
 
   const canGoPrev = current > 0 || (isQuestion && phase === 'results') || (current === 0 && isRealSession && !showingWaitingRoom)
   const canGoNext     = !(current === deck.length - 1 && (!isQuestion || phase === 'results'))
@@ -1114,6 +1175,30 @@ export default function Present() {
               <p className="mt-2 text-sm font-light text-white/50">
                 If you end the session, you can resume it anytime — just click the Resume button on the Create page. Your audience won't need to re-enter the room code.
               </p>
+              {isRealSession && (
+                <div className="mt-6 text-left">
+                  <label htmlFor="end-label" className="text-sm font-medium text-white">
+                    Who was this session with? <span className="font-light text-white/40">(optional)</span>
+                  </label>
+                  <input
+                    id="end-label"
+                    value={endLabel}
+                    maxLength={60}
+                    autoFocus={!('ontouchstart' in window)}
+                    autoComplete="off"
+                    placeholder="e.g. Sydney team, New starters"
+                    onChange={e => { endLabelTouched.current = true; setEndLabel(e.target.value) }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { e.preventDefault(); void endShow() }
+                      else if (e.key === 'Escape') setShowExitConfirm(false)
+                    }}
+                    className="mt-1.5 w-full rounded-xl border border-white/15 bg-white/5 px-3.5 py-2.5 text-sm text-white placeholder:text-white/30 focus:border-hot-pink focus:outline-none"
+                  />
+                  <p className="mt-1.5 text-xs font-light text-white/40">
+                    Shows on the Results page, so you can tell sessions of this deck apart.
+                  </p>
+                </div>
+              )}
               <div className="mt-7 flex gap-3">
                 <button
                   onClick={() => setShowExitConfirm(false)}
@@ -1122,46 +1207,11 @@ export default function Present() {
                   Keep presenting
                 </button>
                 <button
-                  onClick={async () => {
-                    // Snapshot results from this session so the editor can
-                    // save them with the deck for later analysis.
-                    let lastResults: DeckResults | undefined
-                    if (isRealSession) {
-                      try {
-                        const [all, sess] = await Promise.all([fetchAllSessionResponses(code), getSessionByCode(code)])
-                        const snapshot = buildResultsSnapshot(
-                          deck, all, code,
-                          sessionStartedAt.current,
-                          peakViewerRef.current,
-                          sess?.tests,
-                        )
-                        // Only keep a results record if at least one question
-                        // actually received a response. Skips empty history from
-                        // content-only runs or sessions nobody answered, so the
-                        // saved data (and the all-data export) stays meaningful.
-                        // A survey is always kept: people can still answer it after the show.
-                        if (snapshot.questions.some(q => q.responseCount > 0) || snapshot.tests?.some(t => t.participants.length > 0 || t.kind === 'survey')) {
-                          lastResults = snapshot
-                        }
-                      } catch (e) {
-                        console.error('Failed to capture session results:', e)
-                      }
-                      endSession(code).catch(console.error)
-                    }
-                    navigate('/create', { state: {
-                      slides: stateSlides,
-                      deckTitle: stateDeckTitle,
-                      sessionCode: isRealSession ? code : undefined,
-                      deckId: stateDeckId,
-                      lastResults,
-                      selectedSlideId: deck[current]?.id,
-                      isQuiz,
-                      quizAutoOff: locationState.quizAutoOff,
-                    } })
-                  }}
-                  className="flex-1 rounded-xl bg-hot-pink py-3 text-sm font-medium text-white shadow-[0_0_20px_-4px] shadow-hot-pink/50 transition hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/70"
+                  disabled={isEnding}
+                  onClick={endShow}
+                  className="flex-1 rounded-xl bg-hot-pink py-3 text-sm font-medium text-white shadow-[0_0_20px_-4px] shadow-hot-pink/50 transition hover:shadow-[0_0_28px_-2px] hover:shadow-hot-pink/70 disabled:opacity-70"
                 >
-                  End session
+                  {isEnding ? 'Saving…' : 'End session'}
                 </button>
               </div>
             </motion.div>

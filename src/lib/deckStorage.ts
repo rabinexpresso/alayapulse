@@ -2,7 +2,7 @@ import type { TestAnswer, TestQType } from './selfPacedTest'
 import { openDB, type IDBPDatabase } from 'idb'
 import { db, auth } from './firebase'
 import {
-  doc, setDoc, getDoc, getDocs, deleteDoc, collection,
+  doc, setDoc, getDoc, getDocs, deleteDoc, updateDoc, collection,
 } from 'firebase/firestore'
 import {
   GoogleAuthProvider, signInWithPopup, signOut,
@@ -130,6 +130,9 @@ export interface DeckResults {
   id:             string
   /** The 6-char session code from the live poll. */
   sessionCode:    string
+  /** Who the session was with, e.g. "Sydney team" — typed when ending the
+   *  show or on the Results page, so sessions of one deck can be told apart. */
+  label?:         string
   /** Unix ms when the session started. */
   conductedAt:    number
   /** Unix ms when the session ended (for "X mins" calculations). */
@@ -647,6 +650,15 @@ export async function cloudListResults(deckId: string): Promise<DeckResults[]> {
   return Promise.all(sessions.map(r => loadResponseParts(user.uid, deckId, r)))
 }
 
+/** One saved session, or null when there isn't one. */
+export async function cloudGetResults(deckId: string, sessionId: string): Promise<DeckResults | null> {
+  const user = auth.currentUser
+  if (!user) return null
+  const snap = await getDoc(resultsDoc(user.uid, deckId, sessionId))
+  if (!snap.exists()) return null
+  return loadResponseParts(user.uid, deckId, { ...(snap.data() as DeckResults), id: sessionId })
+}
+
 export async function cloudDeleteResults(deckId: string, sessionId: string): Promise<void> {
   const user = auth.currentUser
   if (!user) return
@@ -670,6 +682,15 @@ export async function browserListResults(deckId: string): Promise<DeckResults[]>
       return rest as DeckResults
     })
     .sort((a, b) => b.conductedAt - a.conductedAt)
+}
+
+export async function browserGetResults(deckId: string, sessionId: string): Promise<DeckResults | null> {
+  const idb = await getIDB()
+  const row = await idb.get(IDB_RESULTS, `${deckId}__${sessionId}`) as (DeckResults & { _key: string; deckId: string }) | undefined
+  if (!row) return null
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { _key, deckId: _drop, ...rest } = row
+  return rest as DeckResults
 }
 
 export async function browserDeleteResults(deckId: string, sessionId: string): Promise<void> {
@@ -778,6 +799,50 @@ export async function deleteResults(
   return backend === 'cloud'
     ? cloudDeleteResults(deckId, sessionId)
     : browserDeleteResults(deckId, sessionId)
+}
+export async function getResults(
+  backend: StorageBackend, deckId: string, sessionId: string,
+): Promise<DeckResults | null> {
+  return backend === 'cloud'
+    ? cloudGetResults(deckId, sessionId)
+    : browserGetResults(deckId, sessionId)
+}
+
+/** Names a saved session ("Sydney team"); an empty name clears it. */
+export async function renameResults(
+  backend: StorageBackend, deckId: string, sessionId: string, label: string,
+): Promise<void> {
+  if (backend === 'cloud') {
+    const user = auth.currentUser
+    if (!user) throw new Error('Not signed in')
+    await updateDoc(resultsDoc(user.uid, deckId, sessionId), { label })
+    return
+  }
+  const r = await browserGetResults(deckId, sessionId)
+  if (r) await browserSaveResults(deckId, { ...r, label })
+}
+
+/** A resumed show is saved again under the same id. Keep the earlier save's
+ *  name (unless a new one was typed) and any question or test from it that is
+ *  no longer in the deck, so editing between runs never loses answers. */
+export function mergeResults(prev: DeckResults, next: DeckResults): DeckResults {
+  const qIds = new Set(next.questions.map(q => q.slideId))
+  const tIds = new Set((next.tests ?? []).map(t => t.blockId))
+  // A survey's late answers (through the link) may already be in the earlier save
+  const fresher = (t: TestResult) => {
+    const old = t.kind === 'survey' ? prev.tests?.find(o => o.blockId === t.blockId) : undefined
+    return old && old.participants.length > t.participants.length ? { ...t, participants: old.participants } : t
+  }
+  const tests = [...(next.tests ?? []).map(fresher), ...(prev.tests ?? []).filter(t => !tIds.has(t.blockId))]
+  const label = next.label ?? prev.label
+  return {
+    ...next,
+    conductedAt:   Math.min(prev.conductedAt, next.conductedAt),
+    audienceCount: Math.max(prev.audienceCount, next.audienceCount),
+    questions:     [...next.questions, ...prev.questions.filter(q => !qIds.has(q.slideId))],
+    ...(label !== undefined ? { label } : {}),
+    ...(tests.length ? { tests } : {}),
+  }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
