@@ -1,11 +1,12 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   Hammer, Presentation, BarChart2, Upload, Scissors, LayoutGrid,
   FileSpreadsheet, ListPlus, Bookmark, Play, Compass, Trophy, ClipboardCheck,
-  Download, Share2, Lightbulb, AlertTriangle, ClipboardList,
+  Download, Share2, Lightbulb, AlertTriangle, ClipboardList, ArrowRight, Maximize2, X,
 } from 'lucide-react'
 import { AlayaMark } from '@/components/AlayaMark'
+import { cn } from '@/lib/utils'
 
 /* ─────────────────────────────────────────────────────────────────────────
    User Guide — /guide
@@ -286,21 +287,71 @@ const QUICK_START: { text: React.ReactNode; link: string }[] = [
   { text: <>Afterwards, click <Btn color="gold">Results</Btn> to see and download everything.</>, link: 'results' },
 ]
 
-/* Screenshot that removes itself if the image file doesn't exist (yet). */
-function Shot({ src, alt }: { src: string; alt: string }) {
+/* What people usually come here to do — big cards that jump to the answer. */
+const TASKS: { label: string; sub: string; link: string; icon: React.ReactNode; card: string; ink: string }[] = [
+  { label: 'Build my deck',      sub: 'Import slides, add questions',  link: 'import-slides',   icon: <Upload className="size-5" />,         card: 'border-[#f97316]/35 hover:border-[#f97316]/75', ink: 'bg-[#f97316]/15 text-[#fb923c]' },
+  { label: 'Run a live session', sub: 'QR code, moving through',       link: 'slideshow',       icon: <Presentation className="size-5" />,   card: 'border-hot-pink/35 hover:border-hot-pink/75',   ink: 'bg-hot-pink/15 text-[#ff6aa0]' },
+  { label: 'Live quiz',          sub: 'Points and a leaderboard',      link: 'quiz-mode',       icon: <Trophy className="size-5" />,         card: 'border-golden-sun/35 hover:border-golden-sun/75', ink: 'bg-golden-sun/15 text-golden-sun' },
+  { label: 'Self-paced test',    sub: 'Everyone at their own pace',    link: 'self-paced-test', icon: <ClipboardCheck className="size-5" />, card: 'border-golden-sun/35 hover:border-golden-sun/75', ink: 'bg-golden-sun/15 text-golden-sun' },
+  { label: 'Survey',             sub: 'Feedback, like a Google Form',  link: 'survey',          icon: <ClipboardList className="size-5" />,  card: 'border-hot-pink/35 hover:border-hot-pink/75',   ink: 'bg-hot-pink/15 text-[#ff6aa0]' },
+  { label: 'Get the results',    sub: 'Excel, PDF, Word, AI summary',  link: 'results',         icon: <BarChart2 className="size-5" />,      card: 'border-fresh-green/35 hover:border-fresh-green/75', ink: 'bg-fresh-green/15 text-fresh-green' },
+]
+
+/** Roughly how long a topic takes to read (its steps are short). */
+const readMinutes = (t: Topic) => Math.max(1, Math.round(t.steps.length / 4))
+const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+
+/* A screenshot beside the steps: click to see it bigger. Hides itself if
+   the image file doesn't exist (yet). */
+function Shot({ src, alt, step, onZoom }: { src: string; alt: string; step: number; onZoom: (src: string, alt: string) => void }) {
   return (
-    <img
-      src={`/guide/${src}`}
-      alt={alt}
-      loading="lazy"
-      className="mt-3 w-full max-w-2xl rounded-xl border border-white/10 shadow-lg"
-      onError={e => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none' }}
-    />
+    <figure>
+      <button
+        onClick={() => onZoom(src, alt)}
+        aria-label={`Enlarge: ${alt}`}
+        className="group relative block w-full overflow-hidden rounded-xl border border-white/10 bg-black/20 shadow-lg transition hover:border-white/25"
+      >
+        <img
+          src={`/guide/${src}`}
+          alt={alt}
+          loading="lazy"
+          className="block w-full"
+          onError={e => { (e.currentTarget.closest('figure') as HTMLElement).style.display = 'none' }}
+        />
+        <span className="absolute bottom-2 right-2 flex items-center gap-1 rounded-md bg-black/65 px-2 py-0.5 text-[11px] text-white/85 opacity-0 transition group-hover:opacity-100">
+          <Maximize2 className="size-3" /> Click to enlarge
+        </span>
+      </button>
+      <figcaption className="mt-1.5 text-xs text-white/45">Step {step} · {alt}</figcaption>
+    </figure>
+  )
+}
+
+/* A topic's tip and warning boxes. */
+function Notes({ topic }: { topic: Topic }) {
+  return (
+    <>
+      {topic.tip && (
+        <div className="flex gap-2.5 rounded-xl border border-sky-blue/20 bg-sky-blue/10 px-4 py-3">
+          <Lightbulb className="mt-0.5 size-4 shrink-0 text-sky-blue" />
+          <p className="text-[13px] leading-relaxed text-white/80">{topic.tip}</p>
+        </div>
+      )}
+      {topic.warning && (
+        <div className="flex gap-2.5 rounded-xl border border-golden-sun/25 bg-golden-sun/10 px-4 py-3">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-golden-sun" />
+          <p className="text-[13px] leading-relaxed text-white/80">{topic.warning}</p>
+        </div>
+      )}
+    </>
   )
 }
 
 export default function Guide() {
   const { hash } = useLocation()
+  // The topic being read, for the menu; the screenshot shown big
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [zoom, setZoom] = useState<{ src: string; alt: string } | null>(null)
 
   // Scroll to the linked topic (e.g. /guide#quiz-mode) once content renders
   useEffect(() => {
@@ -309,18 +360,46 @@ export default function Guide() {
     if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60)
   }, [hash])
 
+  // The menu follows along: "here" is the last topic whose top has passed
+  // the upper third of the screen
+  useEffect(() => {
+    const ids = GUIDE.flatMap(s => s.topics.map(t => t.id))
+    let frame = 0
+    const update = () => {
+      frame = 0
+      let here: string | null = null
+      for (const id of ids) {
+        const el = document.getElementById(id)
+        if (el && el.getBoundingClientRect().top <= window.innerHeight * 0.33) here = id
+      }
+      setActiveId(here)
+    }
+    const onScroll = () => { if (!frame) frame = requestAnimationFrame(update) }
+    update()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('resize', onScroll)
+    return () => { window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onScroll); cancelAnimationFrame(frame) }
+  }, [])
+
+  useEffect(() => {
+    if (!zoom) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setZoom(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [zoom])
+
   return (
     <div className="min-h-screen bg-midnight-sky-900 text-white">
       {/* Header */}
       <header className="sticky top-0 z-20 border-b border-white/5 bg-midnight-sky-900/85 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center px-6 py-4">
+        <div className="mx-auto flex max-w-[1440px] items-center px-6 py-4">
           <Link to="/"><AlayaMark className="text-white" /></Link>
         </div>
       </header>
 
-      <div className="mx-auto flex max-w-6xl gap-10 px-6 py-10">
-        {/* Sticky topic menu (desktop) — bounded height with its own scroll,
-            so every link stays reachable even once the nav is pinned. */}
+      <div className="mx-auto flex max-w-[1440px] gap-10 px-6 py-10">
+        {/* Sticky topic menu (desktop) — follows the topic you're reading, with
+            its own scroll so every link stays reachable once it's pinned. */}
         <nav className="scrollbar-sidebar sticky top-24 hidden w-56 shrink-0 self-start overflow-y-auto lg:block" style={{ maxHeight: 'calc(100vh - 7rem)' }}>
           {GUIDE.map(stage => (
             <div key={stage.id} className="mb-5">
@@ -332,7 +411,11 @@ export default function Guide() {
                   <li key={t.id}>
                     <a
                       href={`#${t.id}`}
-                      className="block border-l-2 border-transparent py-1 pl-3 text-[13px] leading-snug text-white/60 transition hover:border-hot-pink hover:text-white"
+                      aria-current={activeId === t.id ? 'location' : undefined}
+                      className={cn(
+                        'block border-l-2 py-1 pl-3 text-[13px] leading-snug transition hover:border-hot-pink hover:text-white',
+                        activeId === t.id ? 'border-hot-pink font-medium text-white' : 'border-transparent text-white/55',
+                      )}
                     >
                       {t.title}
                     </a>
@@ -345,48 +428,72 @@ export default function Guide() {
 
         {/* Content */}
         <main className="min-w-0 flex-1">
-          <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-            User <span className="text-hot-pink">Guide</span>
-          </h1>
-          <p className="mt-3 max-w-2xl font-light text-white/60">
-            How to build a deck, run a live session and get the results — in the order you’ll do it.
-          </p>
+          {/* Title + quick start, with the walkthrough video beside them */}
+          <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]">
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+                User <span className="text-hot-pink">Guide</span>
+              </h1>
+              <p className="mt-3 font-light text-white/60">
+                How to build a deck, run a live session and get the results — in the order you’ll do it.
+              </p>
 
-          {/* Quick start — the whole journey in four lines */}
-          <div className="mt-6 max-w-2xl rounded-2xl border border-hot-pink/25 bg-hot-pink/[0.06] p-5">
-            <p className="text-[11px] font-bold uppercase tracking-widest text-hot-pink">Quick start</p>
-            <ol className="mt-3 space-y-2 text-sm leading-relaxed text-white/85">
-              {QUICK_START.map((q, i) => (
-                <li key={i} className="flex gap-3">
-                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-hot-pink/15 text-xs font-bold text-hot-pink">{i + 1}</span>
-                  <span>{q.text} <a href={`#${q.link}`} className="whitespace-nowrap text-hot-pink underline-offset-2 hover:underline">How →</a></span>
-                </li>
-              ))}
-            </ol>
+              {/* Quick start — the whole journey in four lines */}
+              <div className="mt-6 rounded-2xl border border-hot-pink/25 bg-hot-pink/[0.06] p-5">
+                <p className="text-[11px] font-bold uppercase tracking-widest text-hot-pink">Quick start · 2 min</p>
+                <ol className="mt-3 space-y-2.5 text-sm leading-relaxed text-white/85">
+                  {QUICK_START.map((q, i) => (
+                    <li key={i} className="flex gap-3">
+                      <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-hot-pink/15 text-xs font-bold text-hot-pink">{i + 1}</span>
+                      <span>{q.text} <a href={`#${q.link}`} className="whitespace-nowrap text-hot-pink underline-offset-2 hover:underline">How →</a></span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            </div>
+
+            {/* Walkthrough video — self-hosted (no third-party player), so
+                everything stays inside our own Google Cloud project. */}
+            <figure className="overflow-hidden rounded-2xl border border-white/10 bg-black">
+              <video
+                id="guide-video"
+                controls
+                preload="metadata"
+                playsInline
+                poster="/guide/video-poster.jpg"
+                className="block w-full"
+              >
+                <source src="/alaya-pulse-tutorial.mp4" type="video/mp4" />
+                Your browser can’t play this video — the written steps below cover everything it shows.
+              </video>
+              <figcaption className="flex items-center gap-2 border-t border-white/10 px-4 py-2.5 text-[13px] text-white/50">
+                <Play className="size-3.5 shrink-0 text-hot-pink" />
+                The full walkthrough — 6 min 19 sec. Prefer reading? Every step is below.
+              </figcaption>
+            </figure>
           </div>
 
-          {/* Walkthrough video — self-hosted (no third-party player), so
-              everything stays inside our own Google Cloud project. */}
-          <figure className="mt-8 overflow-hidden rounded-2xl border border-white/10 bg-black">
-            <video
-              id="guide-video"
-              controls
-              preload="metadata"
-              playsInline
-              poster="/guide/video-poster.jpg"
-              className="block w-full"
-            >
-              <source src="/alaya-pulse-tutorial.mp4" type="video/mp4" />
-              Your browser can’t play this video — the written steps below cover everything it shows.
-            </video>
-            <figcaption className="flex items-center gap-2 border-t border-white/10 px-4 py-2.5 text-[13px] text-white/50">
-              <Play className="size-3.5 shrink-0 text-hot-pink" />
-              Full walkthrough — 6 min 19 sec. Prefer reading? Every step is written out below.
-            </figcaption>
-          </figure>
+          {/* Jump straight to a task */}
+          <p className="mt-12 text-[11px] font-bold uppercase tracking-widest text-white/45">What do you want to do?</p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {TASKS.map(t => (
+              <a
+                key={t.link}
+                href={`#${t.link}`}
+                className={cn('group flex items-center gap-3.5 rounded-2xl border bg-white/[0.04] p-4 transition hover:bg-white/[0.08]', t.card)}
+              >
+                <span className={cn('flex size-11 shrink-0 items-center justify-center rounded-xl', t.ink)}>{t.icon}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-semibold">{t.label}</span>
+                  <span className="block text-[13px] font-light text-white/55">{t.sub}</span>
+                </span>
+                <ArrowRight className="size-4 shrink-0 text-white/30 transition group-hover:translate-x-0.5 group-hover:text-white/70" />
+              </a>
+            ))}
+          </div>
 
           {GUIDE.map(stage => (
-            <section key={stage.id} className="mt-12">
+            <section key={stage.id} className="mt-14">
               <div className="mb-6 flex items-center gap-3">
                 <span className="flex size-9 items-center justify-center rounded-xl bg-hot-pink/15 text-hot-pink">
                   {stage.icon}
@@ -397,60 +504,65 @@ export default function Guide() {
                 </div>
               </div>
 
-              <div className="space-y-4">
-                {stage.topics.map(topic => (
-                  <article
-                    key={topic.id}
-                    id={topic.id}
-                    className="scroll-mt-24 rounded-2xl border border-white/10 bg-white/[0.03] p-6"
-                  >
-                    <h3 className="flex items-center gap-2.5 text-lg font-semibold">
-                      <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-white/10 text-white/70">
-                        {topic.icon}
-                      </span>
-                      {topic.title}
-                    </h3>
-                    {topic.intro && (
-                      <p className="mt-2.5 text-sm font-light leading-relaxed text-white/60">{topic.intro}</p>
-                    )}
-                    {topic.videoAt !== undefined && (
-                      <button
-                        onClick={() => playVideoAt(topic.videoAt!)}
-                        className="mt-3 inline-flex items-center gap-2 rounded-full border border-hot-pink/40 bg-hot-pink/10 px-3.5 py-1.5 text-[13px] font-medium text-white/90 transition hover:bg-hot-pink/20"
-                      >
-                        <Play className="size-3.5 text-hot-pink" />
-                        Watch this part of the video ({Math.floor(topic.videoAt / 60)}:{String(topic.videoAt % 60).padStart(2, '0')})
-                      </button>
-                    )}
-
-                    <ol className="mt-4 space-y-4">
-                      {topic.steps.map((step, i) => (
-                        <li key={i} className="flex gap-3">
-                          <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-hot-pink/15 text-xs font-bold text-hot-pink">
-                            {i + 1}
+              <div className="space-y-5">
+                {stage.topics.map(topic => {
+                  const shots = topic.steps.flatMap((s, i) => s.image ? [{ src: s.image, alt: s.imageAlt ?? '', step: i + 1 }] : [])
+                  const hasNotes = !!(topic.tip || topic.warning)
+                  // Pictures (or, without any, the tip) sit beside the steps on a wide screen
+                  const twoCol = shots.length > 0 || hasNotes
+                  return (
+                    <article
+                      key={topic.id}
+                      id={topic.id}
+                      className="scroll-mt-24 rounded-2xl border border-white/10 bg-white/[0.03] p-6 lg:p-7"
+                    >
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                        <h3 className="flex items-center gap-2.5 text-lg font-semibold">
+                          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/10 text-white/75">
+                            {topic.icon}
                           </span>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm leading-relaxed text-white/85">{step.text}</p>
-                            {step.image && <div><Shot src={step.image} alt={step.imageAlt ?? ''} /></div>}
-                          </div>
-                        </li>
-                      ))}
-                    </ol>
+                          {topic.title}
+                        </h3>
+                        <span className="rounded-full bg-white/[0.08] px-2.5 py-0.5 text-xs text-white/55">{readMinutes(topic)} min read</span>
+                        {topic.videoAt !== undefined && (
+                          <button
+                            onClick={() => playVideoAt(topic.videoAt!)}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-hot-pink/40 bg-hot-pink/10 px-3 py-0.5 text-xs font-medium text-white/90 transition hover:bg-hot-pink/20"
+                          >
+                            <Play className="size-3 text-hot-pink" />
+                            Watch ({clock(topic.videoAt)})
+                          </button>
+                        )}
+                      </div>
+                      {topic.intro && (
+                        <p className="mt-3 max-w-3xl text-[15px] font-light leading-relaxed text-white/65">{topic.intro}</p>
+                      )}
 
-                    {topic.tip && (
-                      <div className="mt-5 flex gap-2.5 rounded-xl border border-sky-blue/20 bg-sky-blue/10 px-4 py-3">
-                        <Lightbulb className="mt-0.5 size-4 shrink-0 text-sky-blue" />
-                        <p className="text-[13px] leading-relaxed text-white/80">{topic.tip}</p>
+                      <div className={cn('mt-5 grid gap-8', twoCol && 'lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]')}>
+                        <div className="min-w-0">
+                          <ol className="space-y-4">
+                            {topic.steps.map((step, i) => (
+                              <li key={i} className="flex gap-3">
+                                <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-hot-pink/15 text-xs font-bold text-hot-pink">
+                                  {i + 1}
+                                </span>
+                                <p className="min-w-0 flex-1 text-[15px] leading-relaxed text-white/85">{step.text}</p>
+                              </li>
+                            ))}
+                          </ol>
+                          {shots.length > 0 && hasNotes && <div className="mt-6 space-y-3"><Notes topic={topic} /></div>}
+                        </div>
+                        {twoCol && (
+                          <aside className="min-w-0 space-y-5 lg:sticky lg:top-24 lg:self-start">
+                            {shots.length > 0
+                              ? shots.map(s => <Shot key={s.src} {...s} onZoom={(src, alt) => setZoom({ src, alt })} />)
+                              : <div className="space-y-3"><Notes topic={topic} /></div>}
+                          </aside>
+                        )}
                       </div>
-                    )}
-                    {topic.warning && (
-                      <div className="mt-5 flex gap-2.5 rounded-xl border border-golden-sun/25 bg-golden-sun/10 px-4 py-3">
-                        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-golden-sun" />
-                        <p className="text-[13px] leading-relaxed text-white/80">{topic.warning}</p>
-                      </div>
-                    )}
-                  </article>
-                ))}
+                    </article>
+                  )
+                })}
               </div>
             </section>
           ))}
@@ -460,6 +572,26 @@ export default function Guide() {
           </p>
         </main>
       </div>
+
+      {/* A screenshot, big */}
+      {zoom && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={zoom.alt}
+          onClick={() => setZoom(null)}
+          className="fixed inset-0 z-50 flex cursor-zoom-out items-center justify-center bg-black/85 p-6 backdrop-blur-sm"
+        >
+          <img src={`/guide/${zoom.src}`} alt={zoom.alt} className="max-h-full max-w-full rounded-xl shadow-2xl" />
+          <button
+            onClick={() => setZoom(null)}
+            aria-label="Close"
+            className="absolute right-5 top-5 rounded-full bg-white/10 p-2 text-white transition hover:bg-white/20"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+      )}
     </div>
   )
 }
