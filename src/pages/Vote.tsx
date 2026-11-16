@@ -23,6 +23,31 @@ const REACTION_CONFIG = [
   { type: 'thinking'  as ReactionType, emoji: '🤔', label: 'Hmm...'     },
 ]
 
+/* ── Unsent answers ────────────────────────────────────────────────────────
+   What someone has ticked or typed but not sent yet. Kept by the page, not by
+   the question on screen, so it outlives a slide change: going back to the
+   question — or finishing it late — starts from what was already there. */
+
+type AnswerDraft = { picks?: number[]; text?: string; ratings?: number[]; order?: number[] }
+
+const draftHasContent = (d?: AnswerDraft) =>
+  !!d && (!!d.picks?.length || !!d.text?.trim() || !!d.ratings?.some(r => r >= 0) || !!d.order?.length)
+
+const INTERACTIVE_TYPES = new Set(['mcq', 'wordcloud', 'openended', 'rating', 'ranking'])
+
+/** Votes are counted per reset round, so a host's "reset votes" opens the question again. */
+const roundKeyOf = (session: Session, slideId: string) => `${slideId}:r${(session.resetCounts ?? {})[slideId] ?? 0}`
+
+/** May this question still be answered after the host has moved on? Never one
+ *  that ran against the clock or scores quiz points — that would be extra time. */
+function canAnswerLate(session: Session, slide: unknown, wasTimed: boolean): boolean {
+  const q = slide as { type?: string; timer?: number; correctAnswers?: number[] }
+  if (!q?.type || !INTERACTIVE_TYPES.has(q.type)) return false
+  if (wasTimed || (typeof q.timer === 'number' && q.timer > 0)) return false
+  if (session.isQuiz && q.type === 'mcq' && (q.correctAnswers?.length ?? 0) > 0) return false
+  return true
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    Vote page — the screen every audience member sees on their phone.
    Subscribes to the session doc for live slide / phase changes.
@@ -61,6 +86,24 @@ export default function Vote() {
   const [oeTexts,       setOeTexts]       = useSharedStored<Record<string, string[]>>(stored('oe-texts'), {})
   // A survey opened from the "still open" bar while the show has moved on
   const [surveyView,      setSurveyView]      = useState<string | null>(null)
+  // Unsent answers, by slide + vote round
+  const [drafts,          setDrafts]          = useState<Record<string, AnswerDraft>>({})
+  const saveDraft = useCallback((key: string, d: AnswerDraft) => setDrafts(prev => {
+    if (!draftHasContent(d)) {
+      if (!(key in prev)) return prev
+      const next = { ...prev }; delete next[key]; return next
+    }
+    return JSON.stringify(prev[key]) === JSON.stringify(d) ? prev : { ...prev, [key]: d }
+  }), [])
+  // A question the host moved on from while this phone still had an unsent
+  // answer (pendingLate), and that question opened again to finish it (lateView)
+  const [pendingLate,     setPendingLate]     = useState<string | null>(null)
+  const [lateView,        setLateView]        = useState<string | null>(null)
+  const [lateSent,        setLateSent]        = useState(false)
+  // The slide this phone last showed, to notice the host changing slide
+  const [seenSlideId,     setSeenSlideId]     = useState('')
+  // Which slide each countdown belonged to: timed questions close for good
+  const timerOwnerRef     = useRef<Map<number, string>>(new Map())
   const [quizScore,       setQuizScore]       = useState(0)
   const [lastQuizResult,  setLastQuizResult]  = useState<{
     isCorrect: boolean
@@ -164,6 +207,33 @@ export default function Vote() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.currentSlide])
 
+  // ── The host changed slide ─────────────────────────────────────────────
+  // Worked out while rendering rather than in an effect, so the phone never
+  // paints the new slide for a moment before deciding to stay where it is.
+  const liveSlideId = session?.slides?.[session.currentSlide]?.id ?? ''
+  useEffect(() => {
+    const t = session?.timerEndsAt
+    if (t && liveSlideId && !timerOwnerRef.current.has(t)) timerOwnerRef.current.set(t, liveSlideId)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.timerEndsAt, liveSlideId])
+  if (session && seenSlideId !== liveSlideId) {
+    setSeenSlideId(liveSlideId)
+    const left = session.slides.find(x => x.id === seenSlideId)
+    let nextSurvey = surveyView === liveSlideId ? null : surveyView
+    let nextLate   = pendingLate === liveSlideId ? null : pendingLate
+    if (left?.type === 'testblock' && isSurvey(left as StoredTestBlockSlide)) {
+      // Part-way through the survey: stay in it instead of being pulled out
+      if (surveyOpen(session.surveys?.[left.id], left as StoredTestBlockSlide) && surveyStarted(sessionCode ?? '', left.id)) nextSurvey = left.id
+    } else if (left) {
+      const wasTimed = [...timerOwnerRef.current.values()].includes(left.id)
+      const key      = roundKeyOf(session, left.id)
+      if (canAnswerLate(session, left, wasTimed) && draftHasContent(drafts[key]) && !submittedSlides.has(key)) nextLate = left.id
+    }
+    if (nextSurvey !== surveyView) setSurveyView(nextSurvey)
+    if (nextLate !== pendingLate)  setPendingLate(nextLate)
+    if (lateView === liveSlideId)  setLateView(null)   // the host came back to it: it's live again
+  }
+
   // ── Loading ────────────────────────────────────────────────────────────
   if (session === undefined) {
     return <FullPageSpinner />
@@ -237,22 +307,31 @@ export default function Vote() {
     )
   }
 
-  const slideData = session.slides[session.currentSlide]
+  // The question being finished late, if any — otherwise the slide the host is on
+  const lateSlide     = lateView && lateView !== liveSlideId ? session.slides.find(x => x.id === lateView) : undefined
+  const answeringLate = !!lateSlide
+  const slideData = lateSlide ?? session.slides[session.currentSlide]
   const slideId   = slideData?.id ?? ''
   // Track votes per reset-round so the presenter can clear votes and let audience re-vote.
   // roundKey changes whenever the presenter resets this slide, unlocking the voting form.
-  const voteRound = (session.resetCounts ?? {})[slideId] ?? 0
-  const roundKey  = `${slideId}:r${voteRound}`
+  const roundKey  = roundKeyOf(session, slideId)
   const alreadySubmitted = submittedSlides.has(roundKey)
 
+  // An unsent answer to a question the host has moved on from
+  const pendingSlide = pendingLate && pendingLate !== liveSlideId ? session.slides.find(x => x.id === pendingLate) : undefined
+  const pendingKey   = pendingSlide ? roundKeyOf(session, pendingSlide.id) : ''
+  const showLateBar  = !!pendingSlide && !answeringLate && !surveyView
+    && draftHasContent(drafts[pendingKey]) && !submittedSlides.has(pendingKey)
+  const discardLate  = () => { if (pendingKey) saveDraft(pendingKey, {}); setPendingLate(null) }
+
   // ── Handle submit for any question type ───────────────────────────────
-  const INTERACTIVE_TYPES = new Set(['mcq', 'wordcloud', 'openended', 'rating', 'ranking'])
 
   const handleSubmit = async (value: string) => {
     const sType = (slideData as { type: string } | undefined)?.type ?? ''
     if (!slideData || !INTERACTIVE_TYPES.has(sType) || alreadySubmitted || submitting) return
     // Belt-and-suspenders: if timer has expired, reject any submission
-    if (timerExpired) return
+    // (the countdown on screen belongs to the live slide, not to a late answer)
+    if (timerExpired && !answeringLate) return
     // Extra guard for word cloud
     if (slideData.type === 'wordcloud') {
       const maxSubs = (slideData as { wcMaxSubmissions?: number }).wcMaxSubmissions ?? 3
@@ -270,7 +349,7 @@ export default function Vote() {
     // This avoids cross-clock issues between presenter's Date.now() and Firestore serverTimestamp().
     let quizPoints: { answer: number; speed: number } | undefined
     let quizFeedback: { isCorrect: boolean; answerPts: number; speedPts: number; correctAnswer: string } | undefined
-    if (session.isQuiz && slideData.type === 'mcq') {
+    if (session.isQuiz && slideData.type === 'mcq' && !answeringLate) {
       const qs = slideData as { options: string[]; correctAnswers?: number[] }
       if (qs.correctAnswers?.length) {
         const corrSet = new Set(qs.correctAnswers)
@@ -333,6 +412,12 @@ export default function Vote() {
         // All other types: lock after one submission
         markSubmitted(roundKey)
       }
+      saveDraft(roundKey, {})   // sent — nothing left unsent here
+      if (answeringLate) {
+        // A late answer is done: back to whatever the host is showing now
+        setLateView(null); setPendingLate(null)
+        setLateSent(true); setTimeout(() => setLateSent(false), 3500)
+      }
     } catch (err) {
       console.error('Submit failed:', err)
       setSubmitError('Could not send your response — please try again.')
@@ -350,7 +435,7 @@ export default function Vote() {
 
   // Total slides (question slides only) for progress bar
   const questionSlides = session.slides.filter(s => INTERACTIVE_TYPES.has((s as { type: string }).type))
-  const questionIdx    = questionSlides.findIndex(s => s.id === slideId)
+  const questionIdx    = questionSlides.findIndex(s => s.id === liveSlideId)
   const progressPct    = questionSlides.length > 0
     ? ((questionIdx + 1) / questionSlides.length) * 100
     : 0
@@ -474,7 +559,7 @@ export default function Vote() {
       </AnimatePresence>
 
       {/* A survey is still open but the show has moved on */}
-      {!surveyView && openSurveys.filter(b => b.id !== slideId).slice(0, 1).map(b => (
+      {!surveyView && !answeringLate && openSurveys.filter(b => b.id !== liveSlideId).slice(0, 1).map(b => (
         <button
           key={b.id}
           onClick={() => setSurveyView(b.id)}
@@ -486,11 +571,57 @@ export default function Vote() {
         </button>
       ))}
 
+      {/* The host moved on while an answer was still unsent */}
+      {showLateBar && pendingSlide && (() => {
+        const q = String((pendingSlide as { question?: string }).question ?? '').trim()
+        return (
+          <div className="mx-5 mb-1 rounded-2xl border border-golden-sun/60 bg-golden-sun/10 px-4 py-3">
+            <p className="text-sm leading-snug text-midnight-sky-800">
+              <span className="font-semibold">You didn’t send your answer</span> to the last question
+              {q && <span className="text-midnight-sky-600">: “{q.length > 70 ? q.slice(0, 68).trimEnd() + '…' : q}”</span>}
+            </p>
+            <div className="mt-2.5 flex gap-2">
+              <button
+                onClick={() => setLateView(pendingSlide.id)}
+                className="flex-1 rounded-xl bg-hot-pink py-2 text-sm font-semibold text-white transition active:scale-[0.98]"
+              >
+                Finish and send
+              </button>
+              <button
+                onClick={discardLate}
+                className="rounded-xl border border-midnight-sky-200 bg-white px-4 py-2 text-sm font-medium text-midnight-sky-600 transition active:scale-[0.98]"
+              >
+                Discard
+              </button>
+            </div>
+          </div>
+        )
+      })()}
+      <AnimatePresence>
+        {lateSent && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="mx-5 mb-1 flex items-center gap-2 rounded-2xl bg-fresh-green/15 px-4 py-2.5 text-sm font-medium text-midnight-sky-800"
+          >
+            <Check className="size-4 shrink-0 text-fresh-green" strokeWidth={2.5} />
+            Your answer was sent
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Content */}
       <div className="flex flex-1 flex-col overflow-y-auto px-5 pb-8 pt-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
         <AnimatePresence mode="wait">
           <motion.div
-            key={`${slideId}-${session.currentPhase}`}
+            // Rebuilt only when what's on the phone really changes. Showing the
+            // results (a phase change) keeps the same question, so its unsent
+            // answer stays; a survey being filled in stays through slide changes.
+            key={surveyView && session.slides.some(x => x.id === surveyView) ? `survey:${surveyView}`
+              : slideData?.type === 'testblock' && isSurvey(slideData as StoredTestBlockSlide) ? `survey:${slideId}`
+              : answeringLate ? `late:${slideId}`
+              : slideId}
             initial={{ opacity: 0, x: 24 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -24 }}
@@ -527,7 +658,7 @@ export default function Vote() {
               <WaitingState sessionCode={sessionCode} />
             ) : alreadySubmitted && session.isQuiz && lastQuizResult && lastQuizResult.slideId === slideId ? (
               <QuizFeedbackState result={lastQuizResult} totalScore={quizScore} />
-            ) : timerExpired ? (
+            ) : timerExpired && !answeringLate ? (
               <TimesUpState />
             ) : alreadySubmitted ? (
               <SubmittedState />
@@ -550,7 +681,7 @@ export default function Vote() {
 
                 {/* "Results are live" nudge — shown when presenter has revealed results */}
                 <AnimatePresence>
-                  {isResultsPhase && (
+                  {isResultsPhase && !answeringLate && (
                     <motion.div
                       initial={{ opacity: 0, y: -8 }}
                       animate={{ opacity: 1, y: 0 }}
@@ -565,6 +696,14 @@ export default function Vote() {
                     </motion.div>
                   )}
                 </AnimatePresence>
+
+                {/* Finishing a question the host has moved on from */}
+                {answeringLate && (
+                  <div className="mb-4 flex items-center gap-3 rounded-xl bg-golden-sun/15 px-4 py-2.5 text-sm text-midnight-sky-800">
+                    <span className="min-w-0 flex-1">The presenter has moved on. You can still send this answer.</span>
+                    <button onClick={() => setLateView(null)} className="shrink-0 font-semibold text-midnight-sky-700 underline underline-offset-2">Back</button>
+                  </div>
+                )}
 
                 {/* Optional slide image — shown when layout is 'reference' (or legacy top/right).
                     Hidden for 'background' since that's a presenter-only aesthetic.
@@ -601,6 +740,8 @@ export default function Vote() {
                       multiSelect={(sd.correctAnswers?.length ?? 0) > 1}
                       submitting={submitting}
                       onSubmit={handleSubmit}
+                      initial={drafts[roundKey]?.picks}
+                      onDraft={picks => saveDraft(roundKey, { picks })}
                     />
                   )
                 })()}
@@ -611,6 +752,8 @@ export default function Vote() {
                     maxSubmissions={(slideData as { wcMaxSubmissions?: number }).wcMaxSubmissions ?? 3}
                     submittedWords={wcWords[roundKey] ?? []}
                     onSubmit={word => handleSubmit(word)}
+                    initial={drafts[roundKey]?.text}
+                    onDraft={text => saveDraft(roundKey, { text })}
                   />
                 )}
                 {slideData.type === 'openended' && (
@@ -621,6 +764,8 @@ export default function Vote() {
                     maxSubmissions={(slideData as { oeMaxSubmissions?: number }).oeMaxSubmissions ?? 1}
                     sentTexts={oeTexts[roundKey] ?? []}
                     onSubmit={text => handleSubmit(text)}
+                    initial={drafts[roundKey]?.text}
+                    onDraft={text => saveDraft(roundKey, { text })}
                   />
                 )}
                 {slideData.type === 'rating' && (() => {
@@ -641,6 +786,8 @@ export default function Vote() {
                       rightLabels={rights}
                       submitting ={submitting}
                       onSubmit   ={ratings => handleSubmit(JSON.stringify(ratings))}
+                      initial    ={drafts[roundKey]?.ratings}
+                      onDraft    ={ratings => saveDraft(roundKey, { ratings })}
                     />
                   )
                 })()}
@@ -649,6 +796,8 @@ export default function Vote() {
                     items={(slideData as { options: string[] }).options}
                     submitting={submitting}
                     onSubmit={order => handleSubmit(JSON.stringify(order))}
+                    initial={drafts[roundKey]?.order}
+                    onDraft={order => saveDraft(roundKey, { order })}
                   />
                 )}
               </>
@@ -677,6 +826,14 @@ export default function Vote() {
       </div>
     </main>
   )
+}
+
+/** This device has begun that survey (something answered) but not sent it. */
+function surveyStarted(code: string, blockId: string): boolean {
+  try {
+    const d = JSON.parse(localStorage.getItem(`alaya-survey:${code.toUpperCase()}:${blockId}`) || 'null')
+    return !!d && !d.submitted && Object.keys(d.answers ?? {}).length > 0
+  } catch { return false }
 }
 
 /** This device already sent its answers to that survey. */
@@ -901,15 +1058,20 @@ function WrapState({ session: _session, attendeeName, surveyHref }: { session: S
    ───────────────────────────────────────────────────────────────────────── */
 
 function MCQQuestion({
-  options, submitting, onSubmit, multiSelect = false,
+  options, submitting, onSubmit, multiSelect = false, initial, onDraft,
 }: {
   options:      string[]
   submitting:   boolean
   onSubmit:     (value: string) => void
   multiSelect?: boolean
+  /** What was ticked here before, and a way to report what's ticked now */
+  initial?:     number[]
+  onDraft?:     (picks: number[]) => void
 }) {
   // Always use a Set internally — single-select just enforces max 1 item
-  const [selectedSet, setSelectedSet] = useState<Set<number>>(new Set())
+  const [selectedSet, setSelectedSet] = useState<Set<number>>(() => new Set((initial ?? []).filter(i => i < options.length)))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { onDraft?.([...selectedSet]) }, [selectedSet])
 
   const toggle = (i: number) => {
     if (submitting) return
@@ -1061,15 +1223,19 @@ function containsProfanity(text: string): boolean {
 }
 
 function WordCloudQuestion({
-  submitting, onSubmit, submissionsUsed, maxSubmissions, submittedWords,
+  submitting, onSubmit, submissionsUsed, maxSubmissions, submittedWords, initial, onDraft,
 }: {
   submitting:       boolean
   onSubmit:         (word: string) => void
   submissionsUsed:  number
   maxSubmissions:   number
   submittedWords:   string[]
+  initial?:         string
+  onDraft?:         (text: string) => void
 }) {
-  const [input,        setInput]        = useState('')
+  const [input,        setInput]        = useState(initial ?? '')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { onDraft?.(input) }, [input])
   // Toast stores the word AND the remaining-after count captured at submit time,
   // so it doesn't update when the parent re-renders with a new submissionsUsed value.
   const [recentlySent, setRecentlySent] = useState<{ word: string; remaining: number } | null>(null)
@@ -1253,15 +1419,19 @@ const ORDINAL = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'sevent
  *  each gets its own numbered box: sent ones stay listed above, the boxes
  *  still to come show below, so nobody crams every answer into the first. */
 function OpenEndedQuestion({
-  submitting, onSubmit, submissionsUsed, maxSubmissions, sentTexts,
+  submitting, onSubmit, submissionsUsed, maxSubmissions, sentTexts, initial, onDraft,
 }: {
   submitting:      boolean
   onSubmit:        (text: string) => void
   submissionsUsed: number
   maxSubmissions:  number
   sentTexts:       string[]   // what this person already sent here, in order
+  initial?:        string
+  onDraft?:        (text: string) => void
 }) {
-  const [text, setText] = useState('')
+  const [text, setText] = useState(initial ?? '')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { onDraft?.(text) }, [text])
   const box = useRef<HTMLTextAreaElement>(null)
   useAutoGrow(box, text)
   const MAX = 1000
@@ -1391,7 +1561,7 @@ function OpenEndedQuestion({
    ───────────────────────────────────────────────────────────────────────── */
 
 function RatingQuestion({
-  parameters, ratingMax = 5, leftLabels = [], rightLabels = [], submitting, onSubmit,
+  parameters, ratingMax = 5, leftLabels = [], rightLabels = [], submitting, onSubmit, initial, onDraft,
 }: {
   parameters: string[]
   ratingMax?: 5 | 10
@@ -1399,9 +1569,14 @@ function RatingQuestion({
   rightLabels?: string[]
   submitting: boolean
   onSubmit:  (ratings: number[]) => void
+  initial?:  number[]
+  onDraft?:  (ratings: number[]) => void
 }) {
   // -1 means "not yet rated". Submitted values are integers 0..ratingMax.
-  const [ratings, setRatings] = useState<number[]>(Array(parameters.length).fill(-1))
+  const [ratings, setRatings] = useState<number[]>(() =>
+    initial && initial.length === parameters.length ? initial : Array(parameters.length).fill(-1))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { onDraft?.(ratings) }, [ratings])
   // Build [0..N] scale — audience may want to vote 0 (e.g. "Terrible")
   const SCALE = Array.from({ length: ratingMax + 1 }, (_, i) => i)
   const allRated = ratings.every(r => r >= 0)
@@ -1543,12 +1718,16 @@ function FullPageMessage({ title, body, icon }: { title: string; body: string; i
  * Submits the option indexes in chosen order — e.g. [2,0,3,1] means item 2 was
  * this person's #1.
  */
-function RankingQuestion({ items, submitting, onSubmit }: {
+function RankingQuestion({ items, submitting, onSubmit, initial, onDraft }: {
   items:      string[]
   submitting: boolean
   onSubmit:   (order: number[]) => void
+  initial?:   number[]
+  onDraft?:   (order: number[]) => void
 }) {
-  const [order, setOrder] = useState<number[]>([])
+  const [order, setOrder] = useState<number[]>(() => (initial ?? []).filter(i => i < items.length))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { onDraft?.(order) }, [order])
   const complete = order.length === items.length && items.length > 0
 
   const toggle = (i: number) => {
